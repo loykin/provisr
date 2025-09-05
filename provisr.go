@@ -6,6 +6,7 @@ import (
 
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cron"
+	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
 	pg "github.com/loykin/provisr/internal/process_group"
@@ -22,9 +23,9 @@ type Status = process.Status
 // Manager is a thin facade over internal/process.Manager.
 // It provides a stable public API for embedding.
 
-type Manager struct{ inner *process.Manager }
+type Manager struct{ inner *manager.Manager }
 
-func New() *Manager { return &Manager{inner: process.NewManager()} }
+func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
 func (m *Manager) SetGlobalEnv(kvs []string) { m.inner.SetGlobalEnv(kvs) }
 
@@ -49,7 +50,6 @@ func NewGroup(m *Manager) *Group { return &Group{inner: pg.New(m.inner)} }
 func (g *Group) Start(gs GroupSpec) error                    { return g.inner.Start(gs) }
 func (g *Group) Stop(gs GroupSpec, wait time.Duration) error { return g.inner.Stop(gs, wait) }
 func (g *Group) Status(gs GroupSpec) (map[string][]Status, error) {
-	// pg.Group returns map[string][]process.Status; alias Status is compatible
 	m, err := g.inner.Status(gs)
 	return m, err
 }
@@ -58,15 +58,15 @@ func (g *Group) Status(gs GroupSpec) (map[string][]Status, error) {
 
 type CronScheduler struct{ inner *cron.Scheduler }
 
-type CronJob = cron.Job
+type CronJob = cron.Job // alias; use pointer when adding to avoid copying atomics
 
 func NewCronScheduler(m *Manager) *CronScheduler {
 	return &CronScheduler{inner: cron.NewScheduler(m.inner)}
 }
 
-func (s *CronScheduler) Add(j CronJob) error { return s.inner.Add(j) }
-func (s *CronScheduler) Start() error        { return s.inner.Start() }
-func (s *CronScheduler) Stop()               { s.inner.Stop() }
+func (s *CronScheduler) Add(j *CronJob) error { return s.inner.Add(j) }
+func (s *CronScheduler) Start() error         { return s.inner.Start() }
+func (s *CronScheduler) Stop()                { s.inner.Stop() }
 
 // Config helpers (forwarders to internal/config)
 
