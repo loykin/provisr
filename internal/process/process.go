@@ -223,21 +223,21 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if cmd == nil || cmd.Process == nil {
 		return errBeforeStart(d)
 	}
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-wd:
 			return errBeforeStart(d)
 		case <-deadline.C:
 			return nil
-		case <-time.After(10 * time.Millisecond):
-			// poll to ensure still a live pid group as a fallback
+		case <-ticker.C:
 			r.mu.Lock()
 			c := r.cmd
 			r.mu.Unlock()
-			if c == nil || c.Process == nil {
-				return errBeforeStart(d)
-			}
-			if syscall.Kill(-c.Process.Pid, 0) != nil {
+			if c == nil || c.Process == nil || syscall.Kill(-c.Process.Pid, 0) != nil {
 				return errBeforeStart(d)
 			}
 		}
