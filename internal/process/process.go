@@ -212,18 +212,34 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if d <= 0 {
 		return nil
 	}
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		r.mu.Lock()
-		cmd := r.cmd
-		r.mu.Unlock()
-		if cmd == nil || cmd.Process == nil {
-			return errBeforeStart(d)
-		}
-		if syscall.Kill(-cmd.Process.Pid, 0) != nil {
-			return errBeforeStart(d)
-		}
-		time.Sleep(10 * time.Millisecond)
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	// Also observe waitDone to detect early exit promptly (monitor closes it)
+	wd := r.WaitDoneChan()
+	// Quick check: if process already gone
+	r.mu.Lock()
+	cmd := r.cmd
+	r.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return errBeforeStart(d)
 	}
-	return nil
+	for {
+		select {
+		case <-wd:
+			return errBeforeStart(d)
+		case <-deadline.C:
+			return nil
+		case <-time.After(10 * time.Millisecond):
+			// poll to ensure still a live pid group as a fallback
+			r.mu.Lock()
+			c := r.cmd
+			r.mu.Unlock()
+			if c == nil || c.Process == nil {
+				return errBeforeStart(d)
+			}
+			if syscall.Kill(-c.Process.Pid, 0) != nil {
+				return errBeforeStart(d)
+			}
+		}
+	}
 }
