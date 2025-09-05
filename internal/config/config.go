@@ -175,6 +175,71 @@ func loadEnvFile(path string) (map[string]string, error) {
 }
 
 // LoadSpecsFromTOML parses a TOML config file into a slice of process.Spec.
+func buildDetectors(pc ProcConfig) ([]detector.Detector, error) {
+	dets := make([]detector.Detector, 0, len(pc.Detectors))
+	for _, d := range pc.Detectors {
+		switch d.Type {
+		case "pidfile":
+			if d.Path == "" {
+				return nil, fmt.Errorf("detector pidfile requires path for process %s", pc.Name)
+			}
+			dets = append(dets, detector.PIDFileDetector{PIDFile: d.Path})
+		case "pid":
+			if d.PID <= 0 {
+				return nil, fmt.Errorf("detector pid requires positive pid for process %s", pc.Name)
+			}
+			dets = append(dets, detector.PIDDetector{PID: d.PID})
+		case "command":
+			if d.Command == "" {
+				return nil, fmt.Errorf("detector command requires command for process %s", pc.Name)
+			}
+			dets = append(dets, detector.CommandDetector{Command: d.Command})
+		default:
+			return nil, fmt.Errorf("unknown detector type %q for process %s", d.Type, pc.Name)
+		}
+	}
+	return dets, nil
+}
+
+func mergeLogCfg(fc *FileConfig, pc ProcConfig) logger.Config {
+	var logCfg logger.Config
+	if fc != nil && fc.Log != nil {
+		logCfg = logger.Config{
+			Dir:        fc.Log.Dir,
+			StdoutPath: fc.Log.Stdout,
+			StderrPath: fc.Log.Stderr,
+			MaxSizeMB:  fc.Log.MaxSizeMB,
+			MaxBackups: fc.Log.MaxBackups,
+			MaxAgeDays: fc.Log.MaxAgeDays,
+			Compress:   fc.Log.Compress,
+		}
+	}
+	if pc.Log != nil {
+		if pc.Log.Dir != "" {
+			logCfg.Dir = pc.Log.Dir
+		}
+		if pc.Log.Stdout != "" {
+			logCfg.StdoutPath = pc.Log.Stdout
+		}
+		if pc.Log.Stderr != "" {
+			logCfg.StderrPath = pc.Log.Stderr
+		}
+		if pc.Log.MaxSizeMB != 0 {
+			logCfg.MaxSizeMB = pc.Log.MaxSizeMB
+		}
+		if pc.Log.MaxBackups != 0 {
+			logCfg.MaxBackups = pc.Log.MaxBackups
+		}
+		if pc.Log.MaxAgeDays != 0 {
+			logCfg.MaxAgeDays = pc.Log.MaxAgeDays
+		}
+		if pc.Log.Compress {
+			logCfg.Compress = true
+		}
+	}
+	return logCfg
+}
+
 func LoadSpecsFromTOML(path string) ([]process.Spec, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
@@ -189,64 +254,12 @@ func LoadSpecsFromTOML(path string) ([]process.Spec, error) {
 	result := make([]process.Spec, 0, len(fc.Processes))
 	for _, pc := range fc.Processes {
 		// detectors
-		dets := make([]detector.Detector, 0, len(pc.Detectors))
-		for _, d := range pc.Detectors {
-			switch d.Type {
-			case "pidfile":
-				if d.Path == "" {
-					return nil, fmt.Errorf("detector pidfile requires path for process %s", pc.Name)
-				}
-				dets = append(dets, detector.PIDFileDetector{PIDFile: d.Path})
-			case "pid":
-				if d.PID <= 0 {
-					return nil, fmt.Errorf("detector pid requires positive pid for process %s", pc.Name)
-				}
-				dets = append(dets, detector.PIDDetector{PID: d.PID})
-			case "command":
-				if d.Command == "" {
-					return nil, fmt.Errorf("detector command requires command for process %s", pc.Name)
-				}
-				dets = append(dets, detector.CommandDetector{Command: d.Command})
-			default:
-				return nil, fmt.Errorf("unknown detector type %q for process %s", d.Type, pc.Name)
-			}
+		dets, err := buildDetectors(pc)
+		if err != nil {
+			return nil, err
 		}
 		// logging config: start with top-level defaults then override with per-process
-		var logCfg logger.Config
-		if fc.Log != nil {
-			logCfg = logger.Config{
-				Dir:        fc.Log.Dir,
-				StdoutPath: fc.Log.Stdout,
-				StderrPath: fc.Log.Stderr,
-				MaxSizeMB:  fc.Log.MaxSizeMB,
-				MaxBackups: fc.Log.MaxBackups,
-				MaxAgeDays: fc.Log.MaxAgeDays,
-				Compress:   fc.Log.Compress,
-			}
-		}
-		if pc.Log != nil {
-			if pc.Log.Dir != "" {
-				logCfg.Dir = pc.Log.Dir
-			}
-			if pc.Log.Stdout != "" {
-				logCfg.StdoutPath = pc.Log.Stdout
-			}
-			if pc.Log.Stderr != "" {
-				logCfg.StderrPath = pc.Log.Stderr
-			}
-			if pc.Log.MaxSizeMB != 0 {
-				logCfg.MaxSizeMB = pc.Log.MaxSizeMB
-			}
-			if pc.Log.MaxBackups != 0 {
-				logCfg.MaxBackups = pc.Log.MaxBackups
-			}
-			if pc.Log.MaxAgeDays != 0 {
-				logCfg.MaxAgeDays = pc.Log.MaxAgeDays
-			}
-			if pc.Log.Compress {
-				logCfg.Compress = true
-			}
-		}
+		logCfg := mergeLogCfg(&fc, pc)
 
 		s := process.Spec{
 			Name:            pc.Name,

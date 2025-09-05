@@ -35,8 +35,7 @@ command = "sleep 1"
 	}
 }
 
-func TestLoadSpecsFromTOML_Full(t *testing.T) {
-	// existing full spec test
+func TestLoadSpecsFromTOML_Full_Base(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "cfg.toml")
 	data := `
@@ -76,6 +75,34 @@ instances = 3
 	if s.RetryCount != 2 || s.RetryInterval.String() != "200ms" || s.StartDuration.String() != "150ms" || !s.AutoRestart || s.RestartInterval.String() != "1s" || s.Instances != 3 {
 		t.Fatalf("unexpected control fields: %+v", s)
 	}
+}
+
+func TestLoadSpecsFromTOML_Full_Detectors(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cfg.toml")
+	data := `
+[[processes]]
+name = "web"
+command = "sleep 2"
+workdir = "/tmp"
+  [[processes.detectors]]
+  type = "pidfile"
+  path = "/tmp/web.pid"
+  [[processes.detectors]]
+  type = "command"
+  command = "true"
+`
+	if err := os.WriteFile(file, []byte(data), 0o644); err != nil {
+		t.Fatalf("write toml: %v", err)
+	}
+	specs, err := LoadSpecsFromTOML(file)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 spec, got %d", len(specs))
+	}
+	s := specs[0]
 	if len(s.Detectors) != 2 {
 		t.Fatalf("expected 2 detectors, got %d", len(s.Detectors))
 	}
