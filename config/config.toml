@@ -1,0 +1,94 @@
+# provisr sample configuration (TOML)
+# You can run:  provisr -config config/config.toml
+# This file demonstrates all supported fields.
+
+# Global environment for all processes
+env = ["GLOBAL_NAME=provisr", "SHARED_PORT=9000", "CHAIN=${GLOBAL_NAME}-x"]
+# Optionally load additional env from files and/or include OS environment
+# env_files = ["/path/to/.env"]
+# use_os_env = true
+
+# Optional global log defaults
+[log]
+dir = "/tmp/provisr-logs"
+max_size_mb = 10
+max_backups = 3
+max_age_days = 7
+compress = false
+
+# Process definitions
+[[processes]]
+# Unique process name (base name if instances > 1)
+name = "web"
+# Command to run (executed via sh -c)
+command = "python3 -m http.server 8080"
+# Optional working directory
+workdir = "/tmp"
+# Optional environment variables
+env = ["ENV=prod", "PORT=8080"]
+# Optional PID file path (also used by the built-in pidfile detector below)
+pidfile = "/tmp/web.pid"
+# Start retry configuration
+retries = 3
+retry_interval = "500ms"
+# Consider the start successful only if the process stays up this long
+startsecs = "2s"
+# Auto-restart when the process exits unexpectedly
+autorestart = true
+restart_interval = "1s"
+# Start multiple instances with names web-1..web-3
+instances = 3
+# Per-process logging override example
+[processes.log]
+stdout = "/tmp/provisr-logs/web.stdout.log"
+stderr = "/tmp/provisr-logs/web.stderr.log"
+# Example schedule (cron-like): here we schedule a separate job below instead of the service
+# schedule = "@every 5s"
+# Optional detectors to determine liveness
+  [[processes.detectors]]
+  type = "pidfile"
+  path = "/tmp/web.pid"
+  [[processes.detectors]]
+  # Example of a command detector (returns success when process is alive)
+  type = "command"
+  command = "pgrep -f 'python3 -m http.server 8080' >/dev/null"
+
+[[processes]]
+name = "worker"
+command = "sh -c 'while true; do echo working; sleep 1; done'"
+# No pidfile; rely on a command detector
+retries = 1
+retry_interval = "300ms"
+startsecs = "500ms"
+autorestart = true
+restart_interval = "1s"
+instances = 1
+  [[processes.detectors]]
+  type = "command"
+  command = "pgrep -f 'echo working' >/dev/null"
+
+# Another simple example with a fixed external PID detector (rarely used in practice)
+[[processes]]
+name = "external"
+command = "sleep 60"
+retries = 0
+retry_interval = "500ms"
+startsecs = "0s"
+autorestart = false
+instances = 1
+  # Suppose an external service has PID 1234 (replace with real pid)
+  [[processes.detectors]]
+  type = "pid"
+  pid = 1234
+
+# A pure cron job: run a one-off task every 5 seconds without autorestart
+[[processes]]
+name = "cron-clean"
+command = "sh -c 'echo cleaning'"
+schedule = "@every 5s"
+singleton = true
+
+# Groups section: define logical groups referencing processes by name
+[[groups]]
+name = "backend"
+members = ["web", "worker"]
