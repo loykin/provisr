@@ -76,9 +76,9 @@ func TestStartDurationFailAndRetry(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected start error due to startsecs, got nil")
 	}
-	// ensure we waited at least startsecs once (approx); allow some slack
-	if time.Since(start) < 280*time.Millisecond {
-		t.Fatalf("expected Start to wait around startsecs; took %v", time.Since(start))
+	// With early-exit detection, Start should fail promptly (well before startsecs).
+	if time.Since(start) >= 280*time.Millisecond {
+		t.Fatalf("expected Start to fail promptly before startsecs; took %v", time.Since(start))
 	}
 }
 

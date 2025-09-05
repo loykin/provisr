@@ -162,6 +162,11 @@ func (m *Manager) Start(spec run.Spec) error {
 		metrics.IncStart(spec.Name)
 		e.r.WritePIDFile()
 
+		// Start monitor BEFORE enforcing start duration to catch early exits promptly
+		if e.r.MonitoringStartIfNeeded() {
+			go m.monitor(e)
+		}
+
 		if err := e.r.EnforceStartDuration(spec.StartDuration); err != nil {
 			e.r.RemovePIDFile()
 			e.r.MarkExited(err)
@@ -176,9 +181,6 @@ func (m *Manager) Start(spec run.Spec) error {
 			metrics.ObserveStartDuration(spec.Name, spec.StartDuration.Seconds())
 		}
 
-		if e.r.MonitoringStartIfNeeded() {
-			go m.monitor(e)
-		}
 		return nil
 	}
 	return lastErr
