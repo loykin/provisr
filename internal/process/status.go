@@ -2,7 +2,7 @@ package process
 
 import "time"
 
-// Status represents a runtime state of managed process.
+// Status mirrors process.Status to avoid import cycle; kept minimal for internal use.
 type Status struct {
 	Name       string
 	Running    bool
@@ -10,6 +10,6 @@ type Status struct {
 	StartedAt  time.Time
 	StoppedAt  time.Time
 	ExitErr    error
-	DetectedBy string // which detector reported alive
+	DetectedBy string
 	Restarts   int
 }

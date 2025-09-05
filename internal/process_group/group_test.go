@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	mgrpkg "github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/process"
 )
 
 func TestGroupStartStopBasic(t *testing.T) {
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	g := New(mgr)
 	gs := GroupSpec{
 		Name: "grp1",
@@ -45,7 +46,7 @@ func TestGroupStartStopBasic(t *testing.T) {
 }
 
 func TestGroupRollbackOnFailure(t *testing.T) {
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	g := New(mgr)
 	gs := GroupSpec{
 		Name: "grp2",
@@ -69,7 +70,7 @@ func TestGroupRollbackOnFailure(t *testing.T) {
 }
 
 func TestGroupWithInstances(t *testing.T) {
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	g := New(mgr)
 	gs := GroupSpec{
 		Name: "grp3",

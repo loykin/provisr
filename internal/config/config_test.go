@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/loykin/provisr/internal/process"
+	mgrpkg "github.com/loykin/provisr/internal/manager"
 	pg "github.com/loykin/provisr/internal/process_group"
 )
 
@@ -135,7 +135,7 @@ members = ["a", "b"]
 		t.Fatalf("unexpected groups: %+v", groups)
 	}
 	// try starting the group to ensure specs are usable
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	g := pg.New(mgr)
 	if err := g.Start(groups[0]); err != nil {
 		t.Fatalf("group start: %v", err)
@@ -207,7 +207,7 @@ env = ["PORT=2000", "LOCAL=${GLOB}-y"]
 		t.Fatalf("write cfg: %v", err)
 	}
 
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	genv, err := LoadEnvFromTOML(cfg)
 	if err != nil {
 		t.Fatalf("load env: %v", err)
@@ -255,7 +255,7 @@ startsecs = "200ms"
 	if err != nil {
 		t.Fatalf("load specs: %v", err)
 	}
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	start := time.Now()
 	err = mgr.Start(specs[0])
 	if err == nil {

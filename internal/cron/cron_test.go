@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	mgrpkg "github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/process"
 )
 
@@ -17,7 +18,7 @@ func TestParseEvery(t *testing.T) {
 }
 
 func TestSchedulerRunsAndNonOverlap(t *testing.T) {
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	sch := NewScheduler(mgr)
 	job := Job{
 		Name:     "j1",
@@ -25,7 +26,7 @@ func TestSchedulerRunsAndNonOverlap(t *testing.T) {
 		Schedule: "@every 100ms",
 		// Singleton default true -> no overlap
 	}
-	if err := sch.Add(job); err != nil {
+	if err := sch.Add(&job); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	if err := sch.Start(); err != nil {
@@ -50,12 +51,12 @@ func TestSchedulerRunsAndNonOverlap(t *testing.T) {
 }
 
 func TestSchedulerRejectsAutoRestartAndInstances(t *testing.T) {
-	mgr := process.NewManager()
+	mgr := mgrpkg.NewManager()
 	sch := NewScheduler(mgr)
-	if err := sch.Add(Job{Name: "bad1", Spec: process.Spec{Name: "x", Command: "true", AutoRestart: true}, Schedule: "@every 1s"}); err == nil {
+	if err := sch.Add(&Job{Name: "bad1", Spec: process.Spec{Name: "x", Command: "true", AutoRestart: true}, Schedule: "@every 1s"}); err == nil {
 		t.Fatalf("expected error for autorestart=true")
 	}
-	if err := sch.Add(Job{Name: "bad2", Spec: process.Spec{Name: "y", Command: "true", Instances: 2}, Schedule: "@every 1s"}); err == nil {
+	if err := sch.Add(&Job{Name: "bad2", Spec: process.Spec{Name: "y", Command: "true", Instances: 2}, Schedule: "@every 1s"}); err == nil {
 		t.Fatalf("expected error for instances>1")
 	}
 }

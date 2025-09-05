@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/process"
 )
 
@@ -28,8 +30,8 @@ type Job struct {
 	Schedule  string
 	Singleton bool // if true, skip tick when the previous run still active (default: true)
 
-	// internal
-	running bool
+	// internal (guarded via atomic)
+	running atomic.Bool
 }
 
 // parseEvery parses schedules of the form "@every <duration>".
@@ -74,17 +76,17 @@ func (j *Job) validate() error {
 // Use Start to launch the background tickers, and Stop to cancel them.
 
 type Scheduler struct {
-	mgr  *process.Manager
+	mgr  *manager.Manager
 	jobs []*Job
 	quit chan struct{}
 	done chan struct{}
 }
 
-func NewScheduler(mgr *process.Manager) *Scheduler {
+func NewScheduler(mgr *manager.Manager) *Scheduler {
 	return &Scheduler{mgr: mgr}
 }
 
-func (s *Scheduler) Add(job Job) error {
+func (s *Scheduler) Add(job *Job) error {
 	if !job.Singleton { // keep as given; defaulting below only when zero value
 		// nothing
 	}
@@ -97,7 +99,7 @@ func (s *Scheduler) Add(job Job) error {
 	if !job.Singleton {
 		job.Singleton = true
 	}
-	s.jobs = append(s.jobs, &job)
+	s.jobs = append(s.jobs, job)
 	return nil
 }
 
@@ -126,14 +128,17 @@ func (s *Scheduler) runJob(j *Job, period time.Duration) {
 		case <-s.quit:
 			return
 		case <-t.C:
-			if j.Singleton && j.running {
-				// skip overlapping run
-				continue
+			if j.Singleton {
+				// attempt to mark running; if already true, skip this tick
+				if !j.running.CompareAndSwap(false, true) {
+					continue
+				}
+			} else {
+				j.running.Store(true)
 			}
-			j.running = true
 			// run in separate goroutine to avoid blocking the ticker if Start waits start duration
 			go func(j *Job) {
-				defer func() { j.running = false }()
+				defer j.running.Store(false)
 				_ = s.mgr.Start(j.Spec)
 				// We don't wait for process completion; it's managed by Manager. Cron semantics fire start attempts.
 			}(j)
@@ -141,11 +146,16 @@ func (s *Scheduler) runJob(j *Job, period time.Duration) {
 	}
 }
 
-// Stop cancels all jobs and waits for goroutines to end.
+// Stop cancels all jobs.
 func (s *Scheduler) Stop() {
 	if s.quit == nil {
 		return
 	}
-	close(s.quit)
-	s.quit = nil
+	// Close once; leaving channel non-nil avoids racy nil assignment observed by goroutines.
+	select {
+	case <-s.quit:
+		// already closed
+	default:
+		close(s.quit)
+	}
 }

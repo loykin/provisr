@@ -202,7 +202,7 @@ func main() {
 			sch := provisr.NewCronScheduler(mgr)
 			for _, j := range jobs {
 				jb := provisr.CronJob{Name: j.Name, Spec: j.Spec, Schedule: j.Schedule, Singleton: j.Singleton}
-				if err := sch.Add(jb); err != nil {
+				if err := sch.Add(&jb); err != nil {
 					return err
 				}
 			}

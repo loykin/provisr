@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/process"
 )
 
@@ -19,10 +20,10 @@ type GroupSpec struct {
 // using an underlying process.Manager.
 
 type Group struct {
-	mgr *process.Manager
+	mgr *manager.Manager
 }
 
-func New(mgr *process.Manager) *Group { return &Group{mgr: mgr} }
+func New(mgr *manager.Manager) *Group { return &Group{mgr: mgr} }
 
 // Start starts all members. If any start fails, it stops any members that
 // have already been started in this call and returns the error.
