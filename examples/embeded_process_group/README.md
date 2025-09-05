@@ -9,7 +9,9 @@ It starts two members:
 
 Run it with:
 
-- go run ./example/embeded_process_group
+```shell
+go run ./examples/embeded_process_group
+```
 
 Output:
 

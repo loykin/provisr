@@ -4,7 +4,9 @@ This example shows how to expose Prometheus metrics from provisr and start a sim
 
 Run it with:
 
-- go run ./example/embedded_metrics
+```shell
+go run ./examples/embedded_metrics
+```
 
 It will:
 

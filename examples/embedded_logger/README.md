@@ -12,12 +12,14 @@ What it does:
 
 Run it with:
 
-- go run ./example/embedded_logger
+```shell
+go run ./examples/embedded_logger
+```
 
 Optional:
 
 - Set PROVISR_LOG_DIR to choose a custom log directory, e.g.
-  PROVISR_LOG_DIR=/tmp/provisr-logs go run ./example/embedded_logger
+  PROVISR_LOG_DIR=/tmp/provisr-logs go run ./examples/embedded_logger
 
 You should see files like:
 

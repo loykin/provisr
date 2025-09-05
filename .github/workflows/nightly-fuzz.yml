@@ -1,0 +1,53 @@
+name: Nightly Fuzz
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Go Fuzz (time-limited)
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Show Go version
+        run: go version
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run fuzzing on internal packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=$(go list ./internal/config ./internal/detector ./internal/env)
+          for pkg in $packages; do
+            echo "Running fuzz on $pkg"
+            go test $pkg -run=^$ -fuzz=Fuzz -fuzztime=10m
+          done
+
+      - name: Build (sanity)
+        run: go build ./...
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fuzz-artifacts
+          path: |
+            internal/**/testdata/fuzz/corpus
+            internal/**/testdata/fuzz/crashers
+          if-no-files-found: ignore
