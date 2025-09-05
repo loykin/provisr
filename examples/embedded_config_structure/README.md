@@ -5,7 +5,9 @@ file.
 
 Run it with:
 
-- go run ./example/embedded_config_structure
+```shell
+go run ./examples/embedded_config_structure
+```
 
 What it does:
 

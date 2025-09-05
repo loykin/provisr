@@ -11,7 +11,9 @@ What it does:
 
 Run it with:
 
-- go run ./example/embeded_metrics_add
+```shell
+go run ./examples/embeded_metrics_add
+```
 
 Then open:
 

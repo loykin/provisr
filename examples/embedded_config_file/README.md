@@ -4,7 +4,9 @@ This example shows how to start processes by loading a TOML configuration file u
 
 Run it with:
 
-- go run ./example/embedded_config_file
+```shell
+go run ./examples/embedded_config_file
+```
 
 What it does:
 
