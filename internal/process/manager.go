@@ -112,6 +112,81 @@ func (m *Manager) get(name string) *proc {
 }
 
 // Start launches a process according to spec. It is idempotent if already running.
+// configureCmd builds the exec.Cmd and sets env, workdir, stdio/logging.
+func (m *Manager) configureCmd(spec Spec, p *proc) *exec.Cmd {
+	cmd := buildCommand(spec)
+	if spec.WorkDir != "" {
+		cmd.Dir = spec.WorkDir
+	}
+	// compute environment using env manager (global + per-process)
+	if m.envM != nil {
+		cmd.Env = m.envM.Merge(spec.Env)
+	} else if len(spec.Env) > 0 {
+		cmd.Env = append(os.Environ(), spec.Env...)
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Setup logging if configured
+	if spec.Log.Dir != "" || spec.Log.StdoutPath != "" || spec.Log.StderrPath != "" {
+		// Ensure directory exists if using Dir
+		if spec.Log.Dir != "" {
+			_ = os.MkdirAll(spec.Log.Dir, 0o750)
+		}
+		// Create writers only once per proc; reuse across restarts
+		if p.outCloser == nil && p.errCloser == nil {
+			outW, errW, _ := spec.Log.Writers(spec.Name)
+			p.outCloser = outW
+			p.errCloser = errW
+		}
+		if p.outCloser != nil {
+			cmd.Stdout = p.outCloser
+		} else {
+			cmd.Stdout, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		}
+		if p.errCloser != nil {
+			cmd.Stderr = p.errCloser
+		} else {
+			cmd.Stderr, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		}
+	} else {
+		// Default to devnull
+		null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		cmd.Stdout = null
+		cmd.Stderr = null
+	}
+	return cmd
+}
+
+// writePIDFile writes the PID file if requested.
+func writePIDFile(pidfile string, pid int) {
+	if pidfile == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(pidfile), 0o750)
+	_ = os.WriteFile(pidfile, []byte(strconv.Itoa(pid)), 0o600)
+}
+
+// enforceStartDuration ensures the process stays up for StartDuration, otherwise returns an error.
+func enforceStartDuration(p *proc, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		// Check for early exit
+		if p.cmd == nil {
+			return fmt.Errorf("process exited before start duration %s", d)
+		}
+		if p.cmd.ProcessState != nil && p.cmd.ProcessState.Exited() {
+			return fmt.Errorf("process exited before start duration %s", d)
+		}
+		if tryReap(p) {
+			return fmt.Errorf("process exited before start duration %s", d)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
 func (m *Manager) Start(spec Spec) error {
 	m.mu.Lock()
 	p, exists := m.procs[spec.Name]
@@ -139,45 +214,7 @@ func (m *Manager) Start(spec Spec) error {
 		interval = 500 * time.Millisecond
 	}
 	for i := 0; i <= attempts; i++ {
-		cmd := buildCommand(spec)
-		if spec.WorkDir != "" {
-			cmd.Dir = spec.WorkDir
-		}
-		// compute environment using env manager (global + per-process)
-		if m.envM != nil {
-			cmd.Env = m.envM.Merge(spec.Env)
-		} else if len(spec.Env) > 0 {
-			cmd.Env = append(os.Environ(), spec.Env...)
-		}
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		// Setup logging if configured
-		if spec.Log.Dir != "" || spec.Log.StdoutPath != "" || spec.Log.StderrPath != "" {
-			// Ensure directory exists if using Dir
-			if spec.Log.Dir != "" {
-				_ = os.MkdirAll(spec.Log.Dir, 0o750)
-			}
-			// Create writers only once per proc; reuse across restarts
-			if p.outCloser == nil && p.errCloser == nil {
-				outW, errW, _ := spec.Log.Writers(spec.Name)
-				p.outCloser = outW
-				p.errCloser = errW
-			}
-			if p.outCloser != nil {
-				cmd.Stdout = p.outCloser
-			} else {
-				cmd.Stdout, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
-			}
-			if p.errCloser != nil {
-				cmd.Stderr = p.errCloser
-			} else {
-				cmd.Stderr, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
-			}
-		} else {
-			// Default to devnull
-			null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-			cmd.Stdout = null
-			cmd.Stderr = null
-		}
+		cmd := m.configureCmd(spec, p)
 
 		if err := cmd.Start(); err != nil {
 			lastErr = err
@@ -194,47 +231,25 @@ func (m *Manager) Start(spec Spec) error {
 		metrics.IncStart(spec.Name)
 
 		// write pidfile if requested
-		if spec.PIDFile != "" {
-			_ = os.MkdirAll(filepath.Dir(spec.PIDFile), 0o750)
-			_ = os.WriteFile(spec.PIDFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
-		}
+		writePIDFile(spec.PIDFile, cmd.Process.Pid)
 
 		// If start duration is specified, ensure the process stays up that long before considering success.
 		startWait := spec.StartDuration
+		if err := enforceStartDuration(p, startWait); err != nil {
+			// Treat as failed start, cleanup and retry if allowed
+			if spec.PIDFile != "" {
+				_ = os.Remove(spec.PIDFile)
+			}
+			p.status.Running = false
+			p.status.StoppedAt = time.Now()
+			lastErr = err
+			if i < attempts {
+				time.Sleep(interval)
+				continue
+			}
+			return lastErr
+		}
 		if startWait > 0 {
-			deadline := time.Now().Add(startWait)
-			ok := true
-			for time.Now().Before(deadline) {
-				// Check for early exit
-				if p.cmd == nil {
-					ok = false
-					break
-				}
-				if p.cmd.ProcessState != nil && p.cmd.ProcessState.Exited() {
-					ok = false
-					break
-				}
-				if tryReap(p) {
-					ok = false
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if !ok {
-				// Treat as failed start, cleanup and retry if allowed
-				if spec.PIDFile != "" {
-					_ = os.Remove(spec.PIDFile)
-				}
-				p.status.Running = false
-				p.status.StoppedAt = time.Now()
-				lastErr = fmt.Errorf("process exited before start duration %s", spec.StartDuration)
-				if i < attempts {
-					time.Sleep(interval)
-					continue
-				}
-				return lastErr
-			}
-			// We waited the start window successfully; observe it.
 			metrics.ObserveStartDuration(spec.Name, startWait.Seconds())
 		}
 

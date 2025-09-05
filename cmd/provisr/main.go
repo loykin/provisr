@@ -10,6 +10,60 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func applyGlobalEnvFromFlags(mgr *provisr.Manager, useOSEnv bool, envFiles []string, envKVs []string) {
+	if useOSEnv {
+		mgr.SetGlobalEnv(os.Environ())
+	}
+	if len(envFiles) > 0 {
+		for _, f := range envFiles {
+			if pairs, err := provisr.LoadEnv(f); err == nil && len(pairs) > 0 {
+				mgr.SetGlobalEnv(pairs)
+			}
+		}
+	}
+	if len(envKVs) > 0 {
+		mgr.SetGlobalEnv(envKVs)
+	}
+}
+
+func startFromSpecs(mgr *provisr.Manager, specs []provisr.Spec) error {
+	for _, sp := range specs {
+		if sp.Instances > 1 {
+			if err := mgr.StartN(sp); err != nil {
+				return err
+			}
+		} else {
+			if err := mgr.Start(sp); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func statusesByBase(mgr *provisr.Manager, specs []provisr.Spec) map[string][]provisr.Status {
+	all := make(map[string][]provisr.Status)
+	for _, sp := range specs {
+		sts, _ := mgr.StatusAll(sp.Name)
+		all[sp.Name] = sts
+	}
+	return all
+}
+
+func findGroupByName(groups []provisr.GroupSpec, name string) *provisr.GroupSpec {
+	for i := range groups {
+		if groups[i].Name == name {
+			return &groups[i]
+		}
+	}
+	return nil
+}
+
+func printJSON(v any) {
+	b, _ := json.MarshalIndent(v, "", "  ")
+	fmt.Println(string(b))
+}
+
 func main() {
 	mgr := provisr.New()
 	// If metrics flag is set, start an HTTP server for Prometheus.
@@ -52,41 +106,14 @@ func main() {
 				if err != nil {
 					return err
 				}
-				for _, sp := range specs {
-					if sp.Instances > 1 {
-						if err := mgr.StartN(sp); err != nil {
-							return err
-						}
-					} else {
-						if err := mgr.Start(sp); err != nil {
-							return err
-						}
-					}
+				if err := startFromSpecs(mgr, specs); err != nil {
+					return err
 				}
-				all := make(map[string][]provisr.Status)
-				for _, sp := range specs {
-					sts, _ := mgr.StatusAll(sp.Name)
-					all[sp.Name] = sts
-				}
-				b, _ := json.MarshalIndent(all, "", "  ")
-				fmt.Println(string(b))
+				printJSON(statusesByBase(mgr, specs))
 				return nil
 			}
 			// Apply global env from flags when not using config
-			if useOSEnv {
-				mgr.SetGlobalEnv(os.Environ())
-			}
-			if len(envFiles) > 0 {
-				for _, f := range envFiles {
-					pairs, err := provisr.LoadEnv(f)
-					if err == nil && len(pairs) > 0 {
-						mgr.SetGlobalEnv(pairs)
-					}
-				}
-			}
-			if len(envKVs) > 0 {
-				mgr.SetGlobalEnv(envKVs)
-			}
+			applyGlobalEnvFromFlags(mgr, useOSEnv, envFiles, envKVs)
 			sp := provisr.Spec{
 				Name:            name,
 				Command:         cmdStr,
@@ -124,18 +151,11 @@ func main() {
 				if err != nil {
 					return err
 				}
-				all := make(map[string][]provisr.Status)
-				for _, sp := range specs {
-					sts, _ := mgr.StatusAll(sp.Name)
-					all[sp.Name] = sts
-				}
-				b, _ := json.MarshalIndent(all, "", "  ")
-				fmt.Println(string(b))
+				printJSON(statusesByBase(mgr, specs))
 				return nil
 			}
 			sts, _ := mgr.StatusAll(name)
-			b, _ := json.MarshalIndent(sts, "", "  ")
-			fmt.Println(string(b))
+			printJSON(sts)
 			return nil
 		},
 	}
@@ -153,19 +173,12 @@ func main() {
 				for _, sp := range specs {
 					_ = mgr.StopAll(sp.Name, 3*time.Second)
 				}
-				all := make(map[string][]provisr.Status)
-				for _, sp := range specs {
-					sts, _ := mgr.StatusAll(sp.Name)
-					all[sp.Name] = sts
-				}
-				b, _ := json.MarshalIndent(all, "", "  ")
-				fmt.Println(string(b))
+				printJSON(statusesByBase(mgr, specs))
 				return nil
 			}
 			_ = mgr.StopAll(name, 3*time.Second)
 			sts, _ := mgr.StatusAll(name)
-			b, _ := json.MarshalIndent(sts, "", "  ")
-			fmt.Println(string(b))
+			printJSON(sts)
 			return nil
 		},
 	}
@@ -217,13 +230,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		var gs *provisr.GroupSpec
-		for i := range groups {
-			if groups[i].Name == groupName {
-				gs = &groups[i]
-				break
-			}
-		}
+		gs := findGroupByName(groups, groupName)
 		if gs == nil {
 			return fmt.Errorf("group %s not found in config", groupName)
 		}
@@ -241,13 +248,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		var gs *provisr.GroupSpec
-		for i := range groups {
-			if groups[i].Name == groupName {
-				gs = &groups[i]
-				break
-			}
-		}
+		gs := findGroupByName(groups, groupName)
 		if gs == nil {
 			return fmt.Errorf("group %s not found in config", groupName)
 		}
@@ -265,13 +266,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		var gs *provisr.GroupSpec
-		for i := range groups {
-			if groups[i].Name == groupName {
-				gs = &groups[i]
-				break
-			}
-		}
+		gs := findGroupByName(groups, groupName)
 		if gs == nil {
 			return fmt.Errorf("group %s not found in config", groupName)
 		}
@@ -280,8 +275,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		b, _ := json.MarshalIndent(stmap, "", "  ")
-		fmt.Println(string(b))
+		printJSON(stmap)
 		return nil
 	}}
 	cmdGroupStart.Flags().StringVar(&groupName, "group", "", "group name from config")

@@ -66,14 +66,14 @@ func TestWriters_WithExplicitPaths(t *testing.T) {
 	}
 }
 
-func TestWriters_DefaultsAndOverrides(t *testing.T) {
+func TestWriters_Defaults(t *testing.T) {
 	cfg := Config{ /* zero values to trigger defaults */ }
 	outW, errW, _ := cfg.Writers("n")
 	// With no Dir and no explicit paths, Writers returns nils; ensure that's the case
 	if outW != nil || errW != nil {
 		t.Fatalf("expected nil writers when no Dir/stdout/stderr set")
 	}
-	// Now set overrides and inspect internal lumberjack settings via type assertion
+	// Now set explicit paths to instantiate lumberjack with defaults
 	cfg = Config{StdoutPath: "x", StderrPath: "y"}
 	outW, errW, _ = cfg.Writers("n")
 	ol, ok1 := outW.(*lj.Logger)
@@ -90,11 +90,14 @@ func TestWriters_DefaultsAndOverrides(t *testing.T) {
 	}
 	closeIf(outW)
 	closeIf(errW)
+}
+
+func TestWriters_Overrides(t *testing.T) {
 	// Custom values propagate
-	cfg = Config{StdoutPath: "x2", StderrPath: "y2", MaxSizeMB: 1, MaxBackups: 9, MaxAgeDays: 11, Compress: true}
-	outW, errW, _ = cfg.Writers("n")
-	ol = outW.(*lj.Logger)
-	el = errW.(*lj.Logger)
+	cfg := Config{StdoutPath: "x2", StderrPath: "y2", MaxSizeMB: 1, MaxBackups: 9, MaxAgeDays: 11, Compress: true}
+	outW, errW, _ := cfg.Writers("n")
+	ol := outW.(*lj.Logger)
+	el := errW.(*lj.Logger)
 	if ol.MaxSize != 1 || ol.MaxBackups != 9 || ol.MaxAge != 11 || !ol.Compress {
 		t.Fatalf("unexpected overrides: size=%d backups=%d age=%d compress=%t", ol.MaxSize, ol.MaxBackups, ol.MaxAge, ol.Compress)
 	}
