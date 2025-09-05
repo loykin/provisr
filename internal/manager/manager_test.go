@@ -69,15 +69,15 @@ func TestAutoRestart(t *testing.T) {
 
 func TestStartDurationFailAndRetry(t *testing.T) {
 	mgr := NewManager()
-	// Process exits in ~50ms but startsecs requires 200ms -> Start should fail after retries
-	spec := process.Spec{Name: "ssfail", Command: "sh -c 'sleep 0.05'", StartDuration: 200 * time.Millisecond, RetryCount: 1, RetryInterval: 50 * time.Millisecond}
+	// Process exits in ~100ms but startsecs requires 300ms -> Start should fail after retries
+	spec := process.Spec{Name: "ssfail", Command: "sh -c 'sleep 0.1'", StartDuration: 300 * time.Millisecond, RetryCount: 1, RetryInterval: 50 * time.Millisecond}
 	start := time.Now()
 	err := mgr.Start(spec)
 	if err == nil {
 		t.Fatalf("expected start error due to startsecs, got nil")
 	}
 	// ensure we waited at least startsecs once (approx); allow some slack
-	if time.Since(start) < 180*time.Millisecond {
+	if time.Since(start) < 280*time.Millisecond {
 		t.Fatalf("expected Start to wait around startsecs; took %v", time.Since(start))
 	}
 }

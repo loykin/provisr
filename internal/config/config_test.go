@@ -239,14 +239,14 @@ env = ["PORT=2000", "LOCAL=${GLOB}-y"]
 func TestConfigRetryHonored(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "retry.toml")
-	// Run a short command exiting in ~50ms; set startsecs=200ms to force start failure; retries=2, interval=100ms
+	// Run a short command exiting in ~100ms; set startsecs=300ms to force start failure; retries=2, interval=100ms
 	data := `
 [[processes]]
 name = "bad"
-command = "sh -c 'sleep 0.05'"
+command = "sh -c 'sleep 0.1'"
 retries = 2
 retry_interval = "100ms"
-startsecs = "200ms"
+startsecs = "300ms"
 `
 	if err := os.WriteFile(cfg, []byte(data), 0o644); err != nil {
 		t.Fatalf("write cfg: %v", err)
@@ -262,8 +262,8 @@ startsecs = "200ms"
 		t.Fatalf("expected start error for failing command")
 	}
 	elapsed := time.Since(start)
-	// With 2 retries and 100ms interval, total sleep ~ 2*100ms = 200ms plus minimal overhead.
-	if elapsed < 180*time.Millisecond {
-		t.Fatalf("expected elapsed around retries, got %v", elapsed)
+	// With retries and a 300ms start window, elapsed should be at least ~280ms
+	if elapsed < 280*time.Millisecond {
+		t.Fatalf("expected elapsed around retries/start window, got %v", elapsed)
 	}
 }
