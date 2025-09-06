@@ -45,13 +45,13 @@ stderr = "/tmp/provisr-logs/web.stderr.log"
 # Example schedule (cron-like): here we schedule a separate job below instead of the service
 # schedule = "@every 5s"
 # Optional detectors to determine liveness
-  [[processes.detectors]]
-  type = "pidfile"
-  path = "/tmp/web.pid"
-  [[processes.detectors]]
-  # Example of a command detector (returns success when process is alive)
-  type = "command"
-  command = "pgrep -f 'python3 -m http.server 8080' >/dev/null"
+[[processes.detectors]]
+type = "pidfile"
+path = "/tmp/web.pid"
+[[processes.detectors]]
+# Example of a command detector (returns success when process is alive)
+type = "command"
+command = "pgrep -f 'python3 -m http.server 8080' >/dev/null"
 
 [[processes]]
 name = "worker"
@@ -63,9 +63,9 @@ startsecs = "500ms"
 autorestart = true
 restart_interval = "1s"
 instances = 1
-  [[processes.detectors]]
-  type = "command"
-  command = "pgrep -f 'echo working' >/dev/null"
+[[processes.detectors]]
+type = "command"
+command = "pgrep -f 'echo working' >/dev/null"
 
 # Another simple example with a fixed external PID detector (rarely used in practice)
 [[processes]]
@@ -76,10 +76,10 @@ retry_interval = "500ms"
 startsecs = "0s"
 autorestart = false
 instances = 1
-  # Suppose an external service has PID 1234 (replace with real pid)
-  [[processes.detectors]]
-  type = "pid"
-  pid = 1234
+# Suppose an external service has PID 1234 (replace with real pid)
+[[processes.detectors]]
+type = "pid"
+pid = 1234
 
 # A pure cron job: run a one-off task every 5 seconds without autorestart
 [[processes]]
@@ -92,3 +92,14 @@ singleton = true
 [[groups]]
 name = "backend"
 members = ["web", "worker"]
+
+# Optional HTTP API server configuration
+# When enabled, `provisr serve --config config/config.toml` will start an HTTP server.
+# You can override these with CLI flags: --api-listen and --api-base.
+[http_api]
+# Enable the HTTP API server (set to true to allow starting from config)
+enabled = true
+# Listen address, e.g. ":8080" or "127.0.0.1:8080"
+listen = ":8080"
+# Base path for endpoints: {base}/start, {base}/stop, {base}/status
+base_path = "/api"

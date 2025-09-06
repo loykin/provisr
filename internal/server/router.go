@@ -1,0 +1,189 @@
+package server
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	mng "github.com/loykin/provisr/internal/manager"
+	"github.com/loykin/provisr/internal/process"
+)
+
+// Router provides embeddable HTTP handlers for managing processes.
+// Endpoints:
+//   POST {basePath}/start        body: Spec JSON
+//   POST {basePath}/stop         query: name=...&wait=1s (wait optional)
+//   GET  {basePath}/status       query: name=... (instance) OR base=... (list)
+// If both name and base are empty, returns 400.
+// If base provided without name, returns list of statuses for base.
+// If name provided, returns single status.
+// basePath may be empty or start with '/'; no trailing slash.
+
+type Router struct {
+	mgr      *mng.Manager
+	basePath string
+}
+
+// NewRouter constructs a new Router with configurable basePath.
+// Example basePath: "/abc" results in /abc/start, /abc/stop, /abc/status.
+func NewRouter(mgr *mng.Manager, basePath string) *Router {
+	bp := sanitizeBase(basePath)
+	return &Router{mgr: mgr, basePath: bp}
+}
+
+// Handler returns an http.Handler powered by gin that can be mounted in any server/mux.
+func (r *Router) Handler() http.Handler {
+	g := gin.New()
+	g.Use(gin.Recovery())
+	group := g.Group(r.basePath)
+	group.POST("/start", r.handleStart)
+	group.POST("/stop", r.handleStop)
+	group.GET("/status", r.handleStatus)
+	return g
+}
+
+// NewServer starts a standalone HTTP server on addr using this router.
+// The returned function can be called to shutdown the server immediately
+// by closing the listener via http.Server's Close.
+func NewServer(addr, basePath string, mgr *mng.Manager) (*http.Server, error) {
+	r := NewRouter(mgr, basePath)
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           r.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	go func() { _ = server.ListenAndServe() }()
+	return server, nil
+}
+
+// --- Handlers ---
+
+type errorResp struct {
+	Error string `json:"error"`
+}
+
+type okResp struct {
+	OK bool `json:"ok"`
+}
+
+func (r *Router) handleStart(c *gin.Context) {
+	var spec process.Spec
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid JSON: " + err.Error()})
+		return
+	}
+	if spec.Name == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "spec.name required"})
+		return
+	}
+	if err := r.mgr.StartN(spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleStop(c *gin.Context) {
+	name := c.Query("name")
+	base := c.Query("base")
+	wild := c.Query("wildcard")
+	waitStr := c.Query("wait")
+	wait := 2 * time.Second
+	if waitStr != "" {
+		if d, err := time.ParseDuration(waitStr); err == nil {
+			wait = d
+		}
+	}
+	// ensure exactly one selector is provided
+	selCount := 0
+	if name != "" {
+		selCount++
+	}
+	if base != "" {
+		selCount++
+	}
+	if wild != "" {
+		selCount++
+	}
+	if selCount == 0 {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "one of name, base, wildcard query param required"})
+		return
+	}
+	if selCount > 1 {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "only one of name, base, wildcard must be provided"})
+		return
+	}
+	if base != "" {
+		if err := r.mgr.StopAll(base, wait); err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+			return
+		}
+		writeJSON(c, http.StatusOK, okResp{OK: true})
+		return
+	}
+	if wild != "" {
+		if err := r.mgr.StopMatch(wild, wait); err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+			return
+		}
+		writeJSON(c, http.StatusOK, okResp{OK: true})
+		return
+	}
+	if err := r.mgr.Stop(name, wait); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleStatus(c *gin.Context) {
+	name := c.Query("name")
+	base := c.Query("base")
+	wild := c.Query("wildcard")
+	// ensure exactly one selector is provided
+	selCount := 0
+	if name != "" {
+		selCount++
+	}
+	if base != "" {
+		selCount++
+	}
+	if wild != "" {
+		selCount++
+	}
+	if selCount == 0 {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "one of name, base, wildcard query param required"})
+		return
+	}
+	if selCount > 1 {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "only one of name, base, wildcard must be provided"})
+		return
+	}
+	if base != "" {
+		sts, err := r.mgr.StatusAll(base)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+			return
+		}
+		writeJSON(c, http.StatusOK, sts)
+		return
+	}
+	if wild != "" {
+		sts, err := r.mgr.StatusMatch(wild)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+			return
+		}
+		writeJSON(c, http.StatusOK, sts)
+		return
+	}
+	st, err := r.mgr.Status(name)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, st)
+}

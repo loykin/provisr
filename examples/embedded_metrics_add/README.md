@@ -4,6 +4,7 @@ This example shows how to integrate provisr metrics into an existing Prometheus
 metrics setup using your own Prometheus registry and HTTP mux.
 
 What it does:
+
 - Creates a custom Prometheus registry
 - Registers provisr process metrics into that registry
 - Serves /metrics from that registry on :9100 via a custom http.ServeMux
@@ -20,6 +21,7 @@ Then open:
 - http://localhost:9100/metrics
 
 You should see provisr metric families like:
+
 - provisr_process_starts_total
 - provisr_process_restarts_total
 - provisr_process_stops_total
