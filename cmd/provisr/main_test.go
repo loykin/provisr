@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/loykin/provisr"
 )
 
 func TestHelpExitsZero(t *testing.T) {
@@ -46,5 +50,42 @@ func TestMetricsFlagStartsServer(t *testing.T) {
 	cmd := exec.Command("go", "run", ".", "--metrics-listen", ":0", "--help")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("metrics --help should succeed: %v out=%s", err, out)
+	}
+}
+
+func TestBuildRootStatusCommandWiring(t *testing.T) {
+	mgr := provisr.New()
+	root, bind := buildRoot(mgr)
+	bind()
+
+	// Capture stdout to verify JSON output is printed by status path.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	root.SetArgs([]string{"status", "--name", "demo"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute status: %v", err)
+	}
+
+	_ = w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	_ = r.Close()
+	s := buf.String()
+	if !strings.HasPrefix(strings.TrimSpace(s), "[") { // statuses slice JSON
+		t.Fatalf("unexpected status output: %q", s)
+	}
+}
+
+func TestBuildRootMetricsBinderHelp(t *testing.T) {
+	mgr := provisr.New()
+	root, bind := buildRoot(mgr)
+	bind()
+
+	root.SetArgs([]string{"--metrics-listen", ":0", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute help with metrics flag: %v", err)
 	}
 }
