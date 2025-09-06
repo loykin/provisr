@@ -39,6 +39,9 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 		envFiles        []string
 		metricsListen   string
 		groupName       string
+		apiListen       string
+		apiBase         string
+		nonBlocking     bool
 	)
 
 	root := &cobra.Command{Use: "provisr"}
@@ -107,7 +110,43 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 	gStop.Flags().StringVar(&groupName, "group", "", "group name from config")
 	gStatus.Flags().StringVar(&groupName, "group", "", "group name from config")
 
-	root.AddCommand(startCmd, statusCmd, stopCmd, cronCmd, gStart, gStop, gStatus)
+	// serve HTTP API
+	serveCmd := &cobra.Command{Use: "serve", Short: "Start HTTP API server (reads http_api from --config)", RunE: func(cmd *cobra.Command, args []string) error {
+		listen := apiListen
+		base := apiBase
+		if configPath != "" {
+			if httpCfg, err := provisr.LoadHTTPAPI(configPath); err == nil && httpCfg != nil {
+				if listen == "" {
+					listen = httpCfg.Listen
+				}
+				if base == "" {
+					base = httpCfg.BasePath
+				}
+				// If config explicitly disables, require explicit flag to override
+				if !httpCfg.Enabled && apiListen == "" {
+					return fmt.Errorf("http_api.enabled=false (or missing); provide --api-listen to start anyway")
+				}
+			}
+		}
+		if listen == "" {
+			listen = ":8080"
+		}
+		if base == "" {
+			base = "/api"
+		}
+		if _, err := provisr.NewHTTPServer(listen, base, mgr); err != nil {
+			return err
+		}
+		if nonBlocking {
+			return nil
+		}
+		select {}
+	}}
+	serveCmd.Flags().StringVar(&apiListen, "api-listen", "", "address to listen for HTTP API (e.g., :8080)")
+	serveCmd.Flags().StringVar(&apiBase, "api-base", "", "base path for API endpoints (default from config or /api)")
+	serveCmd.Flags().BoolVar(&nonBlocking, "non-blocking", false, "do not block; return immediately (useful for tests)")
+
+	root.AddCommand(startCmd, statusCmd, stopCmd, cronCmd, gStart, gStop, gStatus, serveCmd)
 
 	binder := func() {
 		root.PersistentPreRun = func(cmd *cobra.Command, args []string) {

@@ -25,12 +25,13 @@ type CronJob struct {
 // See internal docs for example in previous location.
 
 type FileConfig struct {
-	Env       []string      `toml:"env" mapstructure:"env"`
-	EnvFiles  []string      `toml:"env_files" mapstructure:"env_files"`
-	UseOSEnv  bool          `toml:"use_os_env" mapstructure:"use_os_env"`
-	Log       *LogConfig    `toml:"log" mapstructure:"log"`
-	Processes []ProcConfig  `toml:"processes" mapstructure:"processes"`
-	Groups    []GroupConfig `toml:"groups" mapstructure:"groups"`
+	Env       []string       `toml:"env" mapstructure:"env"`
+	EnvFiles  []string       `toml:"env_files" mapstructure:"env_files"`
+	UseOSEnv  bool           `toml:"use_os_env" mapstructure:"use_os_env"`
+	Log       *LogConfig     `toml:"log" mapstructure:"log"`
+	Processes []ProcConfig   `toml:"processes" mapstructure:"processes"`
+	Groups    []GroupConfig  `toml:"groups" mapstructure:"groups"`
+	HTTP      *HTTPAPIConfig `toml:"http_api" mapstructure:"http_api"`
 }
 
 type LogConfig struct {
@@ -392,4 +393,27 @@ func LoadCronJobsFromTOML(path string) ([]CronJob, error) {
 		jobs = append(jobs, CronJob{Name: pc.Name, Spec: s, Schedule: pc.Schedule, Singleton: singleton})
 	}
 	return jobs, nil
+}
+
+// HTTPAPIConfig describes optional HTTP API server configuration.
+type HTTPAPIConfig struct {
+	Enabled  bool   `toml:"enabled" mapstructure:"enabled"`
+	Listen   string `toml:"listen" mapstructure:"listen"`       // e.g., ":8080"
+	BasePath string `toml:"base_path" mapstructure:"base_path"` // e.g., "/api"
+}
+
+// LoadHTTPAPIFromTOML loads only the http_api section from the TOML file.
+// Returns (nil, nil) if the section is absent.
+func LoadHTTPAPIFromTOML(path string) (*HTTPAPIConfig, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("toml")
+	if err := v.ReadInConfig(); err != nil {
+		return nil, err
+	}
+	var fc FileConfig
+	if err := v.Unmarshal(&fc); err != nil {
+		return nil, err
+	}
+	return fc.HTTP, nil
 }

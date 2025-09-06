@@ -12,7 +12,7 @@ import (
 	"github.com/loykin/provisr/internal/process"
 )
 
-// Manager starts, stops and monitors processes.
+// Manager starts, stops, and monitors processes.
 type Manager struct {
 	mu    sync.Mutex
 	procs map[string]*entry
@@ -227,6 +227,48 @@ func (m *Manager) StatusAll(base string) ([]process.Status, error) {
 	return res, nil
 }
 
+// StatusMatch returns statuses for all process names that match the wildcard pattern.
+// Supported wildcard: '*' matches any substring (including empty). Multiple '*' are allowed.
+func (m *Manager) StatusMatch(pattern string) ([]process.Status, error) {
+	m.mu.Lock()
+	names := make([]string, 0, len(m.procs))
+	for name := range m.procs {
+		if wildcardMatch(name, pattern) {
+			names = append(names, name)
+		}
+	}
+	m.mu.Unlock()
+	res := make([]process.Status, 0, len(names))
+	for _, n := range names {
+		st, err := m.Status(n)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, st)
+	}
+	return res, nil
+}
+
+// StopMatch stops all processes with names that match the wildcard pattern.
+// Returns the first error encountered, if any.
+func (m *Manager) StopMatch(pattern string, wait time.Duration) error {
+	m.mu.Lock()
+	names := make([]string, 0, len(m.procs))
+	for name := range m.procs {
+		if wildcardMatch(name, pattern) {
+			names = append(names, name)
+		}
+	}
+	m.mu.Unlock()
+	var firstErr error
+	for _, name := range names {
+		if err := m.Stop(name, wait); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // Count returns number of running instances for the base name.
 func (m *Manager) Count(base string) (int, error) {
 	sts, err := m.StatusAll(base)
@@ -258,6 +300,49 @@ func (m *Manager) getOrCreateEntry(spec process.Spec) *entry {
 	}
 	m.mu.Unlock()
 	return e
+}
+
+// wildcardMatch matches name against a pattern with '*' wildcard (glob-like, case-sensitive).
+// It returns true if the sequence of non-* segments appear in order in name.
+func wildcardMatch(name, pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+	if pattern == "*" {
+		return true
+	}
+	// fast path: no '*'
+	if !strings.Contains(pattern, "*") {
+		return name == pattern
+	}
+	parts := strings.Split(pattern, "*")
+	// Handle anchors based on leading/trailing '*'
+	idx := 0
+	// Leading part must match prefix if pattern doesn't start with '*'
+	if parts[0] != "" {
+		if !strings.HasPrefix(name, parts[0]) {
+			return false
+		}
+		idx = len(parts[0])
+	}
+	// Middle parts must occur in order
+	for i := 1; i < len(parts)-1; i++ {
+		p := parts[i]
+		if p == "" {
+			continue
+		}
+		j := strings.Index(name[idx:], p)
+		if j < 0 {
+			return false
+		}
+		idx += j + len(p)
+	}
+	// Trailing part must match suffix if pattern doesn't end with '*'
+	last := parts[len(parts)-1]
+	if last != "" {
+		return strings.HasSuffix(name, last) && idx <= len(name)-len(last)
+	}
+	return true
 }
 
 // fastAlive returns true if the process is already reported alive.
