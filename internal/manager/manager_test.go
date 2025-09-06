@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -350,6 +351,174 @@ func TestStartNMultipleBasesAndStopAll(t *testing.T) {
 	for _, st := range append(stsx, stsy...) {
 		if st.Running {
 			t.Fatalf("expected not running after StopAll, got: %+v", st)
+		}
+	}
+}
+
+// TestParallelDifferentProcesses10 starts 10 different processes concurrently and ensures they all reach running state.
+func TestParallelDifferentProcesses10(t *testing.T) {
+	mgr := NewManager()
+	var wg sync.WaitGroup
+	names := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		names = append(names, fmt.Sprintf("par-diff-%d", i+1))
+	}
+
+	// Start all in parallel
+	for _, n := range names {
+		wg.Add(1)
+		n := n
+		go func() {
+			defer wg.Done()
+			spec := process.Spec{Name: n, Command: "sleep 2"}
+			if err := mgr.Start(spec); err != nil {
+				t.Errorf("start %s: %v", n, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Wait until all report running (with deadline)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		all := true
+		for _, n := range names {
+			st, err := mgr.Status(n)
+			if err != nil || !st.Running {
+				all = false
+				break
+			}
+		}
+		if all {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, n := range names {
+		st, err := mgr.Status(n)
+		if err != nil || !st.Running {
+			t.Fatalf("expected %s running, got err=%v st=%+v", n, err, st)
+		}
+	}
+
+	// Stop all
+	for _, n := range names {
+		_ = mgr.Stop(n, 2*time.Second)
+	}
+	time.Sleep(100 * time.Millisecond)
+	for _, n := range names {
+		st, _ := mgr.Status(n)
+		if st.Running {
+			t.Fatalf("expected %s stopped after Stop", n)
+		}
+	}
+}
+
+// TestParallelSameProcessInstances10 starts 10 instances of the same base name concurrently.
+func TestParallelSameProcessInstances10(t *testing.T) {
+	mgr := NewManager()
+	base := "par-same"
+	var wg sync.WaitGroup
+	// Start 10 instances in parallel by calling Start on suffixed names
+	for i := 1; i <= 10; i++ {
+		wg.Add(1)
+		name := fmt.Sprintf("%s-%d", base, i)
+		go func(n string) {
+			defer wg.Done()
+			spec := process.Spec{Name: n, Command: "sleep 2"}
+			if err := mgr.Start(spec); err != nil {
+				t.Errorf("start %s: %v", n, err)
+			}
+		}(name)
+	}
+	wg.Wait()
+
+	// Poll until count == 10
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		c, _ := mgr.Count(base)
+		if c == 10 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	c, _ := mgr.Count(base)
+	if c != 10 {
+		t.Fatalf("expected 10 running instances, got %d", c)
+	}
+
+	// Stop all instances
+	_ = mgr.StopAll(base, 2*time.Second)
+	time.Sleep(100 * time.Millisecond)
+	c2, _ := mgr.Count(base)
+	if c2 != 0 {
+		t.Fatalf("expected 0 after StopAll, got %d", c2)
+	}
+}
+
+// TestManage100Processes verifies the manager can start and observe ~100 processes.
+func TestManage100Processes(t *testing.T) {
+	mgr := NewManager()
+	var wg sync.WaitGroup
+	names := make([]string, 0, 100)
+	for i := 1; i <= 100; i++ {
+		names = append(names, fmt.Sprintf("scale-%03d", i))
+	}
+
+	// Start many processes in parallel batches to avoid extreme spikes
+	batch := 20
+	for i := 0; i < len(names); i += batch {
+		end := i + batch
+		if end > len(names) {
+			end = len(names)
+		}
+		wg = sync.WaitGroup{}
+		for _, n := range names[i:end] {
+			wg.Add(1)
+			n := n
+			go func() {
+				defer wg.Done()
+				spec := process.Spec{Name: n, Command: "sleep 2"}
+				if err := mgr.Start(spec); err != nil {
+					t.Errorf("start %s: %v", n, err)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+
+	// Verify all are running
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		ok := true
+		for _, n := range names {
+			st, err := mgr.Status(n)
+			if err != nil || !st.Running {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	for _, n := range names {
+		st, err := mgr.Status(n)
+		if err != nil || !st.Running {
+			t.Fatalf("expected %s running, got err=%v st=%+v", n, err, st)
+		}
+	}
+
+	// Stop all
+	for _, n := range names {
+		_ = mgr.Stop(n, 2*time.Second)
+	}
+	time.Sleep(150 * time.Millisecond)
+	for _, n := range names {
+		st, _ := mgr.Status(n)
+		if st.Running {
+			t.Fatalf("expected %s stopped after Stop", n)
 		}
 	}
 }

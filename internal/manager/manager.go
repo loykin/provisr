@@ -2,8 +2,6 @@ package manager
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
@@ -11,7 +9,7 @@ import (
 
 	"github.com/loykin/provisr/internal/env"
 	"github.com/loykin/provisr/internal/metrics"
-	run "github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/process"
 )
 
 // Manager starts, stops and monitors processes.
@@ -22,8 +20,8 @@ type Manager struct {
 }
 
 type entry struct {
-	r    *run.Process
-	spec run.Spec
+	r    *process.Process
+	spec process.Spec
 }
 
 // monitor waits for process exit and auto-restarts if configured.
@@ -81,54 +79,17 @@ func (m *Manager) get(name string) *entry {
 	return m.procs[name]
 }
 
-// configureCmd builds the exec.Cmd and sets env, workdir, stdio/logging.
-func (m *Manager) configureCmd(spec run.Spec, e *entry) *exec.Cmd {
-	cmd := spec.BuildCommand()
-	if spec.WorkDir != "" {
-		cmd.Dir = spec.WorkDir
-	}
-	// compute environment using env manager (global + per-process)
-	if m.envM != nil {
-		cmd.Env = m.envM.Merge(spec.Env)
-	} else if len(spec.Env) > 0 {
-		cmd.Env = append(os.Environ(), spec.Env...)
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Setup logging if configured
-	if spec.Log.Dir != "" || spec.Log.StdoutPath != "" || spec.Log.StderrPath != "" {
-		if spec.Log.Dir != "" {
-			_ = os.MkdirAll(spec.Log.Dir, 0o750)
-		}
-		outW, errW, _ := spec.Log.Writers(spec.Name)
-		e.r.EnsureLogClosers(outW, errW)
-		ow, ew := e.r.OutErrClosers()
-		if ow != nil {
-			cmd.Stdout = ow
-		} else {
-			cmd.Stdout, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
-		}
-		if ew != nil {
-			cmd.Stderr = ew
-		} else {
-			cmd.Stderr, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
-		}
-	} else {
-		null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-		cmd.Stdout = null
-		cmd.Stderr = null
-	}
-	return cmd
-}
-
-func (m *Manager) Start(spec run.Spec) error {
+func (m *Manager) Start(spec process.Spec) error {
 	m.mu.Lock()
 	e, exists := m.procs[spec.Name]
 	if !exists {
-		r := run.New(run.Spec{Name: spec.Name, PIDFile: spec.PIDFile, Detectors: spec.Detectors})
+		r := process.New(spec)
 		e = &entry{r: r, spec: spec}
 		m.procs[spec.Name] = e
 	} else {
 		e.spec = spec
+		// ensure process has the updated spec too
+		e.r.UpdateSpec(spec)
 	}
 	m.mu.Unlock()
 
@@ -148,8 +109,12 @@ func (m *Manager) Start(spec run.Spec) error {
 		interval = 500 * time.Millisecond
 	}
 	for i := 0; i <= attempts; i++ {
-		cmd := m.configureCmd(spec, e)
-		if err := cmd.Start(); err != nil {
+		var mergedEnv []string
+		if m.envM != nil {
+			mergedEnv = m.envM.Merge(spec.Env)
+		}
+		cmd := e.r.ConfigureCmd(mergedEnv)
+		if err := e.r.TryStart(cmd); err != nil {
 			lastErr = err
 			if i < attempts {
 				time.Sleep(interval)
@@ -158,9 +123,7 @@ func (m *Manager) Start(spec run.Spec) error {
 			return lastErr
 		}
 
-		e.r.SetStarted(cmd)
 		metrics.IncStart(spec.Name)
-		e.r.WritePIDFile()
 
 		// Start monitor BEFORE enforcing start duration to catch early exits promptly
 		if e.r.MonitoringStartIfNeeded() {
@@ -172,7 +135,10 @@ func (m *Manager) Start(spec run.Spec) error {
 			e.r.MarkExited(err)
 			lastErr = err
 			if i < attempts {
-				time.Sleep(interval)
+				// If process exited early, retry immediately to keep Start responsive.
+				if !process.IsBeforeStartErr(err) {
+					time.Sleep(interval)
+				}
 				continue
 			}
 			return lastErr
@@ -217,14 +183,14 @@ func (m *Manager) Stop(name string, wait time.Duration) error {
 }
 
 // Status returns current status including detector check.
-func (m *Manager) Status(name string) (run.Status, error) {
+func (m *Manager) Status(name string) (process.Status, error) {
 	e := m.get(name)
 	if e == nil {
-		return run.Status{}, fmt.Errorf("unknown process: %s", name)
+		return process.Status{}, fmt.Errorf("unknown process: %s", name)
 	}
 	alive, by := e.r.DetectAlive()
 	rs := e.r.Snapshot()
-	st := run.Status{
+	st := process.Status{
 		Name:       rs.Name,
 		Running:    alive,
 		PID:        rs.PID,
@@ -238,7 +204,7 @@ func (m *Manager) Status(name string) (run.Status, error) {
 }
 
 // StartN starts Spec.Instances instances by suffixing names with -1..-N.
-func (m *Manager) StartN(spec run.Spec) error {
+func (m *Manager) StartN(spec process.Spec) error {
 	n := spec.Instances
 	if n <= 1 {
 		return m.Start(spec)
@@ -280,7 +246,7 @@ func (m *Manager) StopAll(base string, wait time.Duration) error {
 }
 
 // StatusAll returns statuses for all instances matching the base name.
-func (m *Manager) StatusAll(base string) ([]run.Status, error) {
+func (m *Manager) StatusAll(base string) ([]process.Status, error) {
 	m.mu.Lock()
 	names := make([]string, 0, len(m.procs))
 	for name := range m.procs {
@@ -289,7 +255,7 @@ func (m *Manager) StatusAll(base string) ([]run.Status, error) {
 		}
 	}
 	m.mu.Unlock()
-	res := make([]run.Status, 0, len(names))
+	res := make([]process.Status, 0, len(names))
 	for _, n := range names {
 		st, err := m.Status(n)
 		if err != nil {
