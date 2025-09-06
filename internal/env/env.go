@@ -25,6 +25,9 @@ func (e *Env) FromOS() {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			k := kv[:i]
 			v := kv[i+1:]
+			if k == "" {
+				continue
+			}
 			base[k] = v
 		}
 	}
@@ -62,12 +65,18 @@ func (e *Env) Merge(perProc []string) []string {
 		m[k] = v
 	}
 	for k, v := range e.Var {
+		if k == "" {
+			continue
+		}
 		m[k] = v
 	}
 	for _, kv := range perProc {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			k := kv[:i]
 			v := kv[i+1:]
+			if k == "" { // skip malformed entries with empty key
+				continue
+			}
 			m[k] = v
 		}
 	}
@@ -79,6 +88,9 @@ func (e *Env) Merge(perProc []string) []string {
 	// build slice
 	out := make([]string, 0, len(expanded))
 	for k, v := range expanded {
+		if k == "" {
+			continue
+		}
 		out = append(out, k+"="+v)
 	}
 	return out
