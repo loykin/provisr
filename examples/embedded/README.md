@@ -5,7 +5,7 @@ This example shows how to embed provisr in your Go program without importing any
 Run it with:
 
 ```shell
-go run ./examples/embeded
+go run ./examples/embedded
 ```
 
 What it does:

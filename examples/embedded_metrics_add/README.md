@@ -12,7 +12,7 @@ What it does:
 Run it with:
 
 ```shell
-go run ./examples/embeded_metrics_add
+go run ./examples/embedded_metrics_add
 ```
 
 Then open:
