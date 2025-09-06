@@ -10,6 +10,7 @@ import (
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
 	pg "github.com/loykin/provisr/internal/process_group"
+	iapi "github.com/loykin/provisr/internal/server"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -75,6 +76,15 @@ func LoadGlobalEnv(path string) ([]string, error)     { return cfg.LoadGlobalEnv
 func LoadSpecs(path string) ([]Spec, error)           { return cfg.LoadSpecsFromTOML(path) }
 func LoadGroups(path string) ([]pg.GroupSpec, error)  { return cfg.LoadGroupsFromTOML(path) }
 func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsFromTOML(path) }
+
+// HTTP API helpers
+
+func LoadHTTPAPI(path string) (*cfg.HTTPAPIConfig, error) { return cfg.LoadHTTPAPIFromTOML(path) }
+
+// NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
+func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
+	return iapi.NewServer(addr, basePath, m.inner)
+}
 
 // Metrics helpers (public facade)
 
