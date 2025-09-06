@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"errors"
 	"net/http"
 	"sync/atomic"
 
@@ -65,7 +66,8 @@ func Register(r prometheus.Registerer) error {
 	for _, c := range cs {
 		if err := r.Register(c); err != nil {
 			// If already registered, ignore (allows double Register with default registry)
-			if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
+			var are prometheus.AlreadyRegisteredError
+			if errors.As(err, &are) {
 				_ = are // keep existing
 				continue
 			}

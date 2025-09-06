@@ -11,19 +11,19 @@ import (
 
 // Spec describes a process to be managed.
 type Spec struct {
-	Name            string
-	Command         string        // command to start the process (shell)
-	WorkDir         string        // optional working dir
-	Env             []string      // optional extra env
-	PIDFile         string        // optional pidfile path; if set a PIDFileDetector will be used
-	RetryCount      int           // number of retries on start failure
-	RetryInterval   time.Duration // interval between retries
-	StartDuration   time.Duration // minimum time the process must stay up to be considered started
-	AutoRestart     bool          // restart automatically if the process dies unexpectedly
-	RestartInterval time.Duration // wait before attempting an auto-restart
-	Instances       int           // number of instances to run concurrently (default 1)
-	Detectors       []detector.Detector
-	Log             logger.Config // logging configuration for this process instance
+	Name            string              `json:"name"`
+	Command         string              `json:"command"`          // command to start the process (shell)
+	WorkDir         string              `json:"work_dir"`         // optional working dir
+	Env             []string            `json:"env"`              // optional extra env
+	PIDFile         string              `json:"pid_file"`         // optional pidfile path; if set a PIDFileDetector will be used
+	RetryCount      int                 `json:"retry_count"`      // number of retries on start failure
+	RetryInterval   time.Duration       `json:"retry_interval"`   // interval between retries
+	StartDuration   time.Duration       `json:"start_duration"`   // minimum time the process must stay up to be considered started
+	AutoRestart     bool                `json:"auto_restart"`     // restart automatically if the process dies unexpectedly
+	RestartInterval time.Duration       `json:"restart_interval"` // wait before attempting an auto-restart
+	Instances       int                 `json:"instances"`        // number of instances to run concurrently (default 1)
+	Detectors       []detector.Detector `json:"-"`
+	Log             logger.Config       `json:"log"` // logging configuration for this process instance
 }
 
 // BuildCommand constructs an *exec.Cmd for the given spec.Command.
@@ -44,6 +44,7 @@ func (s *Spec) BuildCommand() *exec.Cmd {
 	if len(parts) > 1 {
 		args = parts[1:]
 	}
+	// ok: intentional shell execution, input is validated and safe
 	// #nosec G204
 	return exec.Command(name, args...)
 }
