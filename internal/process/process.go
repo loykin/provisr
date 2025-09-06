@@ -28,6 +28,51 @@ type Process struct {
 
 func New(spec Spec) *Process { return &Process{spec: spec} }
 
+// UpdateSpec replaces the internal spec under lock.
+func (r *Process) UpdateSpec(s Spec) {
+	r.mu.Lock()
+	r.spec = s
+	r.mu.Unlock()
+}
+
+// ConfigureCmd builds and configures *exec.Cmd for this process using mergedEnv.
+// It sets workdir, environment, stdio/logging, and process group attributes.
+// Logging writers are prepared and stored via EnsureLogClosers.
+func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
+	cmd := r.spec.BuildCommand()
+	if r.spec.WorkDir != "" {
+		cmd.Dir = r.spec.WorkDir
+	}
+	if len(mergedEnv) > 0 {
+		cmd.Env = mergedEnv
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Setup logging if configured
+	if r.spec.Log.Dir != "" || r.spec.Log.StdoutPath != "" || r.spec.Log.StderrPath != "" {
+		if r.spec.Log.Dir != "" {
+			_ = os.MkdirAll(r.spec.Log.Dir, 0o750)
+		}
+		outW, errW, _ := r.spec.Log.Writers(r.spec.Name)
+		r.EnsureLogClosers(outW, errW)
+		ow, ew := r.OutErrClosers()
+		if ow != nil {
+			cmd.Stdout = ow
+		} else {
+			cmd.Stdout, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		}
+		if ew != nil {
+			cmd.Stderr = ew
+		} else {
+			cmd.Stderr, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		}
+	} else {
+		null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		cmd.Stdout = null
+		cmd.Stderr = null
+	}
+	return cmd
+}
+
 // Accessors with internal locking kept within methods to avoid external lock usage.
 
 func (r *Process) CopyCmd() *exec.Cmd {
@@ -49,6 +94,18 @@ func (r *Process) SetStarted(cmd *exec.Cmd) {
 	r.mu.Unlock()
 }
 
+// TryStart atomically starts the command and updates internal state and PID file.
+// It encapsulates cmd.Start + SetStarted + WritePIDFile to reduce races.
+func (r *Process) TryStart(cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// After successful start, record state and write PID file under lock-ordered ops.
+	r.SetStarted(cmd)
+	// Write PID file synchronously to ensure availability immediately after Start returns.
+	r.WritePIDFile()
+	return nil
+}
 func (r *Process) CloseWaitDone() {
 	r.mu.Lock()
 	if r.waitDone != nil {
@@ -223,23 +280,10 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if cmd == nil || cmd.Process == nil {
 		return errBeforeStart(d)
 	}
-
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-wd:
-			return errBeforeStart(d)
-		case <-deadline.C:
-			return nil
-		case <-ticker.C:
-			r.mu.Lock()
-			c := r.cmd
-			r.mu.Unlock()
-			if c == nil || c.Process == nil || syscall.Kill(-c.Process.Pid, 0) != nil {
-				return errBeforeStart(d)
-			}
-		}
+	select {
+	case <-wd:
+		return errBeforeStart(d)
+	case <-deadline.C:
+		return nil
 	}
 }
