@@ -131,6 +131,40 @@ API_BASE=/api go run .
 - examples/embedded_config_file — config-driven
 - examples/embedded_config_structure — struct-driven configuration
 
+## Files and Paths
+
+This project reads/writes a few files at well-defined locations. The defaults and rules are:
+
+- Working directory (spec.work_dir)
+  - If provided, the started process runs with this as its cwd.
+  - Must be an absolute path without traversal (e.g., /var/apps/demo). Relative paths are rejected by the HTTP API.
+
+- PID file (spec.pid_file)
+  - If provided, the manager writes the child PID to this file immediately after a successful start.
+  - The parent directory is created if missing (mode 0750).
+  - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid).
+
+- Logs (spec.log)
+  - If log.stdoutPath or log.stderrPath are set, logs are written exactly to those files.
+  - Otherwise, if log.dir is set, files are created as:
+    - <log.dir>/<name>.stdout.log
+    - <log.dir>/<name>.stderr.log
+  - The directory log.dir is created if needed (mode 0750).
+  - Rotation is handled by lumberjack (MaxSizeMB, MaxBackups, MaxAgeDays, Compress).
+  - Example: with name "web-1" and log.dir "/var/log/provisr", stdout goes to /var/log/provisr/web-1.stdout.log.
+
+- Config file
+  - Example configuration is in config/config.toml. CLI examples use:
+    - provisr start --config config/config.toml
+  - You can keep your own TOML anywhere and pass the path via --config.
+
+- Examples
+  - See the examples/ directory for runnable samples. Some include their own config directories, e.g., examples/embedded_config_file/config/config.toml.
+
+- Naming and path rules (validated by the HTTP API)
+  - name: allowed characters [A-Za-z0-9._-]; must not contain ".." or path separators.
+  - work_dir, pid_file, log.dir, log.stdoutPath, log.stderrPath: if provided, must be absolute paths without traversal (cleaned form; no "..").
+
 ## Security notes
 
 - The HTTP API performs input validation for process specs to mitigate uncontrolled path usage (CodeQL: "Uncontrolled
