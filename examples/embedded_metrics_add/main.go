@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// embeded_metrics_add:
+// embedded_metrics_add:
 // Demonstrates adding provisr metrics to an existing Prometheus setup
 // with a custom registry and HTTP mux.
 func main() {

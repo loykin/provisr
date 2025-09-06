@@ -7,7 +7,7 @@ import (
 	"github.com/loykin/provisr"
 )
 
-// Flag structs to decouple cobra from logic for testing.
+// StartFlags Flag structs to decouple cobra from logic for testing.
 type StartFlags struct {
 	ConfigPath      string
 	UseOSEnv        bool
