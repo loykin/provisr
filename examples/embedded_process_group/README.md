@@ -10,7 +10,7 @@ It starts two members:
 Run it with:
 
 ```shell
-go run ./examples/embeded_process_group
+go run ./examples/embedded_process_group
 ```
 
 Output:
