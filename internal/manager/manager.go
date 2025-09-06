@@ -82,41 +82,15 @@ func (m *Manager) get(name string) *entry {
 }
 
 func (m *Manager) Start(spec process.Spec) error {
-	m.mu.Lock()
-	e, exists := m.procs[spec.Name]
-	if !exists {
-		r := process.New(spec)
-		e = &entry{r: r, spec: spec}
-		m.procs[spec.Name] = e
-	} else {
-		e.spec = spec
-		// ensure process has the updated spec too
-		e.r.UpdateSpec(spec)
-	}
-	m.mu.Unlock()
-
+	e := m.getOrCreateEntry(spec)
 	// Fast path: if already alive, no-op
-	alive, _ := e.r.DetectAlive()
-	if alive {
+	if m.fastAlive(e) {
 		return nil
 	}
-
+	attempts, interval := retryParams(spec)
 	var lastErr error
-	attempts := spec.RetryCount
-	if attempts < 0 {
-		attempts = 0
-	}
-	interval := spec.RetryInterval
-	if interval <= 0 {
-		interval = 500 * time.Millisecond
-	}
 	for i := 0; i <= attempts; i++ {
-		var mergedEnv []string
-		if m.envM != nil {
-			mergedEnv = m.envM.Merge(spec.Env)
-		}
-		cmd := e.r.ConfigureCmd(mergedEnv)
-		if err := e.r.TryStart(cmd); err != nil {
+		if err := m.tryStartOnce(e, spec); err != nil {
 			lastErr = err
 			if i < attempts {
 				time.Sleep(interval)
@@ -124,20 +98,9 @@ func (m *Manager) Start(spec process.Spec) error {
 			}
 			return lastErr
 		}
-
-		metrics.IncStart(spec.Name)
-
-		// Start monitor BEFORE enforcing start duration to catch early exits promptly
-		if e.r.MonitoringStartIfNeeded() {
-			go m.monitor(e)
-		}
-
-		if err := e.r.EnforceStartDuration(spec.StartDuration); err != nil {
-			e.r.RemovePIDFile()
-			e.r.MarkExited(err)
+		if err := m.postStart(e, spec); err != nil {
 			lastErr = err
 			if i < attempts {
-				// If process exited early, retry immediately to keep Start responsive.
 				if !process.IsBeforeStartErr(err) {
 					time.Sleep(interval)
 				}
@@ -145,10 +108,6 @@ func (m *Manager) Start(spec process.Spec) error {
 			}
 			return lastErr
 		}
-		if spec.StartDuration > 0 {
-			metrics.ObserveStartDuration(spec.Name, spec.StartDuration.Seconds())
-		}
-
 		return nil
 	}
 	return lastErr
@@ -281,4 +240,74 @@ func (m *Manager) Count(base string) (int, error) {
 		}
 	}
 	return c, nil
+}
+
+// --- helpers extracted to reduce cyclomatic complexity in Start() ---
+// getOrCreateEntry returns an entry for the spec name, creating it if missing.
+func (m *Manager) getOrCreateEntry(spec process.Spec) *entry {
+	m.mu.Lock()
+	e, exists := m.procs[spec.Name]
+	if !exists {
+		r := process.New(spec)
+		e = &entry{r: r, spec: spec}
+		m.procs[spec.Name] = e
+	} else {
+		e.spec = spec
+		// ensure process has the updated spec too
+		e.r.UpdateSpec(spec)
+	}
+	m.mu.Unlock()
+	return e
+}
+
+// fastAlive returns true if the process is already reported alive.
+func (m *Manager) fastAlive(e *entry) bool {
+	alive, _ := e.r.DetectAlive()
+	return alive
+}
+
+// retryParams computes attempts and interval from the spec.
+func retryParams(spec process.Spec) (int, time.Duration) {
+	attempts := spec.RetryCount
+	if attempts < 0 {
+		attempts = 0
+	}
+	interval := spec.RetryInterval
+	if interval <= 0 {
+		interval = 500 * time.Millisecond
+	}
+	return attempts, interval
+}
+
+// mergedEnvFor merges manager globals with per-process env.
+func (m *Manager) mergedEnvFor(spec process.Spec) []string {
+	if m.envM != nil {
+		return m.envM.Merge(spec.Env)
+	}
+	return nil
+}
+
+// tryStartOnce configures and tries to start the process once.
+func (m *Manager) tryStartOnce(e *entry, spec process.Spec) error {
+	mergedEnv := m.mergedEnvFor(spec)
+	cmd := e.r.ConfigureCmd(mergedEnv)
+	return e.r.TryStart(cmd)
+}
+
+// postStart runs metrics, starts monitoring, and enforces start duration.
+// Returns error if the process exits before start duration.
+func (m *Manager) postStart(e *entry, spec process.Spec) error {
+	metrics.IncStart(spec.Name)
+	if e.r.MonitoringStartIfNeeded() {
+		go m.monitor(e)
+	}
+	if err := e.r.EnforceStartDuration(spec.StartDuration); err != nil {
+		e.r.RemovePIDFile()
+		e.r.MarkExited(err)
+		return err
+	}
+	if spec.StartDuration > 0 {
+		metrics.ObserveStartDuration(spec.Name, spec.StartDuration.Seconds())
+	}
+	return nil
 }

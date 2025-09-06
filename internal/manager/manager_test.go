@@ -1,9 +1,11 @@
 package manager
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +15,86 @@ import (
 	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/internal/process"
 )
+
+func requireUnix(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+}
+
+// Test that starting a process and then starting again with the same name but
+// an updated Spec actually uses the new Spec (via getOrCreateEntry + UpdateSpec).
+func TestGetOrCreateEntryUpdatesSpec(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	dir := t.TempDir()
+
+	// First spec: writes to a1.txt quickly
+	s1 := process.Spec{
+		Name:          "upd",
+		Command:       "sh -c 'echo one > a1.txt'",
+		WorkDir:       dir,
+		StartDuration: 0,
+	}
+	if err := mgr.Start(s1); err != nil {
+		t.Fatalf("start s1: %v", err)
+	}
+	// Stop to avoid monitor writing concurrently during spec update
+	// wait a bit for command to run and then stop
+	time.Sleep(80 * time.Millisecond)
+	_ = mgr.StopAll("upd", 500*time.Millisecond)
+	b1, err := os.ReadFile(filepath.Join(dir, "a1.txt"))
+	if err != nil {
+		t.Fatalf("missing a1.txt: %v", err)
+	}
+	if !bytes.Contains(b1, []byte("one")) {
+		t.Fatalf("unexpected a1 content: %q", string(b1))
+	}
+
+	// Second spec: same name, writes to a2.txt
+	s2 := process.Spec{
+		Name:          "upd",
+		Command:       "sh -c 'echo two > a2.txt'",
+		WorkDir:       dir,
+		StartDuration: 0,
+	}
+	if err := mgr.Start(s2); err != nil {
+		t.Fatalf("start s2: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	b2, err := os.ReadFile(filepath.Join(dir, "a2.txt"))
+	if err != nil {
+		t.Fatalf("missing a2.txt after spec update: %v", err)
+	}
+	if !bytes.Contains(b2, []byte("two")) {
+		t.Fatalf("unexpected a2 content: %q", string(b2))
+	}
+}
+
+// Test that when a process exits before StartDuration, Manager.Start retries
+// immediately without sleeping for RetryInterval.
+func TestImmediateRetryOnBeforeStart(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	s := process.Spec{
+		Name:          "imm-retry",
+		Command:       "sh -c 'exit 0'",
+		StartDuration: 200 * time.Millisecond,
+		RetryCount:    1,
+		RetryInterval: 700 * time.Millisecond, // long interval; should be skipped on early-exit retry
+	}
+	start := time.Now()
+	err := mgr.Start(s)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("expected error due to early exit before start duration")
+	}
+	// We expect total time to be much less than RetryInterval since retry was immediate.
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("retry not immediate, took %v (>500ms)", elapsed)
+	}
+}
 
 func TestStartStopWithPIDFile(t *testing.T) {
 	mgr := NewManager()
