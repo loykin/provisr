@@ -79,6 +79,31 @@ func (r *Router) handleStart(c *gin.Context) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "spec.name required"})
 		return
 	}
+	// Validate process name and any path-like fields to avoid uncontrolled path usage
+	if !isSafeName(spec.Name) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid spec.name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+	if !isSafeAbsPath(spec.WorkDir) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid work_dir: must be absolute path without traversal"})
+		return
+	}
+	if !isSafeAbsPath(spec.PIDFile) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid pid_file: must be absolute path without traversal"})
+		return
+	}
+	if !isSafeAbsPath(spec.Log.Dir) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.dir: must be absolute path without traversal"})
+		return
+	}
+	if !isSafeAbsPath(spec.Log.StdoutPath) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stdoutPath: must be absolute path without traversal"})
+		return
+	}
+	if !isSafeAbsPath(spec.Log.StderrPath) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stderrPath: must be absolute path without traversal"})
+		return
+	}
 	if err := r.mgr.StartN(spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
