@@ -27,7 +27,7 @@ func FuzzExpandMerge(f *testing.F) {
 		e := New()
 		for _, kv := range global {
 			if i := strings.IndexByte(kv, '='); i >= 0 {
-				e.Set(kv[:i], kv[i+1:])
+				e = e.WithSet(kv[:i], kv[i+1:])
 			}
 		}
 		out := e.Merge(per)

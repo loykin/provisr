@@ -64,13 +64,15 @@ func (m *Manager) SetGlobalEnv(kvs []string) {
 	if m.envM == nil {
 		m.envM = env.New()
 	}
+	e := m.envM
 	for _, kv := range kvs {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			k := kv[:i]
 			v := kv[i+1:]
-			m.envM.Set(k, v)
+			e = e.WithSet(k, v)
 		}
 	}
+	m.envM = e
 }
 
 func (m *Manager) get(name string) *entry {
