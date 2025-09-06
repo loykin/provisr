@@ -97,7 +97,7 @@ func TestPIDFileDetector(t *testing.T) {
 	if err := os.WriteFile(pidfile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	alive, err = d.Alive()
+	_, err = d.Alive()
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
