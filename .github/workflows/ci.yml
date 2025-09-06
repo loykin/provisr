@@ -73,10 +73,10 @@ jobs:
       - name: Run safe examples (self-contained, no external services)
         run: |
           set -e
-          echo "Running examples/embeded"
-          go run ./examples/embeded
-          echo "Running examples/embeded_process_group"
-          go run ./examples/embeded_process_group
+          echo "Running examples/embedded"
+          go run ./examples/embedded
+          echo "Running examples/embedded_process_group"
+          go run ./examples/embedded_process_group
           echo "Running examples/embedded_logger"
           go run ./examples/embedded_logger
           echo "Running examples/embedded_metrics"
