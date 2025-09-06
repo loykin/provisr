@@ -157,3 +157,122 @@ func TestEnforceStartDurationSuccess(t *testing.T) {
 		t.Fatalf("EnforceStartDuration returned too early: %v < %v", elapsed, d)
 	}
 }
+
+func TestStopRequestedToggleAndIncRestarts(t *testing.T) {
+	r := New(Spec{Name: "x", Command: "sleep 0.2"})
+	if r.StopRequested() {
+		t.Fatalf("default StopRequested should be false")
+	}
+	r.SetStopRequested(true)
+	if !r.StopRequested() {
+		t.Fatalf("StopRequested should be true after SetStopRequested(true)")
+	}
+	r.SetStopRequested(false)
+	if r.StopRequested() {
+		t.Fatalf("StopRequested should be false after SetStopRequested(false)")
+	}
+	if v := r.IncRestarts(); v != 1 {
+		t.Fatalf("IncRestarts first got %d want 1", v)
+	}
+	if v := r.IncRestarts(); v != 2 {
+		t.Fatalf("IncRestarts second got %d want 2", v)
+	}
+}
+
+func TestMonitoringStartIfNeededAndStop(t *testing.T) {
+	r := New(Spec{Name: "m"})
+	if got := r.MonitoringStartIfNeeded(); !got {
+		t.Fatalf("first MonitoringStartIfNeeded should return true")
+	}
+	if got := r.MonitoringStartIfNeeded(); got {
+		t.Fatalf("second MonitoringStartIfNeeded should return false (idempotent)")
+	}
+	r.MonitoringStop()
+	if got := r.MonitoringStartIfNeeded(); !got {
+		t.Fatalf("after stop, MonitoringStartIfNeeded should return true again")
+	}
+}
+
+func TestCloseWritersAndRemovePIDFileAndDetectAlive(t *testing.T) {
+	requireUnix(t)
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "p.pid")
+	r := New(Spec{Name: "alive", Command: "sleep 0.3", PIDFile: pidfile})
+	cmd := r.ConfigureCmd(nil)
+	if err := r.TryStart(cmd); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// After start, PID file should exist
+	if _, err := os.Stat(pidfile); err != nil {
+		t.Fatalf("pidfile missing after start: %v", err)
+	}
+	// DetectAlive should report true via exec:pid
+	if ok, src := r.DetectAlive(); !ok || !strings.Contains(src, "exec:pid") {
+		t.Fatalf("DetectAlive expected true,exec:pid got %v,%q", ok, src)
+	}
+	// Close writers should be safe even if defaults (devnull) were used
+	r.CloseWriters()
+	// Stop process by sending SIGKILL to its pgid via syscall.Kill in manager is not available here;
+	// instead wait for natural exit and then remove pid file.
+	c := r.CopyCmd()
+	_ = c.Process.Kill()
+	_, _ = c.Process.Wait()
+	r.CloseWaitDone()
+	r.MarkExited(nil)
+
+	// RemovePIDFile should remove the file and be idempotent
+	r.RemovePIDFile()
+	if _, err := os.Stat(pidfile); !os.IsNotExist(err) {
+		t.Fatalf("pidfile should be removed, stat err=%v", err)
+	}
+	r.RemovePIDFile() // second time should be no-op
+
+	// Now DetectAlive should return false
+	if ok, _ := r.DetectAlive(); ok {
+		t.Fatalf("DetectAlive expected false after exit")
+	}
+}
+
+func TestDetectorsAndUpdateSpec(t *testing.T) {
+	requireUnix(t)
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "p.pid")
+	r := New(Spec{Name: "d", Command: "sleep 0.2", PIDFile: pidfile})
+	// with PIDFile set, detectors should include pidfile detector
+	dets := r.detectors()
+	if len(dets) == 0 {
+		t.Fatalf("expected at least one detector")
+	}
+	found := false
+	for _, d := range dets {
+		if strings.HasPrefix(d.Describe(), "pidfile:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected pidfile detector present")
+	}
+	// UpdateSpec should change fields used by ConfigureCmd
+	work := filepath.Join(dir, "work")
+	_ = os.MkdirAll(work, 0o755)
+	r.UpdateSpec(Spec{Name: "d", Command: "sh -c 'exit 0'", WorkDir: work})
+	cmd := r.ConfigureCmd([]string{"X=1"})
+	if cmd.Dir != work {
+		t.Fatalf("ConfigureCmd did not apply updated WorkDir: %q", cmd.Dir)
+	}
+	if len(cmd.Env) == 0 || cmd.Env[0] != "X=1" {
+		t.Fatalf("ConfigureCmd did not apply merged env")
+	}
+	// Start to ensure nothing crashes with updated spec
+	_ = r.TryStart(cmd)
+	// Wait quickly
+	c := r.CopyCmd()
+	_ = c.Wait()
+	r.CloseWaitDone()
+	r.MarkExited(nil)
+	// ensure EnforceStartDuration with 0 is no-op
+	if err := r.EnforceStartDuration(0); err != nil {
+		t.Fatalf("EnforceStartDuration(0) unexpected err: %v", err)
+	}
+}
