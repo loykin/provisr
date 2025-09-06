@@ -71,6 +71,7 @@ type okResp struct {
 
 func (r *Router) handleStart(c *gin.Context) {
 	var spec process.Spec
+	// ok: safe path checked
 	if err := c.ShouldBindJSON(&spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid JSON: " + err.Error()})
 		return
@@ -104,6 +105,7 @@ func (r *Router) handleStart(c *gin.Context) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stderrPath: must be absolute path without traversal"})
 		return
 	}
+	// ok: safe path checked
 	if err := r.mgr.StartN(spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return

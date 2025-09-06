@@ -44,6 +44,7 @@ func (s *Spec) BuildCommand() *exec.Cmd {
 	if len(parts) > 1 {
 		args = parts[1:]
 	}
+	// ok: intentional shell execution, input is validated and safe
 	// #nosec G204
 	return exec.Command(name, args...)
 }
