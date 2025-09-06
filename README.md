@@ -42,6 +42,10 @@ provisr group-start --config config/config.toml --group backend
     - POST {base}/stop — query: name= or base= or wildcard= (exactly one), optional wait=duration
     - GET {base}/status — query: name= or base= or wildcard= (exactly one)
 - JSON fields are explicitly tagged (e.g., status fields like running, pid, started_at).
+- Input validation: the server validates spec inputs to avoid unsafe filesystem path usage.
+    - name: must match [A-Za-z0-9._-], must not contain ".." or path separators.
+    - work_dir, pid_file, log.dir, log.stdoutPath, log.stderrPath: if provided, must be absolute paths
+      without traversal (cleaned form only, e.g., no "..").
 
 Examples (assuming server running on localhost:8080 and base /api):
 
@@ -80,6 +84,7 @@ provisr serve --config config/config.toml
 ```
 
 Notes:
+
 - The server reads the [http_api] section from the TOML file.
 - You can override config via flags: `--api-listen` and `--api-base`.
 - If `http_api.enabled` is false or missing, you must provide `--api-listen` to start anyway.
@@ -125,3 +130,10 @@ API_BASE=/api go run .
 - examples/embedded_metrics_add — custom metrics
 - examples/embedded_config_file — config-driven
 - examples/embedded_config_structure — struct-driven configuration
+
+## Security notes
+
+- The HTTP API performs input validation for process specs to mitigate uncontrolled path usage (CodeQL: "Uncontrolled
+  data used in path expression").
+- Even with validation, run the server with least privileges and restrict log directories and pid file locations to
+  trusted paths.
