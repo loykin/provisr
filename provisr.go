@@ -6,11 +6,13 @@ import (
 
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cron"
+	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
 	pg "github.com/loykin/provisr/internal/process_group"
 	iapi "github.com/loykin/provisr/internal/server"
+	storfactory "github.com/loykin/provisr/internal/store/factory"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -26,9 +28,27 @@ type Status = process.Status
 
 type Manager struct{ inner *manager.Manager }
 
+type HistoryConfig = cfg.HistoryConfig
+
+type HistorySink = history.Sink
+
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
 func (m *Manager) SetGlobalEnv(kvs []string) { m.inner.SetGlobalEnv(kvs) }
+
+// SetStoreFromDSN Store controls
+func (m *Manager) SetStoreFromDSN(dsn string) error {
+	s, err := storfactory.NewFromDSN(dsn)
+	if err != nil {
+		return err
+	}
+	return m.inner.SetStore(s)
+}
+func (m *Manager) DisableStore() { _ = m.inner.SetStore(nil) }
+
+// History controls (facade)
+func (m *Manager) SetHistorySinks(sinks ...HistorySink) { m.inner.SetHistorySinks(sinks...) }
+func (m *Manager) SetStoreHistoryEnabled(enabled bool)  { m.inner.SetStoreHistoryEnabled(enabled) }
 
 func (m *Manager) Start(s Spec) error  { return m.inner.Start(s) }
 func (m *Manager) StartN(s Spec) error { return m.inner.StartN(s) }
@@ -39,6 +59,11 @@ func (m *Manager) StopAll(base string, wait time.Duration) error { return m.inne
 func (m *Manager) Status(name string) (Status, error)            { return m.inner.Status(name) }
 func (m *Manager) StatusAll(base string) ([]Status, error)       { return m.inner.StatusAll(base) }
 func (m *Manager) Count(base string) (int, error)                { return m.inner.Count(base) }
+
+// Reconcile controls
+func (m *Manager) ReconcileOnce()                  { m.inner.ReconcileOnce() }
+func (m *Manager) StartReconciler(d time.Duration) { m.inner.StartReconciler(d) }
+func (m *Manager) StopReconciler()                 { m.inner.StopReconciler() }
 
 // Group facade
 
@@ -80,6 +105,8 @@ func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsF
 // HTTP API helpers
 
 func LoadHTTPAPI(path string) (*cfg.HTTPAPIConfig, error) { return cfg.LoadHTTPAPIFromTOML(path) }
+func LoadStore(path string) (*cfg.StoreConfig, error)     { return cfg.LoadStoreFromTOML(path) }
+func LoadHistory(path string) (*cfg.HistoryConfig, error) { return cfg.LoadHistoryFromTOML(path) }
 
 // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
 func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
@@ -104,4 +131,18 @@ func ServeMetrics(addr string) error {
 		IdleTimeout:       60 * time.Second,
 	}
 	return srv.ListenAndServe()
+}
+
+// History sink constructors (public convenience)
+func NewOpenSearchHistorySink(baseURL, index string) HistorySink {
+	return history.NewOpenSearchSink(baseURL, index)
+}
+func NewClickHouseHistorySink(baseURL, table string) HistorySink {
+	return history.NewClickHouseSink(baseURL, table)
+}
+func NewSQLHistorySinkFromDSN(dsn string) HistorySink {
+	if s, err := history.NewSQLSinkFromDSN(dsn); err == nil {
+		return s
+	}
+	return nil
 }

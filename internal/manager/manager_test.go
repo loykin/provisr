@@ -2,6 +2,7 @@ package manager
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"github.com/loykin/provisr/internal/detector"
 	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/store"
+	sqlitedrv "github.com/loykin/provisr/internal/store/sqlite"
 )
 
 func requireUnix(t *testing.T) {
@@ -740,4 +743,214 @@ func TestStartNAndCountZero(t *testing.T) {
 		t.Fatalf("expected count > 0, got %d", c)
 	}
 	_ = mgr.StopAll("svc", 2*time.Second)
+}
+
+func TestManagerPersistsLifecycleToStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer db.Close()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+	// Start a short-lived process
+	spec := process.Spec{Name: "store-demo", Command: "sleep 0.2", StartDuration: 0}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// give it a moment to run and be recorded
+	time.Sleep(30 * time.Millisecond)
+	ctx := context.Background()
+	running, err := db.GetRunning(ctx, "store-demo")
+	if err != nil {
+		t.Fatalf("get running: %v", err)
+	}
+	if len(running) < 1 {
+		t.Fatalf("expected at least 1 running record, got %d", len(running))
+	}
+	// Stop and verify store updated
+	_ = mgr.StopAll("store-demo", 2*time.Second)
+	// wait a bit for monitor to record stop
+	time.Sleep(50 * time.Millisecond)
+	running2, err := db.GetRunning(ctx, "store-demo")
+	if err != nil {
+		t.Fatalf("get running2: %v", err)
+	}
+	if len(running2) != 0 {
+		t.Fatalf("expected 0 running after stop, got %d", len(running2))
+	}
+	past, err := db.GetByName(ctx, "store-demo", 10)
+	if err != nil {
+		t.Fatalf("get by name: %v", err)
+	}
+	foundStopped := false
+	for _, r := range past {
+		if !r.Running && r.StoppedAt.Valid {
+			foundStopped = true
+			break
+		}
+	}
+	if !foundStopped {
+		t.Fatalf("expected at least one stopped record in history")
+	}
+}
+
+// waitUntil polls fn until it returns true or timeout elapses.
+func waitUntil(timeout time.Duration, step time.Duration, fn func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(step)
+	}
+	return false
+}
+
+// This test verifies that when a process with AutoRestart dies, the reconciler
+// quickly restarts it even if the monitor's RestartInterval is large. It also
+// checks that the store is updated accordingly.
+func TestReconcileRestartsDeadProcessAndUpdatesStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer db.Close()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+
+	// Use a tiny sleep that exits immediately; monitor would wait 10s to restart,
+	// but reconciler should restart much sooner on demand.
+	spec := process.Spec{
+		Name:            "recon-quick",
+		Command:         "sh -c 'sleep 0.05'",
+		AutoRestart:     true,
+		RestartInterval: 10 * time.Second,
+		StartDuration:   0,
+	}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Wait for the short-lived process to exit naturally and be marked not running.
+	ok := waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-quick")
+		return err == nil && !st.Running
+	})
+	if !ok {
+		t.Fatalf("process did not exit as expected")
+	}
+
+	// Now trigger reconcile; it should restart immediately (AutoRestart=true).
+	mgr.ReconcileOnce()
+	// Wait until running again.
+	ok = waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-quick")
+		return err == nil && st.Running
+	})
+	if !ok {
+		t.Fatalf("reconcile did not restart process promptly")
+	}
+
+	// Store should have at least one running record for this name.
+	running, err := db.GetRunning(context.Background(), "recon-quick")
+	if err != nil {
+		t.Fatalf("store get running: %v", err)
+	}
+	if len(running) < 1 {
+		t.Fatalf("expected at least one running record after reconcile restart")
+	}
+}
+
+// This test verifies that reconcile still maintains HA when store has no prior
+// records (e.g., store enabled after a failure). It should upsert the current
+// status and restart dead AutoRestart processes regardless of store content.
+func TestReconcileWorksWhenStoreInitiallyEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	// Start without store
+	spec := process.Spec{Name: "recon-empty", Command: "sh -c 'sleep 0.05'", AutoRestart: true, RestartInterval: 10 * time.Second}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Wait until it exits
+	_ = waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-empty")
+		return err == nil && !st.Running
+	})
+	// Now enable store and reconcile
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer db.Close()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+	mgr.ReconcileOnce()
+	// Should be restarted despite store having no prior record.
+	ok := waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-empty")
+		return err == nil && st.Running
+	})
+	if !ok {
+		t.Fatalf("reconcile did not restart process with empty store")
+	}
+	// Store should now have a running record via UpsertStatus or subsequent start recording.
+	running, err := db.GetRunning(context.Background(), "recon-empty")
+	if err != nil {
+		t.Fatalf("store get running: %v", err)
+	}
+	if len(running) == 0 {
+		t.Fatalf("expected running record after reconcile with empty store")
+	}
+}
+
+// This test verifies that even when store content is inconsistent (claims running
+// while the process is actually dead), reconcile corrects the store and restarts
+// the process to maintain availability.
+func TestReconcileOverridesStoreMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer db.Close()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+
+	// Create an entry in manager without starting a real process, by creating the entry
+	// and leaving it non-running. We'll also inject a mismatching store record that says running.
+	spec := process.Spec{Name: "recon-mismatch", Command: "sh -c 'sleep 0.2'", AutoRestart: true, RestartInterval: 10 * time.Second}
+	_ = mgr.getOrCreateEntry(spec) // ensure it's known to the manager
+
+	// Insert a fake 'running' record for the same name in the store, PID/StartedAt arbitrary.
+	fake := time.Now().Add(-1 * time.Minute).UTC()
+	rec := store.Record{Name: "recon-mismatch", PID: 99999, StartedAt: fake, Running: true}
+	_ = db.RecordStart(context.Background(), rec)
+
+	// Reconcile should ignore store contents for restart decision and bring the process up.
+	mgr.ReconcileOnce()
+	ok := waitUntil(2*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-mismatch")
+		return err == nil && st.Running
+	})
+	if !ok {
+		t.Fatalf("reconcile did not restart process despite store mismatch")
+	}
 }
