@@ -604,3 +604,140 @@ func TestManage100Processes(t *testing.T) {
 		}
 	}
 }
+
+func TestStopUnknownProcess(t *testing.T) {
+	mgr := NewManager()
+	err := mgr.Stop("nope", 10*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected error stopping unknown process")
+	}
+}
+
+func TestWildcardMatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		pat   string
+		input string
+		want  bool
+	}{
+		{"empty", "", "abc", false},
+		{"star", "*", "anything", true},
+		{"exact_ok", "abc", "abc", true},
+		{"exact_no", "abc", "abcd", false},
+		{"prefix", "abc*", "abcdef", true},
+		{"suffix", "*def", "abcdef", true},
+		{"middle", "a*c", "abc", true},
+		{"multi_mid", "a*b*c", "axxbyyc", true},
+		{"order_required", "a*b*c", "abxcby", false},
+		{"no_star_diff", "name", "naMe", false},
+		{"double_star", "a**c", "abc", true},
+	}
+	for _, c := range cases {
+		if got := wildcardMatch(c.input, c.pat); got != c.want {
+			t.Fatalf("%s: wildcardMatch(%q,%q)=%v want %v", c.name, c.input, c.pat, got, c.want)
+		}
+	}
+}
+
+func TestRetryParams(t *testing.T) {
+	s := process.Spec{RetryCount: -5, RetryInterval: 0}
+	att, intv := retryParams(s)
+	if att != 0 {
+		t.Fatalf("attempts want 0 got %d", att)
+	}
+	if intv != 500*time.Millisecond {
+		t.Fatalf("interval want 500ms got %v", intv)
+	}
+	// custom values preserved
+	s = process.Spec{RetryCount: 3, RetryInterval: 123 * time.Millisecond}
+	att, intv = retryParams(s)
+	if att != 3 || intv != 123*time.Millisecond {
+		t.Fatalf("got (%d,%v)", att, intv)
+	}
+}
+
+func TestSetGlobalEnvAndMerge(t *testing.T) {
+	mgr := NewManager()
+	mgr.SetGlobalEnv([]string{"G_ONE=1", "G_TWO=2"})
+	// per-process overrides global; NEW expands using merged map (perProc value)
+	s := process.Spec{}
+	merged := mgr.mergedEnvFor(process.Spec{Env: []string{"G_ONE=9", "NEW=${G_ONE}-${G_TWO}"}})
+	// Build a map for assertions
+	m := map[string]string{}
+	for _, kv := range merged {
+		for i := 0; i < len(kv); i++ {
+			if kv[i] == '=' {
+				m[kv[:i]] = kv[i+1:]
+				break
+			}
+		}
+	}
+	if m["G_ONE"] != "9" {
+		t.Fatalf("per-process should override global: G_ONE=%q", m["G_ONE"])
+	}
+	if m["G_TWO"] != "2" {
+		t.Fatalf("global should be present: G_TWO=%q", m["G_TWO"])
+	}
+	if m["NEW"] != "9-2" {
+		t.Fatalf("expand should use merged values: NEW=%q", m["NEW"])
+	}
+	_ = s
+}
+
+func TestStatusMatchAndStopMatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	// Start three processes: web-1, web-2, api-1
+	for _, n := range []string{"web-1", "web-2", "api-1"} {
+		if err := mgr.Start(process.Spec{Name: n, Command: "sleep 1"}); err != nil {
+			t.Fatalf("start %s: %v", n, err)
+		}
+	}
+	// Allow to start
+	time.Sleep(20 * time.Millisecond)
+	// Match web-* should return 2
+	sts, err := mgr.StatusMatch("web-*")
+	if err != nil {
+		t.Fatalf("statusmatch: %v", err)
+	}
+	if len(sts) != 2 {
+		t.Fatalf("expected 2 matched, got %d", len(sts))
+	}
+	// Stop only web-* and ensure api-1 is still running
+	_ = mgr.StopMatch("web-*", 2*time.Second) // stopping may report exit error; tolerate it
+	st, _ := mgr.Status("api-1")
+	if !st.Running {
+		t.Fatalf("api-1 should still be running")
+	}
+}
+
+func TestStartNAndCountZero(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	// Count unknown base returns 0 without error
+	if c, err := mgr.Count("none"); err != nil || c != 0 {
+		t.Fatalf("count none want 0,nil got %d,%v", c, err)
+	}
+	spec := process.Spec{Name: "svc", Command: "sleep 1", Instances: 3}
+	if err := mgr.StartN(spec); err != nil {
+		t.Fatalf("startN: %v", err)
+	}
+	// Give a brief time to start
+	time.Sleep(20 * time.Millisecond)
+	sts, err := mgr.StatusAll("svc")
+	if err != nil {
+		t.Fatalf("statusAll: %v", err)
+	}
+	if len(sts) != 3 {
+		t.Fatalf("expected 3 instances, got %d", len(sts))
+	}
+	c, _ := mgr.Count("svc")
+	if c == 0 { // be lenient due to race, but should be >0 typically
+		t.Fatalf("expected count > 0, got %d", c)
+	}
+	_ = mgr.StopAll("svc", 2*time.Second)
+}
