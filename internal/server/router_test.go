@@ -110,3 +110,88 @@ func TestWildcardStatusAndStop(t *testing.T) {
 		t.Fatalf("stop expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestStartInvalidNameAndPaths(t *testing.T) {
+	h := setupRouter(t, "")
+	// invalid name
+	rec := doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "../bad", "command": "go version"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid name expected 400, got %d", rec.Code)
+	}
+	// invalid workdir (relative)
+	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "work_dir": "rel/path"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid workdir expected 400, got %d", rec.Code)
+	}
+	// invalid pid file (relative)
+	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "pid_file": "pid.pid"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid pidfile expected 400, got %d", rec.Code)
+	}
+	// invalid log paths (relative)
+	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "log": map[string]any{"dir": "logs"}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid log.dir expected 400, got %d", rec.Code)
+	}
+	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "log": map[string]any{"stdoutPath": "out.log"}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid log.stdoutPath expected 400, got %d", rec.Code)
+	}
+	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "log": map[string]any{"stderrPath": "err.log"}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid log.stderrPath expected 400, got %d", rec.Code)
+	}
+}
+
+func TestSelectorsMutualExclusion(t *testing.T) {
+	h := setupRouter(t, "")
+	// stop: too many selectors
+	rec := doReq(t, h, http.MethodPost, "/stop?name=a&base=b", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("stop too many selectors expected 400, got %d", rec.Code)
+	}
+	// status: too many selectors
+	rec = doReq(t, h, http.MethodGet, "/status?name=a&wildcard=*", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status too many selectors expected 400, got %d", rec.Code)
+	}
+}
+
+func TestStartThenStatusByBaseAndName(t *testing.T) {
+	h := setupRouter(t, "/api/") // ensure base sanitization works
+	// successful start
+	startBody := map[string]any{
+		"name":    "svc",
+		"command": "go version",
+	}
+	rec := doReq(t, h, http.MethodPost, "/api/start", startBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("start expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// status by base should return an array (len>=1)
+	rec = doReq(t, h, http.MethodGet, "/api/status?base=svc", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status base expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var arr []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &arr)
+	if len(arr) < 1 {
+		t.Fatalf("expected at least 1 status, got %d", len(arr))
+	}
+	// status by name should return an object
+	rec = doReq(t, h, http.MethodGet, "/api/status?name=svc", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status name expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNewServerStartClose(t *testing.T) {
+	// ensure NewServer returns a server and can be closed quickly
+	mgr := mng.NewManager()
+	srv, err := NewServer("127.0.0.1:0", "/x", mgr)
+	if err != nil {
+		t.Fatalf("NewServer error: %v", err)
+	}
+	// Close immediately; we don't assert more here, just exercise the code path
+	_ = srv.Close()
+}

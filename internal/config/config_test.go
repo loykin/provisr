@@ -267,3 +267,231 @@ startsecs = "300ms"
 		t.Fatalf("expected elapsed around retries/start window, got %v", elapsed)
 	}
 }
+
+func TestLoadSpecsUnknownDetector(t *testing.T) {
+	dir := t.TempDir()
+	toml := `
+[[processes]]
+name = "x"
+command = "true"
+[[processes.detectors]]
+type = "unknown"
+`
+	p := filepath.Join(dir, "c.toml")
+	if err := os.WriteFile(p, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSpecsFromTOML(p); err == nil {
+		t.Fatalf("expected error for unknown detector type")
+	}
+}
+
+func TestLoadCronJobsInvalidFlags(t *testing.T) {
+	dir := t.TempDir()
+	// autorestart true -> error
+	toml1 := `
+[[processes]]
+name = "a"
+command = "true"
+schedule = "@every 1s"
+autorestart = true
+`
+	p1 := filepath.Join(dir, "a.toml")
+	if err := os.WriteFile(p1, []byte(toml1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCronJobsFromTOML(p1); err == nil {
+		t.Fatalf("expected error for autorestart=true in cron job")
+	}
+	// instances > 1 -> error
+	toml2 := `
+[[processes]]
+name = "b"
+command = "true"
+schedule = "@every 1s"
+instances = 2
+`
+	p2 := filepath.Join(dir, "b.toml")
+	if err := os.WriteFile(p2, []byte(toml2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCronJobsFromTOML(p2); err == nil {
+		t.Fatalf("expected error for instances>1 in cron job")
+	}
+}
+
+func TestLoadEnvFileInvalidPath(t *testing.T) {
+	if _, err := LoadEnvFile("/definitely/not/exist.env"); err == nil {
+		t.Fatalf("expected error for missing env file")
+	}
+}
+
+func TestLoadEnvFromTOML_TopLevelOnly(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.toml")
+	// env_files should be ignored by LoadEnvFromTOML; only top-level env returned
+	dotenv := filepath.Join(dir, ".env")
+	_ = os.WriteFile(dotenv, []byte("A=1\n"), 0o644)
+	data := "" +
+		"env = [\"X=9\", \"Y=2\"]\n" +
+		"env_files = [\"" + dotenv + "\"]\n"
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pairs, err := LoadEnvFromTOML(p)
+	if err != nil {
+		t.Fatalf("LoadEnvFromTOML: %v", err)
+	}
+	if len(pairs) != 2 { // only X and Y
+		t.Fatalf("expected 2 items, got %d: %v", len(pairs), pairs)
+	}
+}
+
+func TestLoadEnvFile_MalformedLinesIgnored(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, ".env")
+	content := "#comment\n\nNOEQUAL\nKEY=VAL\nTRAIL= space \n =noval\n" // malformed lines should be ignored, spaces trimmed
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pairs, err := LoadEnvFile(p)
+	if err != nil {
+		t.Fatalf("LoadEnvFile: %v", err)
+	}
+	m := map[string]string{}
+	for _, kv := range pairs {
+		for i := 0; i < len(kv); i++ {
+			if kv[i] == '=' {
+				m[kv[:i]] = kv[i+1:]
+				break
+			}
+		}
+	}
+	if m["KEY"] != "VAL" {
+		t.Fatalf("expected KEY=VAL, got %v", m)
+	}
+	if m["TRAIL"] != "space" { // trimmed
+		t.Fatalf("expected TRAIL=space, got %v", m["TRAIL"])
+	}
+}
+
+func TestMergeLogCfgPrecedenceViaSpecs(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.toml")
+	data := `
+log = { dir = "/tmp/base", stdout = "/tmp/base.out", stderr = "/tmp/base.err", max_size_mb = 10, max_backups = 2, max_age_days = 7, compress = true }
+[[processes]]
+name = "svc"
+command = "true"
+log = { dir = "/tmp/ovr", stdout = "/tmp/ovr.out", max_size_mb = 20 }
+`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	specs, err := LoadSpecsFromTOML(p)
+	if err != nil {
+		t.Fatalf("LoadSpecsFromTOML: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 spec")
+	}
+	lg := specs[0].Log
+	// per-process overrides Dir, StdoutPath, MaxSizeMB; others inherited from top-level
+	if lg.Dir != "/tmp/ovr" || lg.StdoutPath != "/tmp/ovr.out" || lg.StderrPath != "/tmp/base.err" || lg.MaxSizeMB != 20 || lg.MaxBackups != 2 || lg.MaxAgeDays != 7 || !lg.Compress {
+		t.Fatalf("unexpected merged log cfg: %+v", lg)
+	}
+}
+
+func TestLoadGroupsFromTOML_Errors(t *testing.T) {
+	dir := t.TempDir()
+	base := `
+[[processes]]
+name = "a"
+command = "true"
+`
+	// missing name
+	p1 := filepath.Join(dir, "g1.toml")
+	_ = os.WriteFile(p1, []byte(base+"\n[[groups]]\nmembers=[\"a\"]\n"), 0o644)
+	if _, err := LoadGroupsFromTOML(p1); err == nil {
+		t.Fatalf("expected error for missing group name")
+	}
+	// empty members
+	p2 := filepath.Join(dir, "g2.toml")
+	_ = os.WriteFile(p2, []byte(base+"\n[[groups]]\nname=\"g\"\nmembers=[]\n"), 0o644)
+	if _, err := LoadGroupsFromTOML(p2); err == nil {
+		t.Fatalf("expected error for empty members")
+	}
+	// unknown member
+	p3 := filepath.Join(dir, "g3.toml")
+	_ = os.WriteFile(p3, []byte(base+"\n[[groups]]\nname=\"g\"\nmembers=[\"x\"]\n"), 0o644)
+	if _, err := LoadGroupsFromTOML(p3); err == nil {
+		t.Fatalf("expected error for unknown member")
+	}
+}
+
+func TestLoadCronJobs_SingletonDefaultAndExplicit(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "cron.toml")
+	data := `
+[[processes]]
+name = "a"
+command = "true"
+schedule = "@every 1s"
+# no singleton -> default true
+
+[[processes]]
+name = "b"
+command = "true"
+schedule = "@every 1s"
+singleton = false
+`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	jobs, err := LoadCronJobsFromTOML(p)
+	if err != nil {
+		t.Fatalf("LoadCronJobsFromTOML: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs")
+	}
+	if !jobs[0].Singleton {
+		t.Fatalf("expected default singleton=true")
+	}
+	if jobs[1].Singleton {
+		t.Fatalf("expected explicit singleton=false")
+	}
+}
+
+func TestLoadHTTPAPIFromTOML_PresentAndAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "a.toml")
+	p2 := filepath.Join(dir, "b.toml")
+	data1 := `
+[http_api]
+enabled = true
+listen = ":9000"
+base_path = "/api"
+`
+	if err := os.WriteFile(p1, []byte(data1), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := LoadHTTPAPIFromTOML(p1)
+	if err != nil {
+		t.Fatalf("LoadHTTPAPIFromTOML: %v", err)
+	}
+	if cfg == nil || !cfg.Enabled || cfg.Listen != ":9000" || cfg.BasePath != "/api" {
+		t.Fatalf("unexpected http api cfg: %+v", cfg)
+	}
+	// absent section
+	if err := os.WriteFile(p2, []byte("# no http_api\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg2, err := LoadHTTPAPIFromTOML(p2)
+	if err != nil {
+		t.Fatalf("LoadHTTPAPIFromTOML: %v", err)
+	}
+	if cfg2 != nil {
+		t.Fatalf("expected nil cfg when section absent, got %+v", cfg2)
+	}
+}
