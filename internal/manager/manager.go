@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -8,15 +10,20 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/internal/env"
+	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/store"
 )
 
 // Manager starts, stops, and monitors processes.
 type Manager struct {
-	mu    sync.Mutex
-	procs map[string]*entry
-	envM  *env.Env
+	mu        sync.Mutex
+	procs     map[string]*entry
+	envM      *env.Env
+	st        store.Store
+	reconStop chan struct{}
+	histSinks []history.Sink
 }
 
 type entry struct {
@@ -37,6 +44,8 @@ func (m *Manager) monitor(e *entry) {
 		// notify waiters and mark status
 		e.r.CloseWaitDone()
 		e.r.MarkExited(err)
+		// persist stop in store (best-effort)
+		m.recordStop(e, err)
 		stopping := e.r.StopRequested()
 		autoRestart := e.spec.AutoRestart
 		interval2 := e.spec.RestartInterval
@@ -57,6 +66,82 @@ func (m *Manager) monitor(e *entry) {
 }
 
 func NewManager() *Manager { return &Manager{procs: make(map[string]*entry), envM: env.New()} }
+
+// SetHistorySinks configures external history sinks (OpenSearch, ClickHouse, etc.).
+// Passing nil or no sinks clears the list.
+func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
+	m.mu.Lock()
+	m.histSinks = append([]history.Sink(nil), sinks...)
+	m.mu.Unlock()
+}
+
+// SetStore configures a persistence store used to record process lifecycle events.
+// It ensures the schema and stores the instance for subsequent writes.
+func (m *Manager) SetStore(s store.Store) error {
+	m.mu.Lock()
+	m.st = s
+	m.mu.Unlock()
+	if s == nil {
+		return nil
+	}
+	return s.EnsureSchema(context.Background())
+}
+
+// SetStoreHistoryEnabled toggles append-only history recording inside the configured store.
+func (m *Manager) SetStoreHistoryEnabled(enabled bool) {
+	// Deprecated: history persistence is handled via history sinks now.
+	// This method is kept for backward compatibility and is a no-op.
+}
+
+func (m *Manager) recordStart(e *entry) {
+	m.mu.Lock()
+	st := m.st
+	sinks := append([]history.Sink(nil), m.histSinks...)
+	m.mu.Unlock()
+	rs := e.r.Snapshot()
+	rec := store.Record{
+		Name:      rs.Name,
+		PID:       rs.PID,
+		StartedAt: rs.StartedAt,
+	}
+	if st != nil {
+		_ = st.RecordStart(context.Background(), rec)
+	}
+	if len(sinks) > 0 {
+		evt := history.Event{Type: history.EventStart, OccurredAt: time.Now().UTC(), Record: rec}
+		for _, s := range sinks {
+			_ = s.Send(context.Background(), evt)
+		}
+	}
+}
+
+func (m *Manager) recordStop(e *entry, exitErr error) {
+	m.mu.Lock()
+	st := m.st
+	sinks := append([]history.Sink(nil), m.histSinks...)
+	m.mu.Unlock()
+	rs := e.r.Snapshot()
+	uniq := store.UniqueKey(rs.PID, rs.StartedAt)
+	if st != nil {
+		_ = st.RecordStop(context.Background(), uniq, rs.StoppedAt, exitErr)
+	}
+	if len(sinks) > 0 {
+		rec := store.Record{
+			Name:      rs.Name,
+			PID:       rs.PID,
+			StartedAt: rs.StartedAt,
+			StoppedAt: sql.NullTime{Time: rs.StoppedAt, Valid: !rs.StoppedAt.IsZero()},
+			Running:   false,
+		}
+		if exitErr != nil {
+			rec.ExitErr = sql.NullString{String: exitErr.Error(), Valid: true}
+		}
+		evt := history.Event{Type: history.EventStop, OccurredAt: time.Now().UTC(), Record: rec}
+		for _, s := range sinks {
+			_ = s.Send(context.Background(), evt)
+		}
+	}
+}
 
 // SetGlobalEnv sets global environment variables affecting all processes managed by this Manager.
 // kvs must be in the form "KEY=VALUE".
@@ -98,6 +183,8 @@ func (m *Manager) Start(spec process.Spec) error {
 			}
 			return lastErr
 		}
+		// persist start in store (best-effort)
+		m.recordStart(e)
 		if err := m.postStart(e, spec); err != nil {
 			lastErr = err
 			if i < attempts {
@@ -395,4 +482,86 @@ func (m *Manager) postStart(e *entry, spec process.Spec) error {
 		metrics.ObserveStartDuration(spec.Name, spec.StartDuration.Seconds())
 	}
 	return nil
+}
+
+// ReconcileOnce checks current managed processes against reality and updates the store.
+// It also attempts to auto-restart processes that should be running but are not.
+func (m *Manager) ReconcileOnce() {
+	m.mu.Lock()
+	st := m.st
+	entries := make([]*entry, 0, len(m.procs))
+	for _, e := range m.procs {
+		entries = append(entries, e)
+	}
+	m.mu.Unlock()
+	if len(entries) == 0 && st == nil {
+		return
+	}
+	ctx := context.Background()
+	for _, e := range entries {
+		alive, _ := e.r.DetectAlive()
+		rs := e.r.Snapshot()
+		if st != nil {
+			rec := store.Record{
+				Name:      e.spec.Name,
+				PID:       rs.PID,
+				StartedAt: rs.StartedAt,
+				Running:   alive,
+			}
+			if !alive && !rs.StoppedAt.IsZero() {
+				rec.StoppedAt = sql.NullTime{Time: rs.StoppedAt, Valid: true}
+			}
+			if rs.ExitErr != nil {
+				rec.ExitErr = sql.NullString{String: rs.ExitErr.Error(), Valid: true}
+			}
+			_ = st.UpsertStatus(ctx, rec)
+			// If we still think it was running but it's not, ensure a stop record exists.
+			if !alive && rs.Running {
+				uniq := store.UniqueKey(rs.PID, rs.StartedAt)
+				_ = st.RecordStop(ctx, uniq, time.Now().UTC(), fmt.Errorf("lost (reconciler)"))
+			}
+		}
+		// Auto-restart policy enforcement (best-effort)
+		if !alive && e.spec.AutoRestart && !e.r.StopRequested() {
+			_ = m.Start(e.spec)
+		}
+	}
+}
+
+// StartReconciler starts a background loop that periodically calls ReconcileOnce.
+func (m *Manager) StartReconciler(interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	m.mu.Lock()
+	if m.reconStop != nil {
+		m.mu.Unlock()
+		return // already running
+	}
+	stop := make(chan struct{})
+	m.reconStop = stop
+	m.mu.Unlock()
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				m.ReconcileOnce()
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+// StopReconciler stops the background reconcile loop if running.
+func (m *Manager) StopReconciler() {
+	m.mu.Lock()
+	ch := m.reconStop
+	m.reconStop = nil
+	m.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
 }

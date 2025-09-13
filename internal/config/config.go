@@ -32,6 +32,22 @@ type FileConfig struct {
 	Processes []ProcConfig   `toml:"processes" mapstructure:"processes"`
 	Groups    []GroupConfig  `toml:"groups" mapstructure:"groups"`
 	HTTP      *HTTPAPIConfig `toml:"http_api" mapstructure:"http_api"`
+	Store     *StoreConfig   `toml:"store" mapstructure:"store"`
+	History   *HistoryConfig `toml:"history" mapstructure:"history"`
+}
+
+type StoreConfig struct {
+	Enabled bool   `toml:"enabled" mapstructure:"enabled"`
+	DSN     string `toml:"dsn" mapstructure:"dsn"`
+}
+
+type HistoryConfig struct {
+	Enabled         bool   `toml:"enabled" mapstructure:"enabled"`
+	InStore         *bool  `toml:"in_store" mapstructure:"in_store"` // nil means default (true)
+	OpenSearchURL   string `toml:"opensearch_url" mapstructure:"opensearch_url"`
+	OpenSearchIndex string `toml:"opensearch_index" mapstructure:"opensearch_index"`
+	ClickHouseURL   string `toml:"clickhouse_url" mapstructure:"clickhouse_url"`
+	ClickHouseTable string `toml:"clickhouse_table" mapstructure:"clickhouse_table"`
 }
 
 type LogConfig struct {
@@ -416,4 +432,34 @@ func LoadHTTPAPIFromTOML(path string) (*HTTPAPIConfig, error) {
 		return nil, err
 	}
 	return fc.HTTP, nil
+}
+
+// LoadStoreFromTOML loads optional store configuration. Returns (nil, nil) if absent.
+func LoadStoreFromTOML(path string) (*StoreConfig, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("toml")
+	if err := v.ReadInConfig(); err != nil {
+		return nil, err
+	}
+	var fc FileConfig
+	if err := v.Unmarshal(&fc); err != nil {
+		return nil, err
+	}
+	return fc.Store, nil
+}
+
+// LoadHistoryFromTOML loads optional history configuration. Returns (nil, nil) if absent.
+func LoadHistoryFromTOML(path string) (*HistoryConfig, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("toml")
+	if err := v.ReadInConfig(); err != nil {
+		return nil, err
+	}
+	var fc FileConfig
+	if err := v.Unmarshal(&fc); err != nil {
+		return nil, err
+	}
+	return fc.History, nil
 }

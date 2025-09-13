@@ -42,6 +42,14 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 		apiListen       string
 		apiBase         string
 		nonBlocking     bool
+		storeDSN        string
+		noStore         bool
+		// history flags
+		histDisableStore bool
+		histOSURL        string
+		histOSIndex      string
+		histCHURL        string
+		histCHTable      string
 	)
 
 	root := &cobra.Command{Use: "provisr"}
@@ -50,6 +58,14 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 	root.PersistentFlags().StringSliceVar(&envKVs, "env", nil, "additional KEY=VALUE to inject (repeatable)")
 	root.PersistentFlags().StringSliceVar(&envFiles, "env-file", nil, "path to .env file(s) with KEY=VALUE lines (repeatable)")
 	root.PersistentFlags().StringVar(&metricsListen, "metrics-listen", "", "address to serve Prometheus /metrics (e.g., :9090)")
+	root.PersistentFlags().StringVar(&storeDSN, "store-dsn", "", "enable persistent store with DSN (e.g., sqlite:///path.db or postgres://...")
+	root.PersistentFlags().BoolVar(&noStore, "no-store", false, "disable persistent store even if configured")
+	// history-related flags
+	root.PersistentFlags().BoolVar(&histDisableStore, "history-disable-store", false, "do not record history rows in the persistent store")
+	root.PersistentFlags().StringVar(&histOSURL, "history-opensearch-url", "", "OpenSearch base URL (e.g., http://localhost:9200)")
+	root.PersistentFlags().StringVar(&histOSIndex, "history-opensearch-index", "", "OpenSearch index name for history (e.g., provisr-history)")
+	root.PersistentFlags().StringVar(&histCHURL, "history-clickhouse-url", "", "ClickHouse HTTP endpoint (e.g., http://localhost:8123)")
+	root.PersistentFlags().StringVar(&histCHTable, "history-clickhouse-table", "", "ClickHouse table for history (e.g., default.provisr_history)")
 
 	// start
 	startCmd := &cobra.Command{Use: "start", Short: "Start process(es)", RunE: func(cmd *cobra.Command, args []string) error {
@@ -150,6 +166,64 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 
 	binder := func() {
 		root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+			// Configure persistent store based on flags/config
+			currentDSN := ""
+			if noStore {
+				mgr.DisableStore()
+			} else {
+				dsn := storeDSN
+				if dsn == "" && configPath != "" {
+					if sc, err := provisr.LoadStore(configPath); err == nil && sc != nil && sc.Enabled && sc.DSN != "" {
+						dsn = sc.DSN
+					}
+				}
+				if dsn != "" {
+					_ = mgr.SetStoreFromDSN(dsn)
+					currentDSN = dsn
+				}
+			}
+			// History: configure sinks (store-backed via DSN and/or external ones)
+			var cfgSinks []provisr.HistorySink
+			var inStoreEnabled *bool
+			if configPath != "" {
+				if hc, err := provisr.LoadHistory(configPath); err == nil && hc != nil {
+					inStoreEnabled = hc.InStore
+					if hc.Enabled {
+						if hc.OpenSearchURL != "" && hc.OpenSearchIndex != "" {
+							cfgSinks = append(cfgSinks, provisr.NewOpenSearchHistorySink(hc.OpenSearchURL, hc.OpenSearchIndex))
+						}
+						if hc.ClickHouseURL != "" && hc.ClickHouseTable != "" {
+							cfgSinks = append(cfgSinks, provisr.NewClickHouseHistorySink(hc.ClickHouseURL, hc.ClickHouseTable))
+						}
+					}
+				}
+			}
+			// Flags add external sinks; histDisableStore prevents adding store SQL sink
+			var flagSinks []provisr.HistorySink
+			if histOSURL != "" && histOSIndex != "" {
+				flagSinks = append(flagSinks, provisr.NewOpenSearchHistorySink(histOSURL, histOSIndex))
+			}
+			if histCHURL != "" && histCHTable != "" {
+				flagSinks = append(flagSinks, provisr.NewClickHouseHistorySink(histCHURL, histCHTable))
+			}
+			// Add store-backed SQL sink if we have a DSN and not explicitly disabled
+			if !histDisableStore {
+				// default is enabled when InStore is nil; enable if explicitly true too
+				enableStoreSink := inStoreEnabled == nil || (inStoreEnabled != nil && *inStoreEnabled)
+				if enableStoreSink && currentDSN != "" {
+					if ss := provisr.NewSQLHistorySinkFromDSN(currentDSN); ss != nil {
+						cfgSinks = append(cfgSinks, ss)
+					}
+				}
+			}
+			if len(flagSinks) > 0 {
+				mgr.SetHistorySinks(flagSinks...)
+			} else if len(cfgSinks) > 0 {
+				mgr.SetHistorySinks(cfgSinks...)
+			}
+			// Start background reconciler (idempotent)
+			mgr.StartReconciler(2 * time.Second)
+			// Metrics
 			if metricsListen != "" {
 				go func() {
 					_ = provisr.RegisterMetricsDefault()
