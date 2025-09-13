@@ -3,7 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +21,7 @@ func TestOpenSearchSink_Send(t *testing.T) {
 		if r.URL.Path != "/idx/_doc" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		b, _ := ioutil.ReadAll(r.Body)
+		b, _ := io.ReadAll(r.Body)
 		gotBody = b
 		w.WriteHeader(201)
 	}))
@@ -51,7 +51,7 @@ func TestClickHouseSink_Send(t *testing.T) {
 	var gotBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		b, _ := ioutil.ReadAll(r.Body)
+		b, _ := io.ReadAll(r.Body)
 		gotBody = b
 		w.WriteHeader(200)
 	}))

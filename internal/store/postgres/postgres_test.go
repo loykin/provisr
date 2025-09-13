@@ -8,46 +8,51 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/internal/store"
-	postgrescontainers "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// startPostgresContainer starts a PostgreSQL container for tests and returns
-// a DSN suitable for pgx stdlib. It skips the test if Docker is unavailable.
+// startPostgresContainer starts a PostgreSQL container for tests
+// and returns a DSN suitable for pgx stdlib. It skips the test if Docker is unavailable.
 func startPostgresContainer(t *testing.T) (dsn string, terminate func()) {
 	t.Helper()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	// testcontainers' postgres module will pull a default image and expose a port
-	container, err := postgrescontainers.RunContainer(ctx,
-		postgrescontainers.WithDatabase("testdb"),
-		postgrescontainers.WithUsername("test"),
-		postgrescontainers.WithPassword("test"),
+
+	container, err := postgres.Run(ctx, "postgres:16-alpine",
+		postgres.WithDatabase("testdb"),
+		postgres.WithUsername("test"),
+		postgres.WithPassword("test"),
 	)
 	if err != nil {
 		cancel()
-		t.Skipf("skipping Postgres store tests (cannot start container): %v", err)
+		t.Skipf("Failed to start PostgreSQL container: %v", err)
+		return "", nil // ensure container is never used below
 	}
-	// Build DSN for pgx stdlib
+
+	// container is guaranteed to be non-nil here
 	host, err := container.Host(ctx)
 	if err != nil {
 		_ = container.Terminate(ctx)
 		cancel()
-		t.Skipf("skipping Postgres store tests (host err): %v", err)
+		t.Skipf("Failed to get host info: %v", err)
+		return "", nil
 	}
+
 	port, err := container.MappedPort(ctx, "5432/tcp")
 	if err != nil {
 		_ = container.Terminate(ctx)
 		cancel()
-		t.Skipf("skipping Postgres store tests (port err): %v", err)
+		t.Skipf("Failed to get mapped port: %v", err)
+		return "", nil
 	}
-	user := "test"
-	pass := "test"
-	dbname := "testdb"
-	// Example: postgres://user:pass@host:port/dbname?sslmode=disable
-	dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port.Port(), dbname)
+
+	dsn = fmt.Sprintf("postgres://test:test@%s:%s/testdb?sslmode=disable", host, port.Port())
+
 	terminate = func() {
-		_ = container.Terminate(context.Background())
+		_ = container.Terminate(ctx)
 		cancel()
 	}
+
 	return dsn, terminate
 }
 
@@ -87,7 +92,7 @@ func TestPostgresStoreLifecycleAndQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pg open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	if err := db.EnsureSchema(ctx); err != nil {
 		t.Fatalf("ensure schema: %v", err)
@@ -176,67 +181,5 @@ func TestPostgresStoreLifecycleAndQueries(t *testing.T) {
 	runs4, _ := db.GetRunning(ctx, "pgsvc")
 	if len(runs4) != 1 {
 		t.Fatalf("expected 1 running after purge, got %d", len(runs4))
-	}
-}
-
-func TestPostgresHistoryToggle(t *testing.T) {
-	t.Skip("history moved to internal/history; store drivers no longer handle history")
-	dsn, terminate := startPostgresContainer(t)
-	defer func() {
-		if terminate != nil {
-			terminate()
-		}
-	}()
-	waitForPostgres(t, dsn)
-
-	db, err := New(dsn)
-	if err != nil {
-		t.Fatalf("pg open: %v", err)
-	}
-	defer db.Close()
-	ctx := context.Background()
-	if err := db.EnsureSchema(ctx); err != nil {
-		t.Fatalf("ensure schema: %v", err)
-	}
-
-	start := time.Now().Add(-1 * time.Second).UTC()
-	rec := store.Record{Name: "hxpg", PID: 3333, StartedAt: start}
-	if err := db.RecordStart(ctx, rec); err != nil {
-		t.Fatalf("record start: %v", err)
-	}
-	uniq := rec.Key()
-	var cnt int
-	row := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM process_history WHERE uniq=$1 AND event='start'`, uniq)
-	if err := row.Scan(&cnt); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if cnt != 1 {
-		t.Fatalf("expected 1 start history row, got %d", cnt)
-	}
-
-	if err := db.RecordStop(ctx, uniq, time.Now().UTC(), sql.ErrNoRows); err != nil {
-		t.Fatalf("record stop: %v", err)
-	}
-	row = db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM process_history WHERE uniq=$1`, uniq)
-	if err := row.Scan(&cnt); err != nil {
-		t.Fatalf("scan2: %v", err)
-	}
-	if cnt != 2 {
-		t.Fatalf("expected 2 history rows, got %d", cnt)
-	}
-
-	db.SetHistoryEnabled(false)
-	start2 := time.Now().UTC()
-	rec2 := store.Record{Name: "hxpg", PID: 4444, StartedAt: start2}
-	if err := db.RecordStart(ctx, rec2); err != nil {
-		t.Fatalf("record start2: %v", err)
-	}
-	uniq2 := rec2.Key()
-	row = db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM process_history WHERE uniq=$1`, uniq2)
-	if err := row.Scan(&cnt); err != nil {
-		t.Fatalf("scan3: %v", err)
-	}
-	if cnt != 0 {
-		t.Fatalf("expected 0 rows when history disabled, got %d", cnt)
 	}
 }

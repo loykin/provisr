@@ -15,7 +15,7 @@ func TestSQLiteStoreLifecycleAndQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	if err := db.EnsureSchema(ctx); err != nil {
 		t.Fatalf("ensure schema: %v", err)
