@@ -64,7 +64,7 @@ func NewSQLSinkFromDSN(dsn string) (*SQLSink, error) {
 }
 
 func (s *SQLSink) ensureSchema(ctx context.Context) error {
-	stmts := []string{}
+	var stmts []string
 	if s.dialect == "sqlite" {
 		stmts = []string{
 			`CREATE TABLE IF NOT EXISTS process_history(

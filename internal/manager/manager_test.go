@@ -754,7 +754,7 @@ func TestManagerPersistsLifecycleToStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := mgr.SetStore(db); err != nil {
 		t.Fatalf("set store: %v", err)
 	}
@@ -824,7 +824,7 @@ func TestReconcileRestartsDeadProcessAndUpdatesStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := mgr.SetStore(db); err != nil {
 		t.Fatalf("set store: %v", err)
 	}
@@ -894,7 +894,7 @@ func TestReconcileWorksWhenStoreInitiallyEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := mgr.SetStore(db); err != nil {
 		t.Fatalf("set store: %v", err)
 	}
@@ -929,7 +929,7 @@ func TestReconcileOverridesStoreMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := mgr.SetStore(db); err != nil {
 		t.Fatalf("set store: %v", err)
 	}

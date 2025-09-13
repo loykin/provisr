@@ -140,7 +140,7 @@ func (p *DB) GetByName(ctx context.Context, name string, limit int) ([]store.Rec
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRecords(rows)
 }
 
@@ -154,7 +154,7 @@ func (p *DB) GetRunning(ctx context.Context, namePrefix string) ([]store.Record,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRecords(rows)
 }
 
