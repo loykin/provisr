@@ -169,6 +169,16 @@ func (r *Process) MonitoringStop() {
 	r.mu.Unlock()
 }
 
+// IsMonitoring reports whether a monitor goroutine (e.g., Supervisor) is actively
+// waiting on the underlying process. When true, Stop/Kill must not call cmd.Wait
+// to avoid a race with the monitor; they should instead wait on waitDone.
+func (r *Process) IsMonitoring() bool {
+	r.mu.Lock()
+	v := r.monitoring
+	r.mu.Unlock()
+	return v
+}
+
 func (r *Process) OutErrClosers() (io.WriteCloser, io.WriteCloser) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -270,10 +280,6 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if d <= 0 {
 		return nil
 	}
-	deadline := time.NewTimer(d)
-	defer deadline.Stop()
-	// Also observe waitDone to detect early exit promptly (monitor closes it)
-	wd := r.WaitDoneChan()
 	// Quick check: if process already gone
 	r.mu.Lock()
 	cmd := r.cmd
@@ -281,10 +287,157 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if cmd == nil || cmd.Process == nil {
 		return errBeforeStart(d)
 	}
-	select {
-	case <-wd:
-		return errBeforeStart(d)
-	case <-deadline.C:
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		alive, _ := r.DetectAlive()
+		if !alive {
+			return errBeforeStart(d)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
+func (r *Process) Stop(wait time.Duration) error {
+	alive, _ := r.DetectAlive()
+	if !alive {
 		return nil
 	}
+	r.SetStopRequested(true)
+	cmd := r.CopyCmd()
+	if cmd != nil && cmd.Process != nil {
+		pid := cmd.Process.Pid
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
+		if r.IsMonitoring() {
+			// A supervisor/monitor goroutine is responsible for waiting and state transitions.
+			// Wait on waitDone (closed by monitor) with timeout and escalate if needed.
+			wd := r.WaitDoneChan()
+			if wd != nil {
+				select {
+				case <-wd:
+					// exited and reaped by monitor
+				case <-time.After(wait):
+					_ = syscall.Kill(-pid, syscall.SIGKILL)
+					select {
+					case <-wd:
+						// reaped by monitor after kill
+					case <-time.After(200 * time.Millisecond):
+						// best-effort
+					}
+				}
+			} else {
+				// No wait channel available; fall back to brief sleep and continue.
+				time.Sleep(wait)
+			}
+		} else {
+			// No monitor observed. Try to claim monitoring to ensure single waiter.
+			if r.MonitoringStartIfNeeded() {
+				// We own the wait; perform it and finalize state.
+				ch := make(chan error, 1)
+				go func() {
+					err := cmd.Wait()
+					r.CloseWaitDone()
+					r.MarkExited(err)
+					ch <- err
+				}()
+				select {
+				case <-ch:
+					// done
+				case <-time.After(wait):
+					_ = syscall.Kill(-pid, syscall.SIGKILL)
+					select {
+					case <-ch:
+						// reaped
+					case <-time.After(200 * time.Millisecond):
+						// best-effort
+					}
+				}
+				// When we owned the wait, close writers and release monitoring flag.
+				r.CloseWriters()
+				r.MonitoringStop()
+			} else {
+				// Someone else claimed monitoring concurrently; wait on waitDone instead.
+				wd := r.WaitDoneChan()
+				if wd != nil {
+					select {
+					case <-wd:
+						// reaped by monitor
+					case <-time.After(wait):
+						_ = syscall.Kill(-pid, syscall.SIGKILL)
+						select {
+						case <-wd:
+							// reaped after kill
+						case <-time.After(200 * time.Millisecond):
+							// best-effort
+						}
+					}
+				} else {
+					// No wait channel; brief sleep as last resort.
+					time.Sleep(wait)
+				}
+			}
+		}
+	}
+	// If monitor owned the wait, writers will be closed in the supervisor.
+	rs := r.Snapshot()
+	return rs.ExitErr
+}
+
+// Kill sends SIGKILL to the process group and attempts to reap promptly.
+func (r *Process) Kill() error {
+	cmd := r.CopyCmd()
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	pid := cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	if r.IsMonitoring() {
+		// Let monitor reap; wait on waitDone briefly.
+		wd := r.WaitDoneChan()
+		if wd != nil {
+			select {
+			case <-wd:
+				// reaped by monitor
+			case <-time.After(200 * time.Millisecond):
+				// best-effort
+			}
+		} else {
+			time.Sleep(200 * time.Millisecond)
+		}
+		// writers will be closed by supervisor
+	} else if r.MonitoringStartIfNeeded() {
+		// We successfully claimed monitoring; we own the wait here.
+		ch := make(chan error, 1)
+		go func() {
+			err := cmd.Wait()
+			r.CloseWaitDone()
+			r.MarkExited(err)
+			ch <- err
+		}()
+		select {
+		case <-ch:
+			// ok
+		case <-time.After(200 * time.Millisecond):
+			// best-effort
+		}
+		// Close writers and release monitoring flag when we own the wait.
+		r.CloseWriters()
+		r.MonitoringStop()
+	} else {
+		// Someone else claimed monitoring concurrently.
+		wd := r.WaitDoneChan()
+		if wd != nil {
+			select {
+			case <-wd:
+				// reaped by monitor
+			case <-time.After(200 * time.Millisecond):
+				// best-effort
+			}
+		} else {
+			// last resort
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	rs := r.Snapshot()
+	return rs.ExitErr
 }

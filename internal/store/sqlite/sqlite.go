@@ -29,6 +29,12 @@ func New(path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// For in-memory databases, ensure a single underlying connection so the
+	// schema and data are visible across all operations. With multiple
+	// connections, each would get its own isolated :memory: DB.
+	if p == ":memory:" {
+		d.SetMaxOpenConns(1)
+	}
 	// busy timeout helps with short concurrent locks
 	_, _ = d.Exec("PRAGMA busy_timeout=3000;")
 	return &DB{db: d}, nil
