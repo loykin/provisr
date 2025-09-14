@@ -262,9 +262,10 @@ startsecs = "300ms"
 		t.Fatalf("expected start error for failing command")
 	}
 	elapsed := time.Since(start)
-	// With retries and a 300ms start window, elapsed should be at least ~280ms
-	if elapsed < 2*time.Second {
-		t.Fatalf("expected elapsed around retries/start window, got %v", elapsed)
+	// With startsecs=300ms and immediate retries on early exit, elapsed should be close to the start window,
+	// not too short. Allow some margin for scheduling; require at least ~280ms.
+	if elapsed < 280*time.Millisecond {
+		t.Fatalf("expected elapsed around retries/start window (>=280ms), got %v", elapsed)
 	}
 }
 
