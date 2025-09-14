@@ -1,10 +1,12 @@
 package process
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -252,7 +254,19 @@ func (r *Process) DetectAlive() (bool, string) {
 		return false, ""
 	}
 	if cmd != nil && cmd.Process != nil {
-		if syscall.Kill(-cmd.Process.Pid, 0) == nil {
+		pid := cmd.Process.Pid
+		// On Linux, a quickly-exiting child can be a zombie; treat that as not alive.
+		if runtime.GOOS == "linux" {
+			if isZombieLinux(pid) {
+				return false, ""
+			}
+			if syscall.Kill(pid, 0) == nil {
+				return true, "exec:pid"
+			}
+			return false, ""
+		}
+		// Non-Linux: use process group signal check as before to handle quick-exit detection.
+		if syscall.Kill(-pid, 0) == nil {
 			return true, "exec:pid"
 		}
 		return false, ""
@@ -273,6 +287,16 @@ func (r *Process) detectors() []detector.Detector {
 	}
 	dets = append(dets, r.spec.Detectors...)
 	return dets
+}
+
+// isZombieLinux returns true if /proc/<pid>/status reports a zombie state (Z) on Linux.
+func isZombieLinux(pid int) bool {
+	path := "/proc/" + strconv.Itoa(pid) + "/status"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(b, []byte("State:\tZ"))
 }
 
 // EnforceStartDuration waits until d ensuring process stays up; returns error if it exits early.
