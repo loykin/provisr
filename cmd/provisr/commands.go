@@ -7,47 +7,13 @@ import (
 	"github.com/loykin/provisr"
 )
 
-// StartFlags Flag structs to decouple cobra from logic for testing.
-type StartFlags struct {
-	ConfigPath      string
-	UseOSEnv        bool
-	EnvKVs          []string
-	EnvFiles        []string
-	Name            string
-	Cmd             string
-	PIDFile         string
-	Retries         int
-	RetryInterval   time.Duration
-	AutoRestart     bool
-	RestartInterval time.Duration
-	StartDuration   time.Duration
-	Instances       int
+type command struct {
+	mgr *provisr.Manager
 }
 
-type StatusFlags struct {
-	ConfigPath string
-	Name       string
-}
-
-type StopFlags struct {
-	ConfigPath string
-	Name       string
-	Wait       time.Duration
-}
-
-type CronFlags struct {
-	ConfigPath string
-	// For tests we can set NonBlocking to avoid infinite block
-	NonBlocking bool
-}
-
-type GroupFlags struct {
-	ConfigPath string
-	GroupName  string
-	Wait       time.Duration
-}
-
-func cmdStart(mgr *provisr.Manager, f StartFlags) error {
+// Start Method-style handlers bound to a command with an embedded manager
+func (c *command) Start(f StartFlags) error {
+	mgr := c.mgr
 	if f.ConfigPath != "" {
 		if genv, err := provisr.LoadGlobalEnv(f.ConfigPath); err == nil && len(genv) > 0 {
 			mgr.SetGlobalEnv(genv)
@@ -81,7 +47,9 @@ func cmdStart(mgr *provisr.Manager, f StartFlags) error {
 	return mgr.Start(sp)
 }
 
-func cmdStatus(mgr *provisr.Manager, f StatusFlags) error {
+// Status prints status information, optionally loading specs from config for base queries
+func (c *command) Status(f StatusFlags) error {
+	mgr := c.mgr
 	if f.ConfigPath != "" {
 		specs, err := provisr.LoadSpecs(f.ConfigPath)
 		if err != nil {
@@ -95,7 +63,9 @@ func cmdStatus(mgr *provisr.Manager, f StatusFlags) error {
 	return nil
 }
 
-func cmdStop(mgr *provisr.Manager, f StopFlags) error {
+// Stop stops processes by name/base from flags or config
+func (c *command) Stop(f StopFlags) error {
+	mgr := c.mgr
 	if f.Wait <= 0 {
 		f.Wait = 3 * time.Second
 	}
@@ -116,7 +86,9 @@ func cmdStop(mgr *provisr.Manager, f StopFlags) error {
 	return nil
 }
 
-func cmdCron(mgr *provisr.Manager, f CronFlags) error {
+// Cron runs cron scheduler based on config
+func (c *command) Cron(f CronFlags) error {
+	mgr := c.mgr
 	if f.ConfigPath == "" {
 		return fmt.Errorf("cron requires --config file with processes having schedule")
 	}
@@ -146,7 +118,9 @@ func cmdCron(mgr *provisr.Manager, f CronFlags) error {
 	select {}
 }
 
-func runGroupStart(mgr *provisr.Manager, f GroupFlags) error {
+// GroupStart starts a group from config
+func (c *command) GroupStart(f GroupFlags) error {
+	mgr := c.mgr
 	if f.ConfigPath == "" {
 		return fmt.Errorf("group-start requires --config")
 	}
@@ -168,7 +142,9 @@ func runGroupStart(mgr *provisr.Manager, f GroupFlags) error {
 	return g.Start(*gs)
 }
 
-func runGroupStop(mgr *provisr.Manager, f GroupFlags) error {
+// GroupStop stops a group from config
+func (c *command) GroupStop(f GroupFlags) error {
+	mgr := c.mgr
 	if f.Wait <= 0 {
 		f.Wait = 3 * time.Second
 	}
@@ -190,7 +166,9 @@ func runGroupStop(mgr *provisr.Manager, f GroupFlags) error {
 	return g.Stop(*gs, f.Wait)
 }
 
-func runGroupStatus(mgr *provisr.Manager, f GroupFlags) error {
+// GroupStatus prints status for a group from config
+func (c *command) GroupStatus(f GroupFlags) error {
+	mgr := c.mgr
 	if f.ConfigPath == "" {
 		return fmt.Errorf("group-status requires --config")
 	}
@@ -212,4 +190,9 @@ func runGroupStatus(mgr *provisr.Manager, f GroupFlags) error {
 	}
 	printJSON(stmap)
 	return nil
+}
+
+func (c *command) runGroupStatus(f GroupFlags) error {
+	mgr := c.mgr
+	return (&command{mgr: mgr}).GroupStatus(f)
 }

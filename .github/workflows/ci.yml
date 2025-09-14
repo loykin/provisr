@@ -91,7 +91,7 @@ jobs:
       - name: Run tests with coverage
         env:
           CGO_ENABLED: 1
-        run: go test -p 1 -race -covermode=atomic -coverprofile=coverage.out $(go list ./... | grep -v '/examples/')
+        run: go test -p 1 -race -covermode=atomic -coverprofile=coverage.out $(go list ./... | grep -v '/examples')
 
       - name: Show coverage summary
         run: go tool cover -func=coverage.out | tail -n 1

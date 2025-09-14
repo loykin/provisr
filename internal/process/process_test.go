@@ -276,3 +276,141 @@ func TestDetectorsAndUpdateSpec(t *testing.T) {
 		t.Fatalf("EnforceStartDuration(0) unexpected err: %v", err)
 	}
 }
+
+// waitUntilProc polls fn until it returns true or timeout expires.
+func waitUntilProc(timeout, step time.Duration, fn func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(step)
+	}
+	return false
+}
+
+func TestProcessStopWithoutMonitor(t *testing.T) {
+	requireUnix(t)
+	r := New(Spec{Name: "stop-nomon", Command: "sleep 1"})
+	cmd := r.ConfigureCmd(nil)
+	if err := r.TryStart(cmd); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if r.IsMonitoring() {
+		t.Fatalf("expected no monitor initially")
+	}
+	_ = r.Stop(500 * time.Millisecond)
+	if ok, _ := r.DetectAlive(); ok {
+		t.Fatalf("expected not alive after Stop")
+	}
+	if ch := r.WaitDoneChan(); ch != nil {
+		t.Fatalf("expected waitDone to be cleared by Stop when owning wait")
+	}
+}
+
+func TestProcessStopWithSimulatedMonitor(t *testing.T) {
+	requireUnix(t)
+	r := New(Spec{Name: "stop-mon", Command: "sleep 1"})
+	cmd := r.ConfigureCmd(nil)
+	if err := r.TryStart(cmd); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !r.MonitoringStartIfNeeded() {
+		t.Fatalf("failed to claim monitoring")
+	}
+	done := make(chan struct{})
+	go func() {
+		c := r.CopyCmd()
+		_ = c.Wait()
+		r.CloseWaitDone()
+		r.MarkExited(nil)
+		r.CloseWriters()
+		r.MonitoringStop()
+		close(done)
+	}()
+	// give the process a brief moment to be fully up
+	time.Sleep(50 * time.Millisecond)
+	_ = r.Stop(700 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("monitor waiter timeout")
+	}
+	if ok, _ := r.DetectAlive(); ok {
+		t.Fatalf("expected not alive after Stop with monitor")
+	}
+}
+
+func TestProcessKillWithoutMonitor(t *testing.T) {
+	requireUnix(t)
+	r := New(Spec{Name: "kill-nomon", Command: "sleep 10"})
+	cmd := r.ConfigureCmd(nil)
+	if err := r.TryStart(cmd); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	_ = r.Kill()
+	if !waitUntilProc(1*time.Second, 20*time.Millisecond, func() bool { alive, _ := r.DetectAlive(); return !alive }) {
+		t.Fatalf("expected process to be dead after Kill")
+	}
+}
+
+func TestProcessKillWithSimulatedMonitor(t *testing.T) {
+	requireUnix(t)
+	r := New(Spec{Name: "kill-mon", Command: "sleep 10"})
+	cmd := r.ConfigureCmd(nil)
+	if err := r.TryStart(cmd); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !r.MonitoringStartIfNeeded() {
+		t.Fatalf("failed to claim monitoring")
+	}
+	done := make(chan struct{})
+	go func() {
+		c := r.CopyCmd()
+		_ = c.Wait()
+		r.CloseWaitDone()
+		r.MarkExited(nil)
+		r.CloseWriters()
+		r.MonitoringStop()
+		close(done)
+	}()
+	_ = r.Kill()
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("monitor waiter timeout after Kill")
+	}
+}
+
+func TestProcessDetectAliveParallel(t *testing.T) {
+	requireUnix(t)
+	r := New(Spec{Name: "alive-par", Command: "sleep 0.3"})
+	cmd := r.ConfigureCmd(nil)
+	if err := r.TryStart(cmd); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	done := make(chan struct{})
+	for i := 0; i < 20; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for {
+				alive, _ := r.DetectAlive()
+				if !alive {
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}()
+	}
+	c := r.CopyCmd()
+	_ = c.Wait()
+	r.CloseWaitDone()
+	r.MarkExited(nil)
+	for i := 0; i < 20; i++ {
+		select {
+		case <-done:
+		case <-time.After(1 * time.Second):
+			t.Fatalf("goroutine %d did not finish", i)
+		}
+	}
+}

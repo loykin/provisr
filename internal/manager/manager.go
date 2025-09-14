@@ -1,62 +1,115 @@
 package manager
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/loykin/provisr/internal/env"
+	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/store"
 )
 
 // Manager starts, stops, and monitors processes.
 type Manager struct {
-	mu    sync.Mutex
-	procs map[string]*entry
-	envM  *env.Env
+	mu        sync.RWMutex
+	envM      *env.Env
+	st        store.Store
+	reconStop chan struct{}
+	histSinks []history.Sink
+
+	// unified per-process entry holding handler/supervisor and their cancels
+	entries map[string]*procEntry
 }
 
-type entry struct {
-	r    *process.Process
-	spec process.Spec
+type procEntry struct {
+	h       *handler
+	hCancel context.CancelFunc
+	s       *supervisor
+	sCancel context.CancelFunc
 }
 
-// monitor waits for process exit and auto-restarts if configured.
-func (m *Manager) monitor(e *entry) {
-	for {
-		cmd := e.r.CopyCmd()
-		if cmd == nil {
-			e.r.MonitoringStop()
-			return
-		}
-		// Wait for process to exit
-		err := cmd.Wait()
-		// notify waiters and mark status
-		e.r.CloseWaitDone()
-		e.r.MarkExited(err)
-		stopping := e.r.StopRequested()
-		autoRestart := e.spec.AutoRestart
-		interval2 := e.spec.RestartInterval
-		if interval2 <= 0 {
-			interval2 = 1 * time.Second
-		}
-		if stopping || !autoRestart {
-			e.r.MonitoringStop()
-			return
-		}
-		// attempt restart
-		time.Sleep(interval2)
-		_ = e.r.IncRestarts()
-		metrics.IncRestart(e.spec.Name)
-		_ = m.Start(e.spec)
-		// loop continues to wait on new cmd
+func NewManager() *Manager {
+	return &Manager{
+		entries: make(map[string]*procEntry),
+		envM:    env.New(),
 	}
 }
 
-func NewManager() *Manager { return &Manager{procs: make(map[string]*entry), envM: env.New()} }
+// SetHistorySinks configures external history sinks (OpenSearch, ClickHouse, etc.).
+// Passing nil or no sinks clears the list.
+func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
+	m.mu.Lock()
+	m.histSinks = append([]history.Sink(nil), sinks...)
+	m.mu.Unlock()
+}
+
+// SetStore configures a persistence store used to record process lifecycle events.
+// It ensures the schema and stores the instance for subsequent writes.
+func (m *Manager) SetStore(s store.Store) error {
+	m.mu.Lock()
+	m.st = s
+	m.mu.Unlock()
+	if s == nil {
+		return nil
+	}
+	return s.EnsureSchema(context.Background())
+}
+
+func (m *Manager) recordStart(p *process.Process) {
+	m.mu.Lock()
+	st := m.st
+	sinks := append([]history.Sink(nil), m.histSinks...)
+	m.mu.Unlock()
+	rs := p.Snapshot()
+	rec := store.Record{
+		Name:      rs.Name,
+		PID:       rs.PID,
+		StartedAt: rs.StartedAt,
+	}
+	if st != nil {
+		_ = st.RecordStart(context.Background(), rec)
+	}
+	if len(sinks) > 0 {
+		evt := history.Event{Type: history.EventStart, OccurredAt: time.Now().UTC(), Record: rec}
+		for _, s := range sinks {
+			_ = s.Send(context.Background(), evt)
+		}
+	}
+}
+
+func (m *Manager) recordStop(p *process.Process, exitErr error) {
+	m.mu.Lock()
+	st := m.st
+	sinks := append([]history.Sink(nil), m.histSinks...)
+	m.mu.Unlock()
+	rs := p.Snapshot()
+	uniq := store.UniqueKey(rs.PID, rs.StartedAt)
+	if st != nil {
+		_ = st.RecordStop(context.Background(), uniq, rs.StoppedAt, exitErr)
+	}
+	if len(sinks) > 0 {
+		rec := store.Record{
+			Name:      rs.Name,
+			PID:       rs.PID,
+			StartedAt: rs.StartedAt,
+			StoppedAt: sql.NullTime{Time: rs.StoppedAt, Valid: !rs.StoppedAt.IsZero()},
+			Running:   false,
+		}
+		if exitErr != nil {
+			rec.ExitErr = sql.NullString{String: exitErr.Error(), Valid: true}
+		}
+		evt := history.Event{Type: history.EventStop, OccurredAt: time.Now().UTC(), Record: rec}
+		for _, s := range sinks {
+			_ = s.Send(context.Background(), evt)
+		}
+	}
+}
 
 // SetGlobalEnv sets global environment variables affecting all processes managed by this Manager.
 // kvs must be in the form "KEY=VALUE".
@@ -75,93 +128,64 @@ func (m *Manager) SetGlobalEnv(kvs []string) {
 	m.envM = e
 }
 
-func (m *Manager) get(name string) *entry {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.procs[name]
-}
-
 func (m *Manager) Start(spec process.Spec) error {
-	e := m.getOrCreateEntry(spec)
-	// Fast path: if already alive, no-op
-	if m.fastAlive(e) {
-		return nil
+	// Inject merged env into spec before passing to handler
+	spec.Env = m.mergedEnvFor(spec)
+	m.ensureHandler(spec)
+	h := m.getHandler(spec.Name)
+	if h == nil {
+		return fmt.Errorf("failed to ensure handler for %s", spec.Name)
 	}
 	attempts, interval := retryParams(spec)
 	var lastErr error
 	for i := 0; i <= attempts; i++ {
-		if err := m.tryStartOnce(e, spec); err != nil {
-			lastErr = err
-			if i < attempts {
+		reply := make(chan error, 1)
+		h.ctrl <- CtrlMsg{Type: CtrlStart, Spec: spec, Reply: reply}
+		err := <-reply
+		if err == nil {
+			// ensure supervisor is running for this process; observability handled by supervisor
+			m.ensureSupervisor(spec.Name)
+			return nil
+		}
+		lastErr = err
+		if i < attempts {
+			if !process.IsBeforeStartErr(err) {
 				time.Sleep(interval)
-				continue
 			}
-			return lastErr
 		}
-		if err := m.postStart(e, spec); err != nil {
-			lastErr = err
-			if i < attempts {
-				if !process.IsBeforeStartErr(err) {
-					time.Sleep(interval)
-				}
-				continue
-			}
-			return lastErr
-		}
-		return nil
 	}
 	return lastErr
 }
 
 // Stop stops a running process. If already stopped, it's a no-op.
 func (m *Manager) Stop(name string, wait time.Duration) error {
-	e := m.get(name)
-	if e == nil {
+	h := m.getHandler(name)
+	if h == nil {
 		return fmt.Errorf("unknown process: %s", name)
 	}
-	alive, _ := e.r.DetectAlive()
-	if !alive {
-		return nil
-	}
-	e.r.SetStopRequested(true)
-	cmd := e.r.CopyCmd()
-	if cmd != nil && cmd.Process != nil {
-		pid := cmd.Process.Pid
-		_ = syscall.Kill(-pid, syscall.SIGTERM)
-		waitCh := e.r.WaitDoneChan()
-		select {
-		case <-waitCh:
-			// monitor observed exit
-		case <-time.After(wait):
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
-			time.Sleep(10 * time.Millisecond)
+	reply := make(chan error, 1)
+	h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: wait, Reply: reply}
+	err := <-reply
+	// stop supervisor if running
+	m.mu.Lock()
+	if e := m.entries[name]; e != nil {
+		if e.sCancel != nil {
+			e.sCancel()
+			e.sCancel = nil
 		}
+		e.s = nil
 	}
-	e.r.CloseWriters()
-	metrics.IncStop(name)
-	rs := e.r.Snapshot()
-	return rs.ExitErr
+	m.mu.Unlock()
+	return err
 }
 
 // Status returns current status including detector check.
 func (m *Manager) Status(name string) (process.Status, error) {
-	e := m.get(name)
-	if e == nil {
+	h := m.getHandler(name)
+	if h == nil {
 		return process.Status{}, fmt.Errorf("unknown process: %s", name)
 	}
-	alive, by := e.r.DetectAlive()
-	rs := e.r.Snapshot()
-	st := process.Status{
-		Name:       rs.Name,
-		Running:    alive,
-		PID:        rs.PID,
-		StartedAt:  rs.StartedAt,
-		StoppedAt:  rs.StoppedAt,
-		ExitErr:    rs.ExitErr,
-		DetectedBy: by,
-		Restarts:   rs.Restarts,
-	}
-	return st, nil
+	return h.Status(), nil
 }
 
 // StartN starts Spec.Instances instances by suffixing names with -1..-N.
@@ -186,14 +210,14 @@ func (m *Manager) StartN(spec process.Spec) error {
 
 // StopAll stops all instances with the base name.
 func (m *Manager) StopAll(base string, wait time.Duration) error {
-	m.mu.Lock()
-	names := make([]string, 0, len(m.procs))
-	for name := range m.procs {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.entries))
+	for name := range m.entries {
 		if name == base || strings.HasPrefix(name, base+"-") {
 			names = append(names, name)
 		}
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	var firstErr error
 	for _, name := range names {
 		if err := m.Stop(name, wait); err != nil && firstErr == nil {
@@ -208,14 +232,14 @@ func (m *Manager) StopAll(base string, wait time.Duration) error {
 
 // StatusAll returns statuses for all instances matching the base name.
 func (m *Manager) StatusAll(base string) ([]process.Status, error) {
-	m.mu.Lock()
-	names := make([]string, 0, len(m.procs))
-	for name := range m.procs {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.entries))
+	for name := range m.entries {
 		if name == base || strings.HasPrefix(name, base+"-") {
 			names = append(names, name)
 		}
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	res := make([]process.Status, 0, len(names))
 	for _, n := range names {
 		st, err := m.Status(n)
@@ -230,14 +254,14 @@ func (m *Manager) StatusAll(base string) ([]process.Status, error) {
 // StatusMatch returns statuses for all process names that match the wildcard pattern.
 // Supported wildcard: '*' matches any substring (including empty). Multiple '*' are allowed.
 func (m *Manager) StatusMatch(pattern string) ([]process.Status, error) {
-	m.mu.Lock()
-	names := make([]string, 0, len(m.procs))
-	for name := range m.procs {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.entries))
+	for name := range m.entries {
 		if wildcardMatch(name, pattern) {
 			names = append(names, name)
 		}
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	res := make([]process.Status, 0, len(names))
 	for _, n := range names {
 		st, err := m.Status(n)
@@ -252,14 +276,14 @@ func (m *Manager) StatusMatch(pattern string) ([]process.Status, error) {
 // StopMatch stops all processes with names that match the wildcard pattern.
 // Returns the first error encountered, if any.
 func (m *Manager) StopMatch(pattern string, wait time.Duration) error {
-	m.mu.Lock()
-	names := make([]string, 0, len(m.procs))
-	for name := range m.procs {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.entries))
+	for name := range m.entries {
 		if wildcardMatch(name, pattern) {
 			names = append(names, name)
 		}
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	var firstErr error
 	for _, name := range names {
 		if err := m.Stop(name, wait); err != nil && firstErr == nil {
@@ -285,21 +309,38 @@ func (m *Manager) Count(base string) (int, error) {
 }
 
 // --- helpers extracted to reduce cyclomatic complexity in Start() ---
-// getOrCreateEntry returns an entry for the spec name, creating it if missing.
-func (m *Manager) getOrCreateEntry(spec process.Spec) *entry {
+
+// getHandler returns the handler for a process name.
+func (m *Manager) getHandler(name string) *handler {
+	m.mu.RLock()
+	e := m.entries[name]
+	m.mu.RUnlock()
+	if e != nil {
+		return e.h
+	}
+	return nil
+}
+
+// ensureHandler creates and runs a handler for the given spec name if missing.
+// It also updates the handler's spec if it already exists.
+func (m *Manager) ensureHandler(spec process.Spec) *handler {
 	m.mu.Lock()
-	e, exists := m.procs[spec.Name]
-	if !exists {
-		r := process.New(spec)
-		e = &entry{r: r, spec: spec}
-		m.procs[spec.Name] = e
+	e := m.entries[spec.Name]
+	if e == nil {
+		// create new handler with injected env merge and history callbacks
+		h := newHandler(spec, m.mergedEnvFor, m.recordStart, m.recordStop)
+		ctx, cancel := context.WithCancel(context.Background())
+		e = &procEntry{h: h, hCancel: cancel}
+		m.entries[spec.Name] = e
+		go h.run(ctx)
 	} else {
-		e.spec = spec
-		// ensure process has the updated spec too
-		e.r.UpdateSpec(spec)
+		// update spec via control channel synchronously
+		reply := make(chan error, 1)
+		e.h.ctrl <- CtrlMsg{Type: CtrlUpdateSpec, Spec: spec, Reply: reply}
+		<-reply
 	}
 	m.mu.Unlock()
-	return e
+	return e.h
 }
 
 // wildcardMatch matches name against a pattern with '*' wildcard (glob-like, case-sensitive).
@@ -345,12 +386,6 @@ func wildcardMatch(name, pattern string) bool {
 	return true
 }
 
-// fastAlive returns true if the process is already reported alive.
-func (m *Manager) fastAlive(e *entry) bool {
-	alive, _ := e.r.DetectAlive()
-	return alive
-}
-
 // retryParams computes attempts and interval from the spec.
 func retryParams(spec process.Spec) (int, time.Duration) {
 	attempts := spec.RetryCount
@@ -372,27 +407,170 @@ func (m *Manager) mergedEnvFor(spec process.Spec) []string {
 	return nil
 }
 
-// tryStartOnce configures and tries to start the process once.
-func (m *Manager) tryStartOnce(e *entry, spec process.Spec) error {
-	mergedEnv := m.mergedEnvFor(spec)
-	cmd := e.r.ConfigureCmd(mergedEnv)
-	return e.r.TryStart(cmd)
+// ReconcileOnce checks current managed processes against reality and updates the store.
+// It also attempts to auto-start processes that should be running but are not by sending control messages.
+func (m *Manager) ReconcileOnce() {
+	m.mu.Lock()
+	st := m.st
+	handlers := make([]*handler, 0, len(m.entries))
+	for _, e := range m.entries {
+		if e != nil && e.h != nil {
+			handlers = append(handlers, e.h)
+		}
+	}
+	m.mu.Unlock()
+	if len(handlers) == 0 && st == nil {
+		return
+	}
+	ctx := context.Background()
+	for _, h := range handlers {
+		stSnap := h.Status()
+		rs := h.Snapshot()
+		if st != nil {
+			rec := store.Record{
+				Name:      rs.Name,
+				PID:       rs.PID,
+				StartedAt: rs.StartedAt,
+				Running:   stSnap.Running,
+			}
+			if !stSnap.Running && !rs.StoppedAt.IsZero() {
+				rec.StoppedAt = sql.NullTime{Time: rs.StoppedAt, Valid: true}
+			}
+			if rs.ExitErr != nil {
+				rec.ExitErr = sql.NullString{String: rs.ExitErr.Error(), Valid: true}
+			}
+			_ = st.UpsertStatus(ctx, rec)
+			// If we still think it was running (internal) but detector says not, record a stop.
+			if !stSnap.Running && rs.Running {
+				uniq := store.UniqueKey(rs.PID, rs.StartedAt)
+				_ = st.RecordStop(ctx, uniq, time.Now().UTC(), fmt.Errorf("lost (reconciler)"))
+			}
+		}
+		// Auto-start safety net: only when no supervisor is present (supervisor owns policies/starts)
+		spec := h.Spec()
+		if !stSnap.Running && spec.AutoRestart && !h.StopRequested() && m.getSupervisor(spec.Name) == nil {
+			reply := make(chan error, 1)
+			h.ctrl <- CtrlMsg{Type: CtrlStart, Spec: spec, Reply: reply}
+			if err := <-reply; err == nil {
+				// Ensure supervisor exists to monitor subsequent exits; observability handled there
+				m.ensureSupervisor(spec.Name)
+			}
+		}
+	}
 }
 
-// postStart runs metrics, starts monitoring, and enforces start duration.
-// Returns error if the process exits before start duration.
-func (m *Manager) postStart(e *entry, spec process.Spec) error {
-	metrics.IncStart(spec.Name)
-	if e.r.MonitoringStartIfNeeded() {
-		go m.monitor(e)
+// StartReconciler starts a background loop that periodically calls ReconcileOnce.
+func (m *Manager) StartReconciler(interval time.Duration) {
+	if interval <= 0 {
+		interval = 500 * time.Millisecond
 	}
-	if err := e.r.EnforceStartDuration(spec.StartDuration); err != nil {
-		e.r.RemovePIDFile()
-		e.r.MarkExited(err)
-		return err
+	m.mu.Lock()
+	if m.reconStop != nil {
+		m.mu.Unlock()
+		return // already running
 	}
-	if spec.StartDuration > 0 {
-		metrics.ObserveStartDuration(spec.Name, spec.StartDuration.Seconds())
+	stop := make(chan struct{})
+	m.reconStop = stop
+	m.mu.Unlock()
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				m.ReconcileOnce()
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+// StopReconciler stops the background reconcile loop if running.
+func (m *Manager) StopReconciler() {
+	m.mu.Lock()
+	ch := m.reconStop
+	m.reconStop = nil
+	m.mu.Unlock()
+	if ch != nil {
+		close(ch)
 	}
-	return nil
+}
+
+// Shutdown stops reconciler and gracefully shuts down all handlers by sending CtrlShutdown
+// and canceling their contexts to avoid goroutine leaks.
+func (m *Manager) Shutdown() {
+	// stop reconciler first to avoid new auto-starts during shutdown
+	m.StopReconciler()
+	m.mu.Lock()
+	entries := make(map[string]*procEntry, len(m.entries))
+	for name, e := range m.entries {
+		entries[name] = e
+	}
+	m.mu.Unlock()
+	// cancel all supervisors first
+	for _, e := range entries {
+		if e != nil && e.sCancel != nil {
+			e.sCancel()
+			e.sCancel = nil
+		}
+	}
+	// then send shutdown to each handler and cancel its context
+	var wg sync.WaitGroup
+	for _, e := range entries {
+		if e == nil || e.h == nil {
+			continue
+		}
+		reply := make(chan error, 1)
+		select {
+		case e.h.ctrl <- CtrlMsg{Type: CtrlShutdown, Reply: reply}:
+			// sent
+		default:
+			// if channel is full, still attempt cancel to unblock run
+		}
+		if e.hCancel != nil {
+			e.hCancel()
+		}
+		wg.Add(1)
+		go func(r <-chan error) {
+			defer wg.Done()
+			select {
+			case <-r:
+			case <-time.After(2 * time.Second):
+				// timeout; best-effort
+			}
+		}(reply)
+	}
+	wg.Wait()
+}
+
+// getSupervisor returns the supervisor for a process name.
+func (m *Manager) getSupervisor(name string) *supervisor {
+	m.mu.RLock()
+	var s *supervisor
+	if e := m.entries[name]; e != nil {
+		s = e.s
+	}
+	m.mu.RUnlock()
+	return s
+}
+
+// ensureSupervisor creates and runs a supervisor for the given process name if missing.
+func (m *Manager) ensureSupervisor(name string) *supervisor {
+	m.mu.Lock()
+	e := m.entries[name]
+	if e == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	s := e.s
+	if s == nil && e.h != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s = newSupervisor(ctx, e.h, m.recordStart, m.recordStop)
+		e.s = s
+		e.sCancel = cancel
+		go s.Run()
+	}
+	m.mu.Unlock()
+	return s
 }

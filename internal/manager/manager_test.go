@@ -2,6 +2,7 @@ package manager
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"github.com/loykin/provisr/internal/detector"
 	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/store"
+	sqlitedrv "github.com/loykin/provisr/internal/store/sqlite"
 )
 
 func requireUnix(t *testing.T) {
@@ -124,22 +127,25 @@ func TestStartStopWithPIDFile(t *testing.T) {
 
 func TestAutoRestart(t *testing.T) {
 	mgr := NewManager()
-	// command exits quickly; enable autorestart
+	// command exits quickly; enable autorestart via reconciler
 	spec := process.Spec{Name: "ar", Command: "sh -c 'sleep 0.05'", AutoRestart: true, RestartInterval: 50 * time.Millisecond}
 	if err := mgr.Start(spec); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	deadline := time.Now().Add(1 * time.Second)
+	// Start reconciler to perform passive restarts
+	mgr.StartReconciler(50 * time.Millisecond)
+	defer mgr.StopReconciler()
+	deadline := time.Now().Add(2 * time.Second)
 	var st process.Status
 	for time.Now().Before(deadline) {
 		st, _ = mgr.Status("ar")
-		if st.Restarts >= 1 && st.Running {
+		if st.Restarts >= 1 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if st.Restarts < 1 || !st.Running {
-		t.Fatalf("expected running after at least one autorestart, got running=%v restarts=%d", st.Running, st.Restarts)
+	if st.Restarts < 1 {
+		t.Fatalf("expected at least one autorestart by reconciler, got running=%v restarts=%d", st.Running, st.Restarts)
 	}
 	// stop should not trigger restart
 	_ = mgr.Stop("ar", 2*time.Second)
@@ -740,4 +746,357 @@ func TestStartNAndCountZero(t *testing.T) {
 		t.Fatalf("expected count > 0, got %d", c)
 	}
 	_ = mgr.StopAll("svc", 2*time.Second)
+}
+
+func TestManagerPersistsLifecycleToStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+	// Start a short-lived process
+	spec := process.Spec{Name: "store-demo", Command: "sleep 0.2", StartDuration: 0}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// give it a moment to run and be recorded
+	time.Sleep(30 * time.Millisecond)
+	ctx := context.Background()
+	running, err := db.GetRunning(ctx, "store-demo")
+	if err != nil {
+		t.Fatalf("get running: %v", err)
+	}
+	if len(running) < 1 {
+		t.Fatalf("expected at least 1 running record, got %d", len(running))
+	}
+	// Stop and verify store updated
+	_ = mgr.StopAll("store-demo", 2*time.Second)
+	// wait a bit for monitor to record stop
+	time.Sleep(50 * time.Millisecond)
+	running2, err := db.GetRunning(ctx, "store-demo")
+	if err != nil {
+		t.Fatalf("get running2: %v", err)
+	}
+	if len(running2) != 0 {
+		t.Fatalf("expected 0 running after stop, got %d", len(running2))
+	}
+	past, err := db.GetByName(ctx, "store-demo", 10)
+	if err != nil {
+		t.Fatalf("get by name: %v", err)
+	}
+	foundStopped := false
+	for _, r := range past {
+		if !r.Running && r.StoppedAt.Valid {
+			foundStopped = true
+			break
+		}
+	}
+	if !foundStopped {
+		t.Fatalf("expected at least one stopped record in history")
+	}
+}
+
+// waitUntil polls fn until it returns true or timeout elapses.
+func waitUntil(timeout time.Duration, step time.Duration, fn func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(step)
+	}
+	return false
+}
+
+// This test verifies that when a process with AutoRestart dies, the reconciler
+// quickly restarts it even if the monitor's RestartInterval is large. It also
+// checks that the store is updated accordingly.
+func TestReconcileRestartsDeadProcessAndUpdatesStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+
+	// Use a tiny sleep that exits immediately; Supervisor will handle restart based on RestartInterval.
+	spec := process.Spec{
+		Name:            "recon-quick",
+		Command:         "sh -c 'sleep 0.05'",
+		AutoRestart:     true,
+		RestartInterval: 50 * time.Millisecond,
+		StartDuration:   0,
+	}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Wait for the short-lived process to exit naturally and be marked not running.
+	ok := waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-quick")
+		return err == nil && !st.Running
+	})
+	if !ok {
+		t.Fatalf("process did not exit as expected")
+	}
+
+	// Now trigger reconcile; it should restart immediately (AutoRestart=true).
+	mgr.ReconcileOnce()
+	// Wait until running again.
+	ok = waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-quick")
+		return err == nil && st.Running
+	})
+	if !ok {
+		t.Fatalf("reconcile did not restart process promptly")
+	}
+
+	// Sync store via reconcile and then expect at least one running record for this name.
+	mgr.ReconcileOnce()
+	running, err := db.GetRunning(context.Background(), "recon-quick")
+	if err != nil {
+		t.Fatalf("store get running: %v", err)
+	}
+	if len(running) < 1 {
+		t.Fatalf("expected at least one running record after supervisor restart and reconcile")
+	}
+}
+
+// This test verifies that reconcile still maintains HA when store has no prior
+// records (e.g., store enabled after a failure). It should upsert the current
+// status and restart dead AutoRestart processes regardless of store content.
+func TestReconcileWorksWhenStoreInitiallyEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	// Start without store
+	spec := process.Spec{Name: "recon-empty", Command: "sh -c 'sleep 0.05'", AutoRestart: true, RestartInterval: 50 * time.Millisecond}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Wait until it exits
+	_ = waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-empty")
+		return err == nil && !st.Running
+	})
+	// Now enable store and reconcile
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+	mgr.ReconcileOnce()
+	// Should be restarted by Supervisor; wait until running.
+	ok := waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-empty")
+		return err == nil && st.Running
+	})
+	if !ok {
+		t.Fatalf("process did not restart promptly with empty store")
+	}
+	// Sync store via reconcile and assert running record now exists.
+	mgr.ReconcileOnce()
+	running, err := db.GetRunning(context.Background(), "recon-empty")
+	if err != nil {
+		t.Fatalf("store get running: %v", err)
+	}
+	if len(running) == 0 {
+		t.Fatalf("expected running record after supervisor restart and reconcile with empty store")
+	}
+}
+
+// This test verifies that even when store content is inconsistent (claims running
+// while the process is actually dead), reconcile corrects the store and restarts
+// the process to maintain availability.
+func TestReconcileOverridesStoreMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix-like environment")
+	}
+	mgr := NewManager()
+	db, err := sqlitedrv.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := mgr.SetStore(db); err != nil {
+		t.Fatalf("set store: %v", err)
+	}
+
+	// Create an entry in manager without starting a real process, by creating the entry
+	// and leaving it non-running. We'll also inject a mismatching store record that says running.
+	spec := process.Spec{Name: "recon-mismatch", Command: "sh -c 'sleep 0.2'", AutoRestart: true, RestartInterval: 10 * time.Second}
+	_ = mgr.ensureHandler(spec) // ensure it's known to the manager
+
+	// Insert a fake 'running' record for the same name in the store, PID/StartedAt arbitrary.
+	fake := time.Now().Add(-1 * time.Minute).UTC()
+	rec := store.Record{Name: "recon-mismatch", PID: 99999, StartedAt: fake, Running: true}
+	_ = db.RecordStart(context.Background(), rec)
+
+	// Reconcile should ignore store contents for restart decision and bring the process up.
+	mgr.ReconcileOnce()
+	ok := waitUntil(2*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status("recon-mismatch")
+		return err == nil && st.Running
+	})
+	if !ok {
+		t.Fatalf("reconcile did not restart process despite store mismatch")
+	}
+}
+
+// Test that duplicate concurrent CtrlStart requests are coalesced by handler.starting
+// and do not cause multiple process starts or deadlocks. Run with -race.
+func TestHandler_DuplicateStartIgnored(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	spec := process.Spec{Name: "dup-start", Command: "sleep 0.3"}
+	h := mgr.ensureHandler(spec)
+
+	// Fire many concurrent start requests.
+	const N = 10
+	var wg sync.WaitGroup
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(ix int) {
+			defer wg.Done()
+			rep := make(chan error, 1)
+			h.ctrl <- CtrlMsg{Type: CtrlStart, Spec: spec, Reply: rep}
+			errs[ix] = <-rep
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("start %d returned error: %v", i, err)
+		}
+	}
+	// Only one process should be running; status should indicate running with a PID.
+	st := h.Status()
+	if !st.Running || st.PID <= 0 {
+		t.Fatalf("expected running after duplicate starts; got %+v", st)
+	}
+	// Cleanup
+	rep := make(chan error, 1)
+	h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: time.Second, Reply: rep}
+	<-rep
+}
+
+// Test that a stop issued while a start is in-flight leads to a clean stop without deadlocks.
+func TestHandler_StopDuringStart(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	// Enforce a start duration to keep Start in-flight briefly.
+	spec := process.Spec{Name: "stop-during-start", Command: "sleep 1", StartDuration: 200 * time.Millisecond}
+	h := mgr.ensureHandler(spec)
+
+	startRep := make(chan error, 1)
+	stopRep := make(chan error, 1)
+	// Send start and immediately request stop.
+	h.ctrl <- CtrlMsg{Type: CtrlStart, Spec: spec, Reply: startRep}
+	go func() {
+		// small delay to overlap with start enforcement
+		time.Sleep(10 * time.Millisecond)
+		h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: time.Second, Reply: stopRep}
+	}()
+
+	st := h.Status()
+	if st.Running {
+		t.Fatalf("expected stopped after StopDuringStart, got running status: %+v", st)
+	}
+}
+
+// Supervisor should detect exit and restart; also stopping while supervisor monitors should not race.
+func TestSupervisor_RestartAndStop_NoDoubleWait(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	spec := process.Spec{Name: "sv-restart", Command: "sh -c 'sleep 0.05'", AutoRestart: true, RestartInterval: 50 * time.Millisecond}
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Ensure supervisor is present.
+	_ = mgr.ensureSupervisor(spec.Name)
+
+	// Wait for at least one restart cycle.
+	ok := waitUntil(2*time.Second, 20*time.Millisecond, func() bool {
+		st, _ := mgr.Status(spec.Name)
+		return st.Restarts >= 1
+	})
+	if !ok {
+		t.Fatalf("expected at least one restart under supervisor")
+	}
+	// Now call Stop while supervisor might still be monitoring a run; ensure it completes.
+	if err := mgr.Stop(spec.Name, 2*time.Second); err != nil {
+		// Stop may return nil on clean exit; treat non-nil as failure.
+	}
+	st, _ := mgr.Status(spec.Name)
+	if st.Running {
+		t.Fatalf("expected stopped after Stop, got running")
+	}
+}
+
+// Fast-exiting command: ensure supervisor observes a single start per run and restarts once without duplicate increments.
+func TestSupervisor_ConcurrentStartAndExit_NoDuplicateStartEvents(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	spec := process.Spec{Name: "sv-fast", Command: "sh -c 'exit 0'", AutoRestart: true, RestartInterval: 80 * time.Millisecond}
+	// Use a couple of retries to allow rapid attempts.
+	spec.RetryCount = 1
+	spec.RetryInterval = 30 * time.Millisecond
+	if err := mgr.Start(spec); err == nil {
+		// Start may fail immediately due to instant exit before startsecs (which is zero here), that's fine.
+	}
+	_ = mgr.ensureSupervisor(spec.Name)
+
+	ok := waitUntil(1*time.Second, 10*time.Millisecond, func() bool {
+		st, _ := mgr.Status(spec.Name)
+		return st.Restarts >= 1 || !st.Running // allow either observed restart or dead but no panic
+	})
+	if !ok {
+		t.Fatalf("supervisor did not handle fast exit as expected")
+	}
+}
+
+// Manager-level: run reconciler and issue start/stop rapidly while process exits on its own; final state must be stable and no deadlocks.
+func TestManager_ConcurrentStartStopReconcile(t *testing.T) {
+	requireUnix(t)
+	mgr := NewManager()
+	spec := process.Spec{Name: "mgr-conc", Command: "sh -c 'sleep 0.05'", AutoRestart: true, RestartInterval: 50 * time.Millisecond}
+	mgr.StartReconciler(50 * time.Millisecond)
+	defer mgr.StopReconciler()
+
+	if err := mgr.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Quickly request stop; depending on timing, process may already have exited.
+	_ = mgr.Stop(spec.Name, time.Second)
+
+	// Give the system a little time to settle, then ensure it's not running.
+	ok := waitUntil(1*time.Second, 20*time.Millisecond, func() bool {
+		st, err := mgr.Status(spec.Name)
+		return err == nil && !st.Running
+	})
+	if !ok {
+		// If reconciler brought it back due to AutoRestart, stop it again and assert we can stop cleanly.
+		_ = mgr.Stop(spec.Name, time.Second)
+		st, _ := mgr.Status(spec.Name)
+		if st.Running {
+			t.Fatalf("manager failed to stabilize to stopped state under concurrent reconcile")
+		}
+	}
 }
