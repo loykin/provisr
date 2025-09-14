@@ -93,9 +93,41 @@ singleton = true
 name = "backend"
 members = ["web", "worker"]
 
+# Persistent store configuration (optional)
+# Enable to persist process lifecycle and support high availability across restarts.
+# You can also control this via CLI: --store-dsn to enable/select DSN, or --no-store to disable.
+# Supported DSNs:
+#   - SQLite:   "sqlite:///tmp/provisr.db"   (or a bare path like "/tmp/provisr.db")
+#   - In-memory SQLite for testing: "sqlite::memory:" or "sqlite://:memory:"
+#   - Postgres: "postgres://user:pass@host:port/dbname?sslmode=disable"
+[store]
+# Set to true to enable the persistent store
+enabled = true
+# Default to SQLite on local filesystem; adjust path as needed
+dsn = "sqlite:///tmp/provisr.db"
+# Example Postgres DSN (uncomment to use instead)
+# dsn = "postgres://user:pass@127.0.0.1:5432/provisr?sslmode=disable"
+
 # Optional HTTP API server configuration
 # When enabled, `provisr serve --config config/config.toml` will start an HTTP server.
 # You can override these with CLI flags: --api-listen and --api-base.
+# Optional History configuration (separate from store state)
+# Controls whether to record append-only history rows inside the store and/or
+# export lifecycle events to external systems like OpenSearch or ClickHouse.
+# When omitted, defaults are: in_store=true and no external exports.
+[history]
+# Master enable for external exports (sinks) defined below
+enabled = false
+# Toggle recording history rows in the configured store (if any)
+# Set to false to keep state only without history rows
+in_store = true
+# Optional OpenSearch sink
+# opensearch_url = "http://localhost:9200"
+# opensearch_index = "provisr-history"
+# Optional ClickHouse sink (HTTP interface)
+# clickhouse_url = "http://localhost:8123"
+# clickhouse_table = "default.provisr_history"
+
 [http_api]
 # Enable the HTTP API server (set to true to allow starting from config)
 enabled = true
