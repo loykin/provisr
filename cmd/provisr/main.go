@@ -52,6 +52,10 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 		histCHTable      string
 	)
 
+	provisrCommand := command{
+		mgr: mgr,
+	}
+
 	root := &cobra.Command{Use: "provisr"}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "path to TOML config file")
 	root.PersistentFlags().BoolVar(&useOSEnv, "use-os-env", false, "inject current OS environment into global env")
@@ -69,7 +73,7 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 
 	// start
 	startCmd := &cobra.Command{Use: "start", Short: "Start process(es)", RunE: func(cmd *cobra.Command, args []string) error {
-		return cmdStart(mgr, StartFlags{
+		return provisrCommand.Start(StartFlags{
 			ConfigPath:      configPath,
 			UseOSEnv:        useOSEnv,
 			EnvKVs:          envKVs,
@@ -97,30 +101,30 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 
 	// status
 	statusCmd := &cobra.Command{Use: "status", Short: "Show status", RunE: func(cmd *cobra.Command, args []string) error {
-		return cmdStatus(mgr, StatusFlags{ConfigPath: configPath, Name: name})
+		return provisrCommand.Status(StatusFlags{ConfigPath: configPath, Name: name})
 	}}
 	statusCmd.Flags().StringVar(&name, "name", "demo", "process name")
 
 	// stop
 	stopCmd := &cobra.Command{Use: "stop", Short: "Stop process(es)", RunE: func(cmd *cobra.Command, args []string) error {
-		return cmdStop(mgr, StopFlags{ConfigPath: configPath, Name: name, Wait: 3 * time.Second})
+		return provisrCommand.Stop(StopFlags{ConfigPath: configPath, Name: name, Wait: 3 * time.Second})
 	}}
 	stopCmd.Flags().StringVar(&name, "name", "demo", "process name")
 
 	// cron
 	cronCmd := &cobra.Command{Use: "cron", Short: "Run cron jobs from config (requires --config)", RunE: func(cmd *cobra.Command, args []string) error {
-		return cmdCron(mgr, CronFlags{ConfigPath: configPath})
+		return provisrCommand.Cron(CronFlags{ConfigPath: configPath})
 	}}
 
 	// groups
 	gStart := &cobra.Command{Use: "group-start", Short: "Start a group from config (requires --config and --group)", RunE: func(cmd *cobra.Command, args []string) error {
-		return runGroupStart(mgr, GroupFlags{ConfigPath: configPath, GroupName: groupName})
+		return provisrCommand.GroupStart(GroupFlags{ConfigPath: configPath, GroupName: groupName})
 	}}
 	gStop := &cobra.Command{Use: "group-stop", Short: "Stop a group from config (requires --config and --group)", RunE: func(cmd *cobra.Command, args []string) error {
-		return runGroupStop(mgr, GroupFlags{ConfigPath: configPath, GroupName: groupName, Wait: 3 * time.Second})
+		return provisrCommand.GroupStop(GroupFlags{ConfigPath: configPath, GroupName: groupName, Wait: 3 * time.Second})
 	}}
 	gStatus := &cobra.Command{Use: "group-status", Short: "Show status for a group from config (requires --config and --group)", RunE: func(cmd *cobra.Command, args []string) error {
-		return runGroupStatus(mgr, GroupFlags{ConfigPath: configPath, GroupName: groupName})
+		return provisrCommand.GroupStatus(GroupFlags{ConfigPath: configPath, GroupName: groupName})
 	}}
 	gStart.Flags().StringVar(&groupName, "group", "", "group name from config")
 	gStop.Flags().StringVar(&groupName, "group", "", "group name from config")
