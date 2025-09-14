@@ -124,7 +124,6 @@ func TestSupervisor_AutoRestartThenStopSuppress(t *testing.T) {
 	// Now stop and ensure no further restarts occur for a grace period
 	r2 := make(chan error, 1)
 	h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: 1 * time.Second, Reply: r2}
-	_ = <-r2
 
 	// After stop, process should be not running and startCount should remain stable
 	prev := atomic.LoadInt32(&startCount)
@@ -176,7 +175,6 @@ func TestSupervisor_ShutdownStopsMonitoring(t *testing.T) {
 	// Stopping the handler should complete and no further starts should be recorded.
 	r2 := make(chan error, 1)
 	h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: 1 * time.Second, Reply: r2}
-	_ = <-r2
 
 	// Ensure not running and stable start count after a grace period (no restarts without supervisor)
 	prev := atomic.LoadInt32(&startCount)

@@ -46,9 +46,7 @@ func (m *Manager) SetStoreFromDSN(dsn string) error {
 }
 func (m *Manager) DisableStore() { _ = m.inner.SetStore(nil) }
 
-// History controls (facade)
 func (m *Manager) SetHistorySinks(sinks ...HistorySink) { m.inner.SetHistorySinks(sinks...) }
-func (m *Manager) SetStoreHistoryEnabled(enabled bool)  { m.inner.SetStoreHistoryEnabled(enabled) }
 
 func (m *Manager) Start(s Spec) error  { return m.inner.Start(s) }
 func (m *Manager) StartN(s Spec) error { return m.inner.StartN(s) }
