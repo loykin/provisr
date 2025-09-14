@@ -263,7 +263,7 @@ startsecs = "300ms"
 	}
 	elapsed := time.Since(start)
 	// With retries and a 300ms start window, elapsed should be at least ~280ms
-	if elapsed < 280*time.Millisecond {
+	if elapsed < 2*time.Second {
 		t.Fatalf("expected elapsed around retries/start window, got %v", elapsed)
 	}
 }
