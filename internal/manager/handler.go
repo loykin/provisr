@@ -61,6 +61,13 @@ func (h *handler) run(ctx context.Context) {
 			var err error
 			switch msg.Type {
 			case CtrlStart:
+				// Apply incoming spec, if provided, to ensure latest config at start time.
+				if msg.Spec.Name != "" {
+					h.mu.Lock()
+					h.spec = msg.Spec
+					h.proc.UpdateSpec(h.spec)
+					h.mu.Unlock()
+				}
 				// avoid duplicate starts while a start is already in-flight
 				alive, _ := h.proc.DetectAlive()
 				if alive {
@@ -151,8 +158,9 @@ func (h *handler) stopNow(wait time.Duration) error {
 		return nil
 	}
 	// Pure stop; metrics/history handled by Supervisor.
-	err := h.proc.Stop(wait)
-	return err
+	_ = h.proc.Stop(wait)
+	// For control-plane Stop, treat termination as success regardless of exit error.
+	return nil
 }
 
 // Status returns an externally consumable process.Status snapshot.
