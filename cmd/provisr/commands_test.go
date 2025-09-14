@@ -15,8 +15,9 @@ func TestCmdStartStatusStop_NoConfig(t *testing.T) {
 		t.Skip("requires Unix sleep")
 	}
 	mgr := provisr.New()
+	provisrCommand := command{mgr: mgr}
 	// Start short-lived process
-	if err := cmdStart(mgr, StartFlags{
+	if err := provisrCommand.Start(StartFlags{
 		Name:          "c1",
 		Cmd:           "sleep 0.2",
 		StartDuration: 50 * time.Millisecond,
@@ -24,11 +25,11 @@ func TestCmdStartStatusStop_NoConfig(t *testing.T) {
 		t.Fatalf("cmdStart: %v", err)
 	}
 	// Status should succeed
-	if err := cmdStatus(mgr, StatusFlags{Name: "c1"}); err != nil {
+	if err := provisrCommand.Status(StatusFlags{Name: "c1"}); err != nil {
 		t.Fatalf("cmdStatus: %v", err)
 	}
 	// Stop should be no-op but succeed
-	if err := cmdStop(mgr, StopFlags{Name: "c1", Wait: 200 * time.Millisecond}); err != nil {
+	if err := provisrCommand.Stop(StopFlags{Name: "c1", Wait: 200 * time.Millisecond}); err != nil {
 		t.Fatalf("cmdStop: %v", err)
 	}
 }
@@ -67,16 +68,17 @@ members = ["g1-a", "g1-b"]
 `
 	path := writeTOML(t, dir, "config.toml", cfg)
 
+	provisrCommand := command{mgr: mgr}
 	// Start via config
-	if err := cmdStart(mgr, StartFlags{ConfigPath: path}); err != nil {
+	if err := provisrCommand.Start(StartFlags{ConfigPath: path}); err != nil {
 		t.Fatalf("cmdStart with config: %v", err)
 	}
 	// Group status
-	if err := runGroupStatus(mgr, GroupFlags{ConfigPath: path, GroupName: "grp1"}); err != nil {
+	if err := provisrCommand.GroupStatus(GroupFlags{ConfigPath: path, GroupName: "grp1"}); err != nil {
 		t.Fatalf("group status: %v", err)
 	}
 	// Group stop
-	if err := runGroupStop(mgr, GroupFlags{ConfigPath: path, GroupName: "grp1", Wait: 500 * time.Millisecond}); err != nil {
+	if err := provisrCommand.GroupStop(GroupFlags{ConfigPath: path, GroupName: "grp1", Wait: 500 * time.Millisecond}); err != nil {
 		// Some environments may report signal termination; accept either nil or a termination error.
 		t.Logf("group stop returned: %v (accepted)", err)
 	}
@@ -97,41 +99,44 @@ startsecs = "10ms"
 schedule = "@every 50ms"
 `
 	path := writeTOML(t, dir, "cron.toml", cfg)
+	provisrCommand := command{mgr: mgr}
 	// NonBlocking should start scheduler and then stop immediately
-	if err := cmdCron(mgr, CronFlags{ConfigPath: path, NonBlocking: true}); err != nil {
+	if err := provisrCommand.Cron(CronFlags{ConfigPath: path, NonBlocking: true}); err != nil {
 		t.Fatalf("cmdCron nonblocking: %v", err)
 	}
 }
 
 func TestCmdCronMissingConfig(t *testing.T) {
 	mgr := provisr.New()
-	if err := cmdCron(mgr, CronFlags{}); err == nil {
+	provisrCommand := command{mgr: mgr}
+	if err := provisrCommand.Cron(CronFlags{}); err == nil {
 		t.Fatalf("expected error when --config is missing for cron")
 	}
 }
 
 func TestGroupCommandsMissingFlags(t *testing.T) {
 	mgr := provisr.New()
+	provisrCommand := command{mgr: mgr}
 	// group-start without config
-	if err := runGroupStart(mgr, GroupFlags{}); err == nil {
+	if err := provisrCommand.GroupStart(GroupFlags{}); err == nil {
 		t.Fatalf("expected error for missing --config in group-start")
 	}
 	// group-start without group
-	if err := runGroupStart(mgr, GroupFlags{ConfigPath: "x"}); err == nil {
+	if err := provisrCommand.GroupStart(GroupFlags{ConfigPath: "x"}); err == nil {
 		t.Fatalf("expected error for missing --group in group-start")
 	}
 	// group-status
-	if err := runGroupStatus(mgr, GroupFlags{}); err == nil {
+	if err := provisrCommand.runGroupStatus(GroupFlags{}); err == nil {
 		t.Fatalf("expected error for missing --config in group-status")
 	}
-	if err := runGroupStatus(mgr, GroupFlags{ConfigPath: "x"}); err == nil {
+	if err := provisrCommand.GroupStatus(GroupFlags{ConfigPath: "x"}); err == nil {
 		t.Fatalf("expected error for missing --group in group-status")
 	}
 	// group-stop
-	if err := runGroupStop(mgr, GroupFlags{}); err == nil {
+	if err := provisrCommand.GroupStop(GroupFlags{}); err == nil {
 		t.Fatalf("expected error for missing --config in group-stop")
 	}
-	if err := runGroupStop(mgr, GroupFlags{ConfigPath: "x"}); err == nil {
+	if err := provisrCommand.GroupStop(GroupFlags{ConfigPath: "x"}); err == nil {
 		t.Fatalf("expected error for missing --group in group-stop")
 	}
 }

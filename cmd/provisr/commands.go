@@ -47,10 +47,6 @@ func (c *command) Start(f StartFlags) error {
 	return mgr.Start(sp)
 }
 
-func cmdStart(mgr *provisr.Manager, f StartFlags) error {
-	return (&command{mgr: mgr}).Start(f)
-}
-
 // Status prints status information, optionally loading specs from config for base queries
 func (c *command) Status(f StatusFlags) error {
 	mgr := c.mgr
@@ -65,10 +61,6 @@ func (c *command) Status(f StatusFlags) error {
 	sts, _ := mgr.StatusAll(f.Name)
 	printJSON(sts)
 	return nil
-}
-
-func cmdStatus(mgr *provisr.Manager, f StatusFlags) error {
-	return (&command{mgr: mgr}).Status(f)
 }
 
 // Stop stops processes by name/base from flags or config
@@ -92,10 +84,6 @@ func (c *command) Stop(f StopFlags) error {
 	sts, _ := mgr.StatusAll(f.Name)
 	printJSON(sts)
 	return nil
-}
-
-func cmdStop(mgr *provisr.Manager, f StopFlags) error {
-	return (&command{mgr: mgr}).Stop(f)
 }
 
 // Cron runs cron scheduler based on config
@@ -130,10 +118,6 @@ func (c *command) Cron(f CronFlags) error {
 	select {}
 }
 
-func cmdCron(mgr *provisr.Manager, f CronFlags) error {
-	return (&command{mgr: mgr}).Cron(f)
-}
-
 // GroupStart starts a group from config
 func (c *command) GroupStart(f GroupFlags) error {
 	mgr := c.mgr
@@ -156,10 +140,6 @@ func (c *command) GroupStart(f GroupFlags) error {
 	}
 	g := provisr.NewGroup(mgr)
 	return g.Start(*gs)
-}
-
-func runGroupStart(mgr *provisr.Manager, f GroupFlags) error {
-	return (&command{mgr: mgr}).GroupStart(f)
 }
 
 // GroupStop stops a group from config
@@ -186,7 +166,8 @@ func (c *command) GroupStop(f GroupFlags) error {
 	return g.Stop(*gs, f.Wait)
 }
 
-func runGroupStop(mgr *provisr.Manager, f GroupFlags) error {
+func (c *command) runGroupStop(f GroupFlags) error {
+	mgr := c.mgr
 	return (&command{mgr: mgr}).GroupStop(f)
 }
 
@@ -216,6 +197,7 @@ func (c *command) GroupStatus(f GroupFlags) error {
 	return nil
 }
 
-func runGroupStatus(mgr *provisr.Manager, f GroupFlags) error {
+func (c *command) runGroupStatus(f GroupFlags) error {
+	mgr := c.mgr
 	return (&command{mgr: mgr}).GroupStatus(f)
 }

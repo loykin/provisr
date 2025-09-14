@@ -106,6 +106,7 @@ func (r *Process) TryStart(cmd *exec.Cmd) error {
 	r.WritePIDFile()
 	return nil
 }
+
 func (r *Process) CloseWaitDone() {
 	r.mu.Lock()
 	if r.waitDone != nil {

@@ -96,7 +96,8 @@ func TestStartInstancesTriggersStartN(t *testing.T) {
 		t.Skip("requires Unix sleep")
 	}
 	mgr := provisr.New()
-	err := cmdStart(mgr, StartFlags{
+	provisrCommand := command{mgr: mgr}
+	err := provisrCommand.Start(StartFlags{
 		Name:          "ninst",
 		Cmd:           "sleep 0.05",
 		StartDuration: 0,
