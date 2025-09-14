@@ -166,11 +166,6 @@ func (c *command) GroupStop(f GroupFlags) error {
 	return g.Stop(*gs, f.Wait)
 }
 
-func (c *command) runGroupStop(f GroupFlags) error {
-	mgr := c.mgr
-	return (&command{mgr: mgr}).GroupStop(f)
-}
-
 // GroupStatus prints status for a group from config
 func (c *command) GroupStatus(f GroupFlags) error {
 	mgr := c.mgr

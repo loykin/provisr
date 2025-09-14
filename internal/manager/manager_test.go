@@ -1014,8 +1014,6 @@ func TestHandler_StopDuringStart(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: time.Second, Reply: stopRep}
 	}()
-	_ = <-startRep // may be nil or error if early exit; we don't assert value here
-	_ = <-stopRep
 
 	st := h.Status()
 	if st.Running {

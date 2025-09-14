@@ -41,8 +41,9 @@ func TestHandler_StartStop_Serialize(t *testing.T) {
 	// Stop
 	r2 := make(chan error, 1)
 	h.ctrl <- CtrlMsg{Type: CtrlStop, Wait: 2 * time.Second, Reply: r2}
-	_ = <-r2 // Stop may return nil
-
+	if err := <-r2; err != nil {
+		t.Fatalf("stop: %v", err)
+	}
 	st2 := h.Status()
 	if st2.Running {
 		t.Fatalf("expected stopped after CtrlStop, got running")
