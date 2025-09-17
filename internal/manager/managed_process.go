@@ -383,32 +383,35 @@ func isExpectedShutdownError(err error) bool {
 	}
 
 	errStr := err.Error()
-	// Common signals sent during graceful shutdown - use simple contains check
-	if len(errStr) > 15 && errStr[len(errStr)-10:] == "terminated" {
-		return true
-	}
-	if len(errStr) > 12 && errStr[len(errStr)-6:] == "killed" {
-		return true
-	}
-	if len(errStr) > 15 && errStr[len(errStr)-9:] == "interrupt" {
-		return true
-	}
-	return false
+	// Check for common shutdown signals and patterns
+	return errStr == "signal: terminated" ||
+		errStr == "signal: killed" ||
+		errStr == "signal: interrupt" ||
+		errStr == "exit status 1" || // Common exit code
+		errStr == "exit status 130" || // Ctrl+C
+		errStr == "exit status 143" || // SIGTERM
+		// Also handle wrapped errors from stop process
+		errStr == "failed to stop process: signal: terminated" ||
+		errStr == "failed to stop process: signal: killed" ||
+		errStr == "failed to stop process: signal: interrupt"
 }
 
 // setState safely updates state (minimal lock scope)
 func (up *ManagedProcess) setState(newState processState) {
 	up.mu.Lock()
 	oldState := up.state
+	oldStateStr := oldState.String() // capture string representation while under lock
 	up.state = newState
+	newStateStr := newState.String() // capture string representation while under lock
+	name := up.name                  // capture name while under lock
 	up.mu.Unlock()
 
-	// Record state transition metrics
-	metrics.RecordStateTransition(up.name, oldState.String(), newState.String())
+	// Record state transition metrics (outside lock to avoid holding lock too long)
+	metrics.RecordStateTransition(name, oldStateStr, newStateStr)
 
 	// Update current state metrics - set old state to 0, new state to 1
-	metrics.SetCurrentState(up.name, oldState.String(), false)
-	metrics.SetCurrentState(up.name, newState.String(), true)
+	metrics.SetCurrentState(name, oldStateStr, false)
+	metrics.SetCurrentState(name, newStateStr, true)
 }
 
 // checkProcessHealth monitors process health and handles auto-restart
