@@ -81,9 +81,22 @@ func TestGroupWithInstances(t *testing.T) {
 	if err := g.Start(gs); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+
+	// Debug: Check what processes exist
+	statuses, err := mgr.StatusAll("*")
+	if err != nil {
+		t.Logf("StatusAll error: %v", err)
+	} else {
+		t.Logf("Found %d processes total", len(statuses))
+		for _, st := range statuses {
+			t.Logf("Process: name=%s, running=%v, pid=%d", st.Name, st.Running, st.PID)
+		}
+	}
+
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		cnt, _ := mgr.Count("batch")
+		t.Logf("Current batch count: %d", cnt)
 		if cnt == 3 {
 			break
 		}

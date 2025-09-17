@@ -373,6 +373,12 @@ func (m *Manager) matchesPattern(name, pattern string) bool {
 		return strings.HasSuffix(name, suffix)
 	}
 
+	// Base name matching: "batch" matches "batch-1", "batch-2", etc.
+	// This is for supporting instances created by StartN
+	if strings.HasPrefix(name, pattern+"-") {
+		return true
+	}
+
 	return false
 }
 
