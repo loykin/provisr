@@ -319,18 +319,31 @@ func (m *Manager) matchesPattern(name, pattern string) bool {
 		return true
 	}
 
+	// Exact match
+	if name == pattern {
+		return true
+	}
+
 	// Simple wildcard matching
+	if strings.HasSuffix(pattern, "*") && strings.HasPrefix(pattern, "*") {
+		// Pattern like "*server*"
+		inner := strings.Trim(pattern, "*")
+		return strings.Contains(name, inner)
+	}
+
 	if strings.HasSuffix(pattern, "*") {
+		// Pattern like "web*"
 		prefix := strings.TrimSuffix(pattern, "*")
 		return strings.HasPrefix(name, prefix)
 	}
 
 	if strings.HasPrefix(pattern, "*") {
+		// Pattern like "*server"
 		suffix := strings.TrimPrefix(pattern, "*")
 		return strings.HasSuffix(name, suffix)
 	}
 
-	return name == pattern
+	return false
 }
 
 // mergeEnv merges global and process-specific environment variables
