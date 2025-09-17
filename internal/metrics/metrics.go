@@ -54,6 +54,24 @@ var (
 			Help:      "Current running instances per base process name.",
 		}, []string{"base"},
 	)
+
+	stateTransitions = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "provisr",
+			Subsystem: "process",
+			Name:      "state_transitions_total",
+			Help:      "Number of state transitions between different process states.",
+		}, []string{"name", "from", "to"},
+	)
+
+	currentStates = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "provisr",
+			Subsystem: "process",
+			Name:      "current_state",
+			Help:      "Current state of processes (1 = active state, 0 = inactive).",
+		}, []string{"name", "state"},
+	)
 )
 
 // Register registers all metrics with the provided registerer.
@@ -62,7 +80,7 @@ func Register(r prometheus.Registerer) error {
 	if regOK.Load() {
 		return nil
 	}
-	cs := []prometheus.Collector{processStarts, processRestarts, processStops, processStartDuration, runningInstances}
+	cs := []prometheus.Collector{processStarts, processRestarts, processStops, processStartDuration, runningInstances, stateTransitions, currentStates}
 	for _, c := range cs {
 		if err := r.Register(c); err != nil {
 			// If already registered, ignore (allows double Register with default registry)
@@ -108,5 +126,21 @@ func ObserveStartDuration(name string, seconds float64) {
 func SetRunningInstances(base string, n int) {
 	if regOK.Load() {
 		runningInstances.WithLabelValues(base).Set(float64(n))
+	}
+}
+
+func RecordStateTransition(name, from, to string) {
+	if regOK.Load() {
+		stateTransitions.WithLabelValues(name, from, to).Inc()
+	}
+}
+
+func SetCurrentState(name, state string, active bool) {
+	if regOK.Load() {
+		var value float64 = 0
+		if active {
+			value = 1
+		}
+		currentStates.WithLabelValues(name, state).Set(value)
 	}
 }

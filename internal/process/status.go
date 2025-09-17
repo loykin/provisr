@@ -12,4 +12,5 @@ type Status struct {
 	ExitErr    error     `json:"exit_error,omitempty"`
 	DetectedBy string    `json:"detected_by"`
 	Restarts   int       `json:"restarts"`
+	State      string    `json:"state"` // State machine state: stopped, starting, running, stopping
 }

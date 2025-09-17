@@ -158,10 +158,15 @@ func createStatusCommand(provisrCommand command, globalFlags *GlobalFlags, proce
 			return provisrCommand.Status(StatusFlags{
 				ConfigPath: globalFlags.ConfigPath,
 				Name:       processFlags.Name,
+				Detailed:   cmd.Flag("detailed").Changed,
+				Watch:      cmd.Flag("watch").Changed,
+				Interval:   3 * time.Second, // Default watch interval
 			})
 		},
 	}
 	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name")
+	cmd.Flags().Bool("detailed", false, "show detailed status including state machine info")
+	cmd.Flags().Bool("watch", false, "continuously monitor process status")
 	return cmd
 }
 

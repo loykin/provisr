@@ -237,10 +237,40 @@ func (m *Manager) StopReconciler() {
 
 // ReconcileOnce performs a single reconciliation cycle
 func (m *Manager) ReconcileOnce() {
-	// Stub for now - can be implemented later if needed
+	m.mu.RLock()
+	processes := make([]*ManagedProcess, 0, len(m.processes))
+	for _, up := range m.processes {
+		processes = append(processes, up)
+	}
+	m.mu.RUnlock()
+
+	// Check each process for health and cleanup
+	for _, up := range processes {
+		m.reconcileProcess(up)
+	}
 }
 
-// runReconciler runs the background reconciliation loop
+// reconcileProcess performs reconciliation for a single process
+func (m *Manager) reconcileProcess(up *ManagedProcess) {
+	status := up.Status()
+
+	// Check if process is in an inconsistent state
+	if status.Running && status.PID == 0 {
+		// Running but no PID - likely stale state
+		_ = up.Stop(5 * time.Second)
+		return
+	}
+
+	// Check if process died unexpectedly and needs cleanup
+	if !status.Running && status.PID != 0 {
+		// Process died but state not updated - force cleanup
+		up.Reconcile()
+		return
+	}
+
+	// For debugging: could log healthy processes
+	// log.Printf("Process %s in state %s is healthy", status.Name, status.State)
+} // runReconciler runs the background reconciliation loop
 func (m *Manager) runReconciler() {
 	defer m.reconWG.Done()
 

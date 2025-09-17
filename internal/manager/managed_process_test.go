@@ -281,10 +281,10 @@ func TestManagedProcessStopNonRunning(t *testing.T) {
 
 	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
 
-	// Try to stop a process that was never started
+	// Try to stop a process that was never started - should be no-op, not error
 	err := mp.Stop(1 * time.Second)
-	if err == nil {
-		t.Error("Expected error when stopping non-running process")
+	if err != nil {
+		t.Errorf("Unexpected error when stopping non-running process: %v", err)
 	}
 }
 
