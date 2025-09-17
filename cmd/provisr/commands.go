@@ -55,11 +55,20 @@ func (c *command) Status(f StatusFlags) error {
 		if err != nil {
 			return err
 		}
-		printJSON(statusesByBase(mgr, specs))
+		if f.Detailed {
+			printDetailedStatusByBase(mgr, specs)
+		} else {
+			printJSON(statusesByBase(mgr, specs))
+		}
 		return nil
 	}
+
 	sts, _ := mgr.StatusAll(f.Name)
-	printJSON(sts)
+	if f.Detailed {
+		printDetailedStatus(sts)
+	} else {
+		printJSON(sts)
+	}
 	return nil
 }
 

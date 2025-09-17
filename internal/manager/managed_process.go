@@ -148,9 +148,12 @@ func (up *ManagedProcess) Status() process.Status {
 	status := proc.Snapshot()
 	alive, detectedBy := proc.DetectAlive()
 
+	// Ensure name and state are properly set
+	status.Name = up.name
 	status.Running = alive && state == StateRunning
 	status.DetectedBy = detectedBy
 	status.Restarts = int(atomic.LoadInt64(&up.restarts))
+	status.State = state.String() // Add state machine state
 
 	return status
 }
@@ -177,6 +180,11 @@ func (up *ManagedProcess) Shutdown() error {
 	case <-up.doneChan:
 		return nil // Already shut down
 	}
+}
+
+// Reconcile performs health check and cleanup for this process
+func (up *ManagedProcess) Reconcile() {
+	up.checkProcessHealth()
 }
 
 // runStateMachine is the core state machine (single goroutine, no races)
@@ -231,7 +239,9 @@ func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 	case StateRunning:
 		// Already running, check if process is actually alive
 		if alive, _ := up.proc.DetectAlive(); alive {
-			return nil // Already running
+			snapshot := up.proc.Snapshot()
+			return fmt.Errorf("process '%s' is already running (PID: %d, state: %s)",
+				up.name, snapshot.PID, up.state.String())
 		}
 		// Process died, transition to stopped and try start
 		up.setState(StateStopped)
@@ -241,10 +251,10 @@ func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 		return up.doStart(newSpec)
 
 	case StateStarting:
-		return fmt.Errorf("process already starting")
+		return fmt.Errorf("process '%s' is already starting, please wait or stop first", up.name)
 
 	case StateStopping:
-		return fmt.Errorf("process is stopping, cannot start")
+		return fmt.Errorf("process '%s' is currently stopping, please wait for stop to complete", up.name)
 
 	default:
 		return fmt.Errorf("invalid state for start: %v", currentState)
@@ -352,7 +362,7 @@ func (up *ManagedProcess) handleUpdateSpec(newSpec process.Spec) error {
 func (up *ManagedProcess) handleShutdown() error {
 	// Stop process if running
 	err := up.handleStop(3 * time.Second)
-	if err != nil {
+	if err != nil && !isExpectedShutdownError(err) {
 		return err
 	}
 
@@ -366,11 +376,39 @@ func (up *ManagedProcess) handleShutdown() error {
 	return nil
 }
 
+// isExpectedShutdownError checks if the error is expected during shutdown
+func isExpectedShutdownError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common signals sent during graceful shutdown - use simple contains check
+	if len(errStr) > 15 && errStr[len(errStr)-10:] == "terminated" {
+		return true
+	}
+	if len(errStr) > 12 && errStr[len(errStr)-6:] == "killed" {
+		return true
+	}
+	if len(errStr) > 15 && errStr[len(errStr)-9:] == "interrupt" {
+		return true
+	}
+	return false
+}
+
 // setState safely updates state (minimal lock scope)
 func (up *ManagedProcess) setState(newState processState) {
 	up.mu.Lock()
+	oldState := up.state
 	up.state = newState
 	up.mu.Unlock()
+
+	// Record state transition metrics
+	metrics.RecordStateTransition(up.name, oldState.String(), newState.String())
+
+	// Update current state metrics - set old state to 0, new state to 1
+	metrics.SetCurrentState(up.name, oldState.String(), false)
+	metrics.SetCurrentState(up.name, newState.String(), true)
 }
 
 // checkProcessHealth monitors process health and handles auto-restart

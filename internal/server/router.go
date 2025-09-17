@@ -39,6 +39,8 @@ func (r *Router) Handler() http.Handler {
 	group.POST("/start", r.handleStart)
 	group.POST("/stop", r.handleStop)
 	group.GET("/status", r.handleStatus)
+	group.GET("/debug/processes", r.handleDebugProcesses)
+	group.POST("/debug/reconcile", r.handleDebugReconcile)
 	return g
 }
 
@@ -213,4 +215,56 @@ func (r *Router) handleStatus(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, st)
+}
+
+// Debug endpoints for troubleshooting
+
+type debugProcessInfo struct {
+	Status        process.Status `json:"status"`
+	InternalState string         `json:"internal_state"`
+	HealthCheck   string         `json:"health_check"`
+}
+
+func (r *Router) handleDebugProcesses(c *gin.Context) {
+	// Get all processes with detailed debug information
+	pattern := c.DefaultQuery("pattern", "*")
+
+	statuses, err := r.mgr.StatusAll(pattern)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	debugInfos := make([]debugProcessInfo, len(statuses))
+	for i, status := range statuses {
+		debugInfos[i] = debugProcessInfo{
+			Status:        status,
+			InternalState: status.State, // Already includes state machine state
+			HealthCheck:   getHealthStatus(status),
+		}
+	}
+
+	writeJSON(c, http.StatusOK, debugInfos)
+}
+
+func (r *Router) handleDebugReconcile(c *gin.Context) {
+	// Trigger manual reconciliation
+	r.mgr.ReconcileOnce()
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func getHealthStatus(status process.Status) string {
+	if !status.Running {
+		return "not_running"
+	}
+
+	if status.PID == 0 {
+		return "no_pid"
+	}
+
+	if status.State != "running" {
+		return "transitioning"
+	}
+
+	return "healthy"
 }

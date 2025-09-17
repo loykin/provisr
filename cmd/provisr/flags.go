@@ -22,6 +22,9 @@ type StartFlags struct {
 type StatusFlags struct {
 	ConfigPath string
 	Name       string
+	Detailed   bool          // Show detailed state information
+	Watch      bool          // Watch mode for continuous monitoring
+	Interval   time.Duration // Watch interval
 }
 
 type StopFlags struct {
