@@ -1,0 +1,13 @@
+# External process configuration
+name = "external"
+command = "sleep 60"
+retries = 0
+retry_interval = "500ms"
+startsecs = "0s"
+autorestart = false
+instances = 1
+
+# Process detectors
+[[detectors]]
+type = "pid"
+pid = 1234

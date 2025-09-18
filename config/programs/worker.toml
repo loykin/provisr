@@ -1,0 +1,14 @@
+# Worker process configuration
+name = "worker"
+command = "sh -c 'while true; do echo working; sleep 1; done'"
+retries = 1
+retry_interval = "300ms"
+startsecs = "500ms"
+autorestart = true
+restart_interval = "1s"
+instances = 1
+
+# Process detectors
+[[detectors]]
+type = "command"
+command = "pgrep -f 'echo working' >/dev/null"

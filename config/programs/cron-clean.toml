@@ -1,0 +1,5 @@
+# Cron job configuration
+name = "cron-clean"
+command = "sh -c 'echo cleaning'"
+schedule = "@every 5s"
+singleton = true
