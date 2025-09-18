@@ -27,7 +27,10 @@ func applyGlobalEnvFromFlags(mgr *provisr.Manager, useOSEnv bool, envFiles []str
 }
 
 func startFromSpecs(mgr *provisr.Manager, specs []provisr.Spec) error {
-	for _, sp := range specs {
+	// Sort specs by priority before starting
+	sortedSpecs := provisr.SortSpecsByPriority(specs)
+
+	for _, sp := range sortedSpecs {
 		if sp.Instances > 1 {
 			if err := mgr.StartN(sp); err != nil {
 				return err

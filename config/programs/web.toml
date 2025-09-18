@@ -4,6 +4,7 @@ command = "python3 -m http.server 8080"
 workdir = "/tmp"
 env = ["ENV=prod", "PORT=8080"]
 pidfile = "/tmp/web.pid"
+priority = 10  # Start after database and other infrastructure
 retries = 3
 retry_interval = "500ms"
 startsecs = "2s"

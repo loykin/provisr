@@ -16,6 +16,7 @@ type Spec struct {
 	WorkDir         string              `json:"work_dir"`         // optional working dir
 	Env             []string            `json:"env"`              // optional extra env
 	PIDFile         string              `json:"pid_file"`         // optional pidfile path; if set a PIDFileDetector will be used
+	Priority        int                 `json:"priority"`         // startup priority (lower numbers start first, default 0)
 	RetryCount      int                 `json:"retry_count"`      // number of retries on start failure
 	RetryInterval   time.Duration       `json:"retry_interval"`   // interval between retries
 	StartDuration   time.Duration       `json:"start_duration"`   // minimum time the process must stay up to be considered started

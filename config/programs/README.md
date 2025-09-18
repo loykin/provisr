@@ -1,6 +1,6 @@
 # Programs Directory Configuration
 
-The `config/programs/` directory allows you to manage individual process configurations separately instead of defining all processes in the main `config.toml` file.
+The `config/programs/` directory allows you to manage individual process configurations separately instead of defining all processes in the main `config.toml` file. Each process can have its own priority for startup ordering.
 
 ## Directory Structure
 
@@ -13,6 +13,15 @@ config/
     ├── external.toml   # External process
     └── cron-clean.toml # Cron job process
 ```
+
+## Startup Priority
+
+Processes are started in priority order (lower numbers start first):
+
+- **priority = 0**: Cron jobs and utilities (cron-clean)
+- **priority = 5**: Infrastructure services (external)
+- **priority = 10**: Application services (web)
+- **priority = 20**: Background workers (worker)
 
 ## Usage
 
@@ -39,6 +48,7 @@ command = "python3 -m http.server 8080"
 workdir = "/tmp"
 env = ["ENV=prod", "PORT=8080"]
 pidfile = "/tmp/web.pid"
+priority = 10  # Start after infrastructure (lower numbers start first)
 retries = 3
 retry_interval = "500ms"
 startsecs = "2s"
