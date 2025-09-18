@@ -15,14 +15,17 @@ type APIClient struct {
 }
 
 // NewAPIClient creates a new API client
-func NewAPIClient(baseURL string) *APIClient {
+func NewAPIClient(baseURL string, timeout time.Duration) *APIClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:8080/api"
+	}
+	if timeout == 0 {
+		timeout = 10 * time.Second
 	}
 	return &APIClient{
 		baseURL: baseURL,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
