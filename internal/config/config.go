@@ -35,6 +35,7 @@ type FileConfig struct {
 	HTTP      *HTTPAPIConfig `toml:"http_api" mapstructure:"http_api"`
 	Store     *StoreConfig   `toml:"store" mapstructure:"store"`
 	History   *HistoryConfig `toml:"history" mapstructure:"history"`
+	Metrics   *MetricsConfig `toml:"metrics" mapstructure:"metrics"`
 }
 
 type StoreConfig struct {
@@ -49,6 +50,11 @@ type HistoryConfig struct {
 	OpenSearchIndex string `toml:"opensearch_index" mapstructure:"opensearch_index"`
 	ClickHouseURL   string `toml:"clickhouse_url" mapstructure:"clickhouse_url"`
 	ClickHouseTable string `toml:"clickhouse_table" mapstructure:"clickhouse_table"`
+}
+
+type MetricsConfig struct {
+	Enabled bool   `toml:"enabled" mapstructure:"enabled"`
+	Listen  string `toml:"listen" mapstructure:"listen"` // e.g., ":9090"
 }
 
 type LogConfig struct {
@@ -537,6 +543,15 @@ func LoadHistoryFromTOML(path string) (*HistoryConfig, error) {
 		return nil, err
 	}
 	return fc.History, nil
+}
+
+// LoadMetricsFromTOML loads optional metrics configuration. Returns (nil, nil) if absent.
+func LoadMetricsFromTOML(path string) (*MetricsConfig, error) {
+	fc, err := parseFileConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	return fc.Metrics, nil
 }
 
 // SortSpecsByPriority sorts process specs by priority (lower numbers first).

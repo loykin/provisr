@@ -67,3 +67,11 @@ enabled = true
 listen = ":8080"
 # Base path for endpoints: {base}/start, {base}/stop, {base}/status
 base_path = "/api"
+
+# Optional Prometheus metrics server configuration
+# When enabled, exposes metrics on /metrics endpoint
+[metrics]
+# Enable the metrics server (set to true to serve Prometheus metrics)
+enabled = false
+# Listen address for metrics server, e.g. ":9090" or "127.0.0.1:9090"  
+listen = ":9090"
