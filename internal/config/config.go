@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ type ProcConfig struct {
 	WorkDir         string          `toml:"workdir" mapstructure:"workdir"`
 	Env             []string        `toml:"env" mapstructure:"env"`
 	PIDFile         string          `toml:"pidfile" mapstructure:"pidfile"`
+	Priority        int             `toml:"priority" mapstructure:"priority"` // startup priority (lower numbers start first)
 	RetryCount      int             `toml:"retries" mapstructure:"retries"`
 	RetryInterval   time.Duration   `toml:"retry_interval" mapstructure:"retry_interval"`
 	StartDuration   time.Duration   `toml:"startsecs" mapstructure:"startsecs"`
@@ -365,6 +367,7 @@ func buildSpecsFromProcessConfigs(processConfigs []ProcConfig, fc *FileConfig) (
 			WorkDir:         pc.WorkDir,
 			Env:             pc.Env,
 			PIDFile:         pc.PIDFile,
+			Priority:        pc.Priority,
 			RetryCount:      pc.RetryCount,
 			RetryInterval:   pc.RetryInterval,
 			StartDuration:   pc.StartDuration,
@@ -490,6 +493,7 @@ func buildCronJobsFromProcessConfigs(processConfigs []ProcConfig) ([]CronJob, er
 			Instances:       1,
 			Detectors:       dets,
 			Log:             logger.Config{},
+			Priority:        pc.Priority,
 		}
 		singleton := true
 		if pc.Singleton != nil {
@@ -533,4 +537,18 @@ func LoadHistoryFromTOML(path string) (*HistoryConfig, error) {
 		return nil, err
 	}
 	return fc.History, nil
+}
+
+// SortSpecsByPriority sorts process specs by priority (lower numbers first).
+// Specs with the same priority maintain their original order (stable sort).
+func SortSpecsByPriority(specs []process.Spec) []process.Spec {
+	// Create a copy to avoid modifying the original slice
+	sorted := make([]process.Spec, len(specs))
+	copy(sorted, specs)
+
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Priority < sorted[j].Priority
+	})
+
+	return sorted
 }

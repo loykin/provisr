@@ -101,6 +101,9 @@ func LoadSpecs(path string) ([]Spec, error)           { return cfg.LoadSpecsFrom
 func LoadGroups(path string) ([]pg.GroupSpec, error)  { return cfg.LoadGroupsFromTOML(path) }
 func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsFromTOML(path) }
 
+// SortSpecsByPriority sorts process specs by priority (lower numbers start first)
+func SortSpecsByPriority(specs []Spec) []Spec { return cfg.SortSpecsByPriority(specs) }
+
 // HTTP API helpers
 
 func LoadHTTPAPI(path string) (*cfg.HTTPAPIConfig, error) { return cfg.LoadHTTPAPIFromTOML(path) }

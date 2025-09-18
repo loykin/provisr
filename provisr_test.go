@@ -149,3 +149,196 @@ func metricsHandler() http.Handler {
 		_, _ = w.Write([]byte("provisr_process_starts_total"))
 	})
 }
+
+// TestSortSpecsByPriority_PublicAPI tests the public API for priority sorting
+func TestSortSpecsByPriority_PublicAPI(t *testing.T) {
+	specs := []Spec{
+		{Name: "low", Priority: 20},
+		{Name: "high", Priority: 1},
+		{Name: "medium", Priority: 10},
+		{Name: "same-medium", Priority: 10},
+	}
+
+	sorted := SortSpecsByPriority(specs)
+
+	// Verify original is not modified
+	if specs[0].Name != "low" {
+		t.Error("original slice was modified")
+	}
+
+	// Verify sort order
+	expected := []string{"high", "medium", "same-medium", "low"}
+	expectedPriorities := []int{1, 10, 10, 20}
+
+	for i, expectedName := range expected {
+		if sorted[i].Name != expectedName {
+			t.Errorf("position %d: expected %s, got %s", i, expectedName, sorted[i].Name)
+		}
+		if sorted[i].Priority != expectedPriorities[i] {
+			t.Errorf("position %d (%s): expected priority %d, got %d",
+				i, sorted[i].Name, expectedPriorities[i], sorted[i].Priority)
+		}
+	}
+}
+
+// TestLoadSpecs_WithPriorityIntegration tests loading specs with priority through public API
+func TestLoadSpecs_WithPriorityIntegration(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create config with priority specs
+	configFile := filepath.Join(dir, "config.toml")
+	configData := `
+[[processes]]
+name = "service-a"
+command = "echo a"
+priority = 5
+
+[[processes]]
+name = "service-b" 
+command = "echo b"
+priority = 1
+`
+	if err := os.WriteFile(configFile, []byte(configData), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Load specs using public API
+	specs, err := LoadSpecs(configFile)
+	if err != nil {
+		t.Fatalf("LoadSpecs failed: %v", err)
+	}
+
+	if len(specs) != 2 {
+		t.Fatalf("expected 2 specs, got %d", len(specs))
+	}
+
+	// Find specs by name and check priorities
+	specMap := make(map[string]int)
+	for _, spec := range specs {
+		specMap[spec.Name] = spec.Priority
+	}
+
+	if specMap["service-a"] != 5 {
+		t.Errorf("service-a: expected priority 5, got %d", specMap["service-a"])
+	}
+	if specMap["service-b"] != 1 {
+		t.Errorf("service-b: expected priority 1, got %d", specMap["service-b"])
+	}
+}
+
+// TestLoadSpecs_ProgramsDirectoryPriority tests priority loading from programs directory
+func TestLoadSpecs_ProgramsDirectoryPriority(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create main config
+	mainConfig := filepath.Join(dir, "config.toml")
+	mainData := `env = ["GLOBAL=test"]`
+	if err := os.WriteFile(mainConfig, []byte(mainData), 0o644); err != nil {
+		t.Fatalf("write main config: %v", err)
+	}
+
+	// Create programs directory
+	programsDir := filepath.Join(dir, "programs")
+	if err := os.MkdirAll(programsDir, 0o755); err != nil {
+		t.Fatalf("create programs dir: %v", err)
+	}
+
+	// Create program files with priorities
+	programs := map[string]string{
+		"frontend.toml": `
+name = "frontend"
+command = "echo frontend"
+priority = 15`,
+		"backend.toml": `
+name = "backend"
+command = "echo backend"
+priority = 10`,
+		"database.toml": `
+name = "database"
+command = "echo database"
+priority = 1`,
+	}
+
+	for filename, content := range programs {
+		programFile := filepath.Join(programsDir, filename)
+		if err := os.WriteFile(programFile, []byte(content), 0o644); err != nil {
+			t.Fatalf("write program file %s: %v", filename, err)
+		}
+	}
+
+	// Load specs
+	specs, err := LoadSpecs(mainConfig)
+	if err != nil {
+		t.Fatalf("LoadSpecs failed: %v", err)
+	}
+
+	if len(specs) != 3 {
+		t.Fatalf("expected 3 specs, got %d", len(specs))
+	}
+
+	// Test sorting
+	sortedSpecs := SortSpecsByPriority(specs)
+	expectedOrder := []string{"database", "backend", "frontend"}
+	expectedPriorities := []int{1, 10, 15}
+
+	for i, expectedName := range expectedOrder {
+		if sortedSpecs[i].Name != expectedName {
+			t.Errorf("sorted position %d: expected %s, got %s", i, expectedName, sortedSpecs[i].Name)
+		}
+		if sortedSpecs[i].Priority != expectedPriorities[i] {
+			t.Errorf("sorted position %d (%s): expected priority %d, got %d",
+				i, sortedSpecs[i].Name, expectedPriorities[i], sortedSpecs[i].Priority)
+		}
+	}
+}
+
+// TestStartManager_WithPriorityBasedStartup tests starting processes with priority order
+func TestStartManager_WithPriorityBasedStartup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	mgr := New()
+
+	// Create specs with priorities (in reverse order)
+	specs := []Spec{
+		{
+			Name:     "last",
+			Command:  "echo last",
+			Priority: 30,
+		},
+		{
+			Name:     "first",
+			Command:  "echo first",
+			Priority: 1,
+		},
+		{
+			Name:     "middle",
+			Command:  "echo middle",
+			Priority: 15,
+		},
+	}
+
+	// Sort specs by priority
+	sortedSpecs := SortSpecsByPriority(specs)
+
+	// Start in priority order
+	for _, spec := range sortedSpecs {
+		if err := mgr.Start(spec); err != nil {
+			t.Errorf("failed to start %s: %v", spec.Name, err)
+		}
+	}
+
+	// Verify startup order by checking the sorted specs
+	expectedOrder := []string{"first", "middle", "last"}
+	for i, expectedName := range expectedOrder {
+		if sortedSpecs[i].Name != expectedName {
+			t.Errorf("startup order position %d: expected %s, got %s", i, expectedName, sortedSpecs[i].Name)
+		}
+	}
+
+	// Clean up
+	for _, spec := range specs {
+		_ = mgr.StopAll(spec.Name, 1000) // 1 second timeout
+	}
+}

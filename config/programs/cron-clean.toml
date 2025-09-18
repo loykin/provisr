@@ -1,5 +1,6 @@
 # Cron job configuration
 name = "cron-clean"
 command = "sh -c 'echo cleaning'"
+priority = 0  # Cron jobs don't need high priority for startup order 
 schedule = "@every 5s"
 singleton = true
