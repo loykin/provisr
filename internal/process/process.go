@@ -247,12 +247,10 @@ func (r *Process) Snapshot() Status {
 // DetectAlive probes liveness avoiding races with os/exec internals.
 func (r *Process) DetectAlive() (bool, string) {
 	r.mu.Lock()
-	running := r.status.Running
 	cmd := r.cmd
 	r.mu.Unlock()
-	if !running {
-		return false, ""
-	}
+
+	// First, try exec:pid detection if we have a command process
 	if cmd != nil && cmd.Process != nil {
 		pid := cmd.Process.Pid
 		// On Linux, a quickly-exiting child can be a zombie; treat that as not alive.
@@ -263,14 +261,15 @@ func (r *Process) DetectAlive() (bool, string) {
 			if syscall.Kill(pid, 0) == nil {
 				return true, "exec:pid"
 			}
-			return false, ""
+		} else {
+			// Non-Linux: use process group signal check as before to handle quick-exit detection.
+			if syscall.Kill(-pid, 0) == nil {
+				return true, "exec:pid"
+			}
 		}
-		// Non-Linux: use process group signal check as before to handle quick-exit detection.
-		if syscall.Kill(-pid, 0) == nil {
-			return true, "exec:pid"
-		}
-		return false, ""
 	}
+
+	// If exec:pid detection fails or no process, try configured detectors
 	for _, d := range r.detectors() {
 		ok, _ := d.Alive()
 		if ok {

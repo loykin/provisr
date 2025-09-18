@@ -478,12 +478,41 @@ func (up *ManagedProcess) monitorProcessExit() {
 	up.proc.MarkExited(err)
 	up.proc.CloseWriters()
 
-	// Transition state if we're still running
+	// Transition state if we're still running and handle autorestart
 	up.mu.RLock()
 	currentState := up.state
+	spec := up.spec
 	up.mu.RUnlock()
 
 	if currentState == StateRunning {
 		up.setState(StateStopped)
+
+		// Log the exit
+		if up.stopLogger != nil {
+			up.stopLogger(up.proc, err)
+		}
+
+		// Handle autorestart if enabled
+		if spec.AutoRestart {
+			// Increment restart count
+			atomic.AddInt64(&up.restarts, 1)
+			metrics.IncRestart(up.name)
+
+			// Wait before restart if specified
+			if spec.RestartInterval > 0 {
+				time.Sleep(spec.RestartInterval)
+			}
+
+			// Attempt restart
+			go func() {
+				cmd := command{
+					action: ActionStart,
+					spec:   spec,
+					reply:  make(chan error, 1),
+				}
+				up.cmdChan <- cmd
+				<-cmd.reply // Wait for completion (ignore error for auto-restart)
+			}()
+		}
 	}
 }

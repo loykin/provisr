@@ -93,7 +93,7 @@ func createRootCommand(flags *GlobalFlags) *cobra.Command {
 	root := &cobra.Command{Use: "provisr"}
 
 	// Add persistent flags
-	root.PersistentFlags().StringVar(&flags.ConfigPath, "config", "", "path to TOML config file")
+	root.PersistentFlags().StringVar(&flags.ConfigPath, "config", "config/config.toml", "path to TOML config file")
 	root.PersistentFlags().BoolVar(&flags.UseOSEnv, "use-os-env", false, "inject current OS environment into global env")
 	root.PersistentFlags().StringSliceVar(&flags.EnvKVs, "env", nil, "additional KEY=VALUE to inject (repeatable)")
 	root.PersistentFlags().StringSliceVar(&flags.EnvFiles, "env-file", nil, "path to .env file(s) with KEY=VALUE lines (repeatable)")
