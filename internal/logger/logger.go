@@ -8,6 +8,13 @@ import (
 	lj "gopkg.in/natefinch/lumberjack.v2"
 )
 
+// Default logging configuration constants
+const (
+	DefaultMaxSizeMB  = 10 // MB
+	DefaultMaxBackups = 3  // number of backup files
+	DefaultMaxAgeDays = 7  // days
+)
+
 // Config describes logging destinations for a process.
 // If StdoutPath/StderrPath are empty, and Dir is set, files will be
 // Dir/<name>.stdout.log and Dir/<name>.stderr.log
@@ -38,18 +45,18 @@ func (c Config) Writers(name string) (io.WriteCloser, io.WriteCloser, error) {
 	if stdout != "" {
 		outW = &lj.Logger{
 			Filename:   stdout,
-			MaxSize:    valOr(c.MaxSizeMB, 10),
-			MaxBackups: valOr(c.MaxBackups, 3),
-			MaxAge:     valOr(c.MaxAgeDays, 7),
+			MaxSize:    valOr(c.MaxSizeMB, DefaultMaxSizeMB),
+			MaxBackups: valOr(c.MaxBackups, DefaultMaxBackups),
+			MaxAge:     valOr(c.MaxAgeDays, DefaultMaxAgeDays),
 			Compress:   c.Compress,
 		}
 	}
 	if stderr != "" {
 		errW = &lj.Logger{
 			Filename:   stderr,
-			MaxSize:    valOr(c.MaxSizeMB, 10),
-			MaxBackups: valOr(c.MaxBackups, 3),
-			MaxAge:     valOr(c.MaxAgeDays, 7),
+			MaxSize:    valOr(c.MaxSizeMB, DefaultMaxSizeMB),
+			MaxBackups: valOr(c.MaxBackups, DefaultMaxBackups),
+			MaxAge:     valOr(c.MaxAgeDays, DefaultMaxAgeDays),
 			Compress:   c.Compress,
 		}
 	}

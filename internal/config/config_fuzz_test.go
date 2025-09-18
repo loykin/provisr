@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -36,16 +37,12 @@ func FuzzProcConfigTOML(f *testing.F) {
 			b.WriteString(strings.ReplaceAll(pidfile, "\"", ""))
 			b.WriteString("\"\n")
 		}
-		b.WriteString("instances = ")
-		b.WriteString(strings.TrimSpace(strings.ReplaceAll(strings.TrimPrefix(strings.TrimPrefix(strings.Join([]string{" ", " ", ""}, ""), ""), ""), " ", ""))) // noop filler
-		// Actually write instances numeric in a safe way
-		b.WriteString(strings.TrimSpace(strings.ReplaceAll(strings.TrimSpace(strings.Trim(strings.Repeat(" ", 0), " ")), " ", "")))
-		b.WriteString("0\n")
+		// Write instances value safely
+		instancesVal := 0
 		if instances > 0 {
-			b.WriteString("instances = ")
-			b.WriteString(strings.TrimSpace(strings.ReplaceAll(strings.TrimSpace(strings.Trim(strings.Repeat(" ", 0), " ")), " ", "")))
-			b.WriteString("1\n")
+			instancesVal = 1
 		}
+		b.WriteString(fmt.Sprintf("instances = %d\n", instancesVal))
 		if autorestart {
 			b.WriteString("autorestart = true\n")
 		}
