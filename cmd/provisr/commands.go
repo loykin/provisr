@@ -71,18 +71,17 @@ func (c *command) statusViaAPI(f StatusFlags, apiClient *APIClient) error {
 
 // Start Method-style handlers bound to a command with an embedded manager
 func (c *command) Start(f StartFlags) error {
-	// Try to use daemon API first
-	apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
-	if apiClient.IsReachable() {
-		return c.startViaAPI(f, apiClient)
+	// If API URL is specified, try daemon API
+	if f.APIUrl != "" {
+		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
+		if apiClient.IsReachable() {
+			return c.startViaAPI(f, apiClient)
+		}
+		return fmt.Errorf("daemon not reachable at %s", f.APIUrl)
 	}
 
-	// Fall back to direct manager only if no API URL specified and config available
-	if f.APIUrl == "" && f.ConfigPath != "" {
-		return c.startViaManager(f)
-	}
-
-	return fmt.Errorf("daemon not reachable at %s - please start daemon with: provisr serve", apiClient.baseURL)
+	// No API URL specified - use direct manager
+	return c.startViaManager(f)
 }
 
 // startViaManager uses direct manager (fallback mode)
@@ -123,18 +122,17 @@ func (c *command) startViaManager(f StartFlags) error {
 
 // Status prints status information, optionally loading specs from config for base queries
 func (c *command) Status(f StatusFlags) error {
-	// Try to use daemon API first
-	apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
-	if apiClient.IsReachable() {
-		return c.statusViaAPI(f, apiClient)
+	// If API URL is specified, try daemon API
+	if f.APIUrl != "" {
+		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
+		if apiClient.IsReachable() {
+			return c.statusViaAPI(f, apiClient)
+		}
+		return fmt.Errorf("daemon not reachable at %s", f.APIUrl)
 	}
 
-	// Fall back to direct manager only if no API URL specified and config available
-	if f.APIUrl == "" && f.ConfigPath != "" {
-		return c.statusViaManager(f)
-	}
-
-	return fmt.Errorf("daemon not reachable at %s - please start daemon with: provisr serve", apiClient.baseURL)
+	// No API URL specified - use direct manager
+	return c.statusViaManager(f)
 }
 
 // statusViaManager uses direct manager (fallback mode)

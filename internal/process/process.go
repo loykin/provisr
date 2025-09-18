@@ -41,20 +41,24 @@ func (r *Process) UpdateSpec(s Spec) {
 // It sets workdir, environment, stdio/logging, and process group attributes.
 // Logging writers are prepared and stored via EnsureLogClosers.
 func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
-	cmd := r.spec.BuildCommand()
-	if r.spec.WorkDir != "" {
-		cmd.Dir = r.spec.WorkDir
+	r.mu.Lock()
+	spec := r.spec // Create a copy to avoid holding lock during I/O operations
+	r.mu.Unlock()
+
+	cmd := spec.BuildCommand()
+	if spec.WorkDir != "" {
+		cmd.Dir = spec.WorkDir
 	}
 	if len(mergedEnv) > 0 {
 		cmd.Env = mergedEnv
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Setup logging if configured
-	if r.spec.Log.Dir != "" || r.spec.Log.StdoutPath != "" || r.spec.Log.StderrPath != "" {
-		if r.spec.Log.Dir != "" {
-			_ = os.MkdirAll(r.spec.Log.Dir, 0o750)
+	if spec.Log.Dir != "" || spec.Log.StdoutPath != "" || spec.Log.StderrPath != "" {
+		if spec.Log.Dir != "" {
+			_ = os.MkdirAll(spec.Log.Dir, 0o750)
 		}
-		outW, errW, _ := r.spec.Log.Writers(r.spec.Name)
+		outW, errW, _ := spec.Log.Writers(spec.Name)
 		r.EnsureLogClosers(outW, errW)
 		ow, ew := r.OutErrClosers()
 		if ow != nil {
@@ -212,28 +216,31 @@ func (r *Process) CloseWriters() {
 }
 
 func (r *Process) WritePIDFile() {
-	if r.spec.PIDFile == "" {
-		return
-	}
 	r.mu.Lock()
+	pidFile := r.spec.PIDFile
 	pid := 0
 	if r.cmd != nil && r.cmd.Process != nil {
 		pid = r.cmd.Process.Pid
 	}
 	r.mu.Unlock()
-	if pid == 0 {
+
+	if pidFile == "" || pid == 0 {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(r.spec.PIDFile), 0o750)
-	_ = os.WriteFile(r.spec.PIDFile, []byte(strconv.Itoa(pid)), 0o600)
+	_ = os.MkdirAll(filepath.Dir(pidFile), 0o750)
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o600)
 }
 
 // RemovePIDFile best-effort
 func (r *Process) RemovePIDFile() {
-	if r.spec.PIDFile == "" {
+	r.mu.Lock()
+	pidFile := r.spec.PIDFile
+	r.mu.Unlock()
+
+	if pidFile == "" {
 		return
 	}
-	_ = os.Remove(r.spec.PIDFile)
+	_ = os.Remove(pidFile)
 }
 
 // Snapshot returns a copy of the current status.
@@ -280,6 +287,9 @@ func (r *Process) DetectAlive() (bool, string) {
 }
 
 func (r *Process) detectors() []detector.Detector {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	dets := make([]detector.Detector, 0, len(r.spec.Detectors)+1)
 	if r.spec.PIDFile != "" {
 		dets = append(dets, detector.PIDFileDetector{PIDFile: r.spec.PIDFile})
