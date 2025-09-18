@@ -11,8 +11,73 @@ type command struct {
 	mgr *provisr.Manager
 }
 
+// startViaAPI starts processes using the daemon API
+func (c *command) startViaAPI(f StartFlags, apiClient *APIClient) error {
+	if f.ConfigPath != "" {
+		// For config-based starts, we need to load specs and start each one
+		specs, err := provisr.LoadSpecs(f.ConfigPath)
+		if err != nil {
+			return err
+		}
+
+		for _, spec := range specs {
+			if err := apiClient.StartProcess(spec); err != nil {
+				return fmt.Errorf("failed to start %s: %w", spec.Name, err)
+			}
+		}
+
+		// Get status and print
+		result, err := apiClient.GetStatus("")
+		if err != nil {
+			return err
+		}
+		printJSON(result)
+		return nil
+	}
+
+	// Single process start
+	spec := provisr.Spec{
+		Name:            f.Name,
+		Command:         f.Cmd,
+		PIDFile:         f.PIDFile,
+		RetryCount:      f.Retries,
+		RetryInterval:   f.RetryInterval,
+		StartDuration:   f.StartDuration,
+		AutoRestart:     f.AutoRestart,
+		RestartInterval: f.RestartInterval,
+		Instances:       f.Instances,
+	}
+
+	return apiClient.StartProcess(spec)
+}
+
+// statusViaAPI gets status using the daemon API
+func (c *command) statusViaAPI(f StatusFlags, apiClient *APIClient) error {
+	result, err := apiClient.GetStatus(f.Name)
+	if err != nil {
+		return err
+	}
+
+	if f.Detailed {
+		// For detailed status, we might need to format differently
+		// For now, just print the JSON
+		printJSON(result)
+	} else {
+		printJSON(result)
+	}
+
+	return nil
+}
+
 // Start Method-style handlers bound to a command with an embedded manager
 func (c *command) Start(f StartFlags) error {
+	// Try to use daemon API first
+	apiClient := NewAPIClient("")
+	if apiClient.IsReachable() {
+		return c.startViaAPI(f, apiClient)
+	}
+
+	// Fall back to direct manager
 	mgr := c.mgr
 	if f.ConfigPath != "" {
 		if genv, err := provisr.LoadGlobalEnv(f.ConfigPath); err == nil && len(genv) > 0 {
@@ -49,6 +114,13 @@ func (c *command) Start(f StartFlags) error {
 
 // Status prints status information, optionally loading specs from config for base queries
 func (c *command) Status(f StatusFlags) error {
+	// Try to use daemon API first
+	apiClient := NewAPIClient("")
+	if apiClient.IsReachable() {
+		return c.statusViaAPI(f, apiClient)
+	}
+
+	// Fall back to direct manager
 	mgr := c.mgr
 	if f.ConfigPath != "" {
 		specs, err := provisr.LoadSpecs(f.ConfigPath)
