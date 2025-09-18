@@ -37,12 +37,13 @@ func TestNewManagedProcess(t *testing.T) {
 		t.Fatal("NewManagedProcess returned nil")
 	}
 
-	if mp.name != "test-process" {
-		t.Errorf("Expected name 'test-process', got '%s'", mp.name)
+	status := mp.Status()
+	if status.Name != "test-process" {
+		t.Errorf("Expected name 'test-process', got '%s'", status.Name)
 	}
 
-	if mp.state != StateStopped {
-		t.Errorf("Expected initial state StateStopped, got %v", mp.state)
+	if status.State != "stopped" {
+		t.Errorf("Expected initial state 'stopped', got '%s'", status.State)
 	}
 }
 
@@ -131,8 +132,9 @@ func TestManagedProcessStateMachine(t *testing.T) {
 	defer func() { _ = mp.Shutdown() }()
 
 	// Initial state should be Stopped
-	if mp.state != StateStopped {
-		t.Errorf("Expected initial state StateStopped, got %v", mp.state)
+	status := mp.Status()
+	if status.State != "stopped" {
+		t.Errorf("Expected initial state 'stopped', got '%s'", status.State)
 	}
 
 	// Start process
@@ -143,7 +145,8 @@ func TestManagedProcessStateMachine(t *testing.T) {
 
 	// State should transition through Starting to Running
 	// Note: This is timing-dependent, so we'll just check it's not Stopped
-	if mp.state == StateStopped {
+	currentStatus := mp.Status()
+	if currentStatus.State == "stopped" {
 		t.Error("Expected state to change from Stopped after start")
 	}
 

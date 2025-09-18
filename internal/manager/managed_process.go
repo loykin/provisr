@@ -233,6 +233,7 @@ func (up *ManagedProcess) handleCommand(cmd command) {
 func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 	up.mu.Lock()
 	currentState := up.state
+	name := up.name // capture name while under lock
 	up.mu.Unlock()
 
 	switch currentState {
@@ -241,7 +242,7 @@ func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 		if alive, _ := up.proc.DetectAlive(); alive {
 			snapshot := up.proc.Snapshot()
 			return fmt.Errorf("process '%s' is already running (PID: %d, state: %s)",
-				up.name, snapshot.PID, up.state.String())
+				name, snapshot.PID, currentState.String())
 		}
 		// Process died, transition to stopped and try start
 		up.setState(StateStopped)
@@ -251,10 +252,10 @@ func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 		return up.doStart(newSpec)
 
 	case StateStarting:
-		return fmt.Errorf("process '%s' is already starting, please wait or stop first", up.name)
+		return fmt.Errorf("process '%s' is already starting, please wait or stop first", name)
 
 	case StateStopping:
-		return fmt.Errorf("process '%s' is currently stopping, please wait for stop to complete", up.name)
+		return fmt.Errorf("process '%s' is currently stopping, please wait for stop to complete", name)
 
 	default:
 		return fmt.Errorf("invalid state for start: %v", currentState)
