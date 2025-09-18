@@ -82,7 +82,7 @@ func TestHandlerServesMetrics(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	s := string(b)
 	if !strings.Contains(s, "provisr_process_starts_total") {
-		t.Fatalf("metrics output missing starts_total: %s", s[:minCalc(200, len(s))])
+		t.Fatalf("metrics output missing starts_total: %s", s[:min(200, len(s))])
 	}
 }
 
@@ -106,11 +106,4 @@ func TestConcurrentIncrements(t *testing.T) {
 	if _, err := reg.Gather(); err != nil {
 		t.Fatalf("gather: %v", err)
 	}
-}
-
-func minCalc(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
