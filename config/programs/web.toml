@@ -1,0 +1,26 @@
+# Web server process configuration
+name = "web"
+command = "python3 -m http.server 8080"
+workdir = "/tmp"
+env = ["ENV=prod", "PORT=8080"]
+pidfile = "/tmp/web.pid"
+retries = 3
+retry_interval = "500ms"
+startsecs = "2s"
+autorestart = true
+restart_interval = "1s"
+instances = 3
+
+# Per-process logging configuration
+[log]
+stdout = "/tmp/provisr-logs/web.stdout.log"
+stderr = "/tmp/provisr-logs/web.stderr.log"
+
+# Process detectors
+[[detectors]]
+type = "pidfile"
+path = "/tmp/web.pid"
+
+[[detectors]]
+type = "command"
+command = "pgrep -f 'python3 -m http.server 8080' >/dev/null"

@@ -90,8 +90,8 @@ type GroupConfig struct {
 	Members []string `toml:"members" mapstructure:"members"`
 }
 
-// LoadEnvFromTOML parses only the top-level env list from TOML.
-func LoadEnvFromTOML(path string) ([]string, error) {
+// parseFileConfig parses the TOML file and returns FileConfig struct
+func parseFileConfig(path string) (*FileConfig, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
 	v.SetConfigType("toml")
@@ -100,6 +100,15 @@ func LoadEnvFromTOML(path string) ([]string, error) {
 	}
 	var fc FileConfig
 	if err := v.Unmarshal(&fc); err != nil {
+		return nil, err
+	}
+	return &fc, nil
+}
+
+// LoadEnvFromTOML parses only the top-level env list from TOML.
+func LoadEnvFromTOML(path string) ([]string, error) {
+	fc, err := parseFileConfig(path)
+	if err != nil {
 		return nil, err
 	}
 	return fc.Env, nil
@@ -108,14 +117,8 @@ func LoadEnvFromTOML(path string) ([]string, error) {
 // LoadGlobalEnv merges env from config: top-level env, env_files contents, and optionally OS env when UseOSEnv is true.
 // Precedence: OS env (when enabled) provides base; then apply file vars; then top-level env list overrides last.
 func LoadGlobalEnv(path string) ([]string, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+	fc, err := parseFileConfig(path)
+	if err != nil {
 		return nil, err
 	}
 	m := make(map[string]string)
@@ -257,26 +260,104 @@ func mergeLogCfg(fc *FileConfig, pc ProcConfig) logger.Config {
 	return logCfg
 }
 
+// LoadSpecsFromTOML parses a TOML config file into a slice of process.Spec.
+// It now supports loading from programs directory as well as the main config file.
 func LoadSpecsFromTOML(path string) ([]process.Spec, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
+	// First, load from main config file
+	specs, err := loadSpecsFromMainConfig(path)
+	if err != nil {
 		return nil, err
 	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+
+	// Then, load from programs directory if it exists
+	programsSpecs, err := loadSpecsFromProgramsDirectory(path)
+	if err != nil {
 		return nil, err
 	}
-	result := make([]process.Spec, 0, len(fc.Processes))
-	for _, pc := range fc.Processes {
+
+	// Merge both results
+	result := make([]process.Spec, 0, len(specs)+len(programsSpecs))
+	result = append(result, specs...)
+	result = append(result, programsSpecs...)
+
+	return result, nil
+}
+
+// loadSpecsFromMainConfig loads process specs from the main config file
+func loadSpecsFromMainConfig(path string) ([]process.Spec, error) {
+	fc, err := parseFileConfig(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildSpecsFromProcessConfigs(fc.Processes, fc)
+}
+
+// loadProgramConfigs reads all .toml files from programs directory and returns ProcConfig slice
+func loadProgramConfigs(configPath string) ([]ProcConfig, error) {
+	configDir := filepath.Dir(configPath)
+	programsDir := filepath.Join(configDir, "programs")
+
+	// Check if programs directory exists
+	if _, err := os.Stat(programsDir); os.IsNotExist(err) {
+		return []ProcConfig{}, nil // No programs directory, return empty slice
+	} else if err != nil {
+		return nil, fmt.Errorf("error checking programs directory: %w", err)
+	}
+
+	// Read all .toml files in programs directory
+	entries, err := os.ReadDir(programsDir)
+	if err != nil {
+		return nil, fmt.Errorf("error reading programs directory: %w", err)
+	}
+
+	var allProcessConfigs []ProcConfig
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+
+		programPath := filepath.Join(programsDir, entry.Name())
+		v := viper.New()
+		v.SetConfigFile(programPath)
+		v.SetConfigType("toml")
+
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("error reading program config %s: %w", entry.Name(), err)
+		}
+
+		var pc ProcConfig
+		if err := v.Unmarshal(&pc); err != nil {
+			return nil, fmt.Errorf("error unmarshaling program config %s: %w", entry.Name(), err)
+		}
+
+		allProcessConfigs = append(allProcessConfigs, pc)
+	}
+
+	return allProcessConfigs, nil
+}
+
+// loadSpecsFromProgramsDirectory loads individual process config files from programs directory
+func loadSpecsFromProgramsDirectory(configPath string) ([]process.Spec, error) {
+	processConfigs, err := loadProgramConfigs(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildSpecsFromProcessConfigs(processConfigs, nil)
+}
+
+// buildSpecsFromProcessConfigs builds process specs from process configs
+func buildSpecsFromProcessConfigs(processConfigs []ProcConfig, fc *FileConfig) ([]process.Spec, error) {
+	result := make([]process.Spec, 0, len(processConfigs))
+	for _, pc := range processConfigs {
 		// detectors
 		dets, err := buildDetectors(pc)
 		if err != nil {
 			return nil, err
 		}
 		// logging config: start with top-level defaults then override with per-process
-		logCfg := mergeLogCfg(&fc, pc)
+		logCfg := mergeLogCfg(fc, pc)
 
 		s := process.Spec{
 			Name:            pc.Name,
@@ -300,14 +381,8 @@ func LoadSpecsFromTOML(path string) ([]process.Spec, error) {
 
 // LoadGroupsFromTOML parses group definitions and returns process_group.GroupSpec list.
 func LoadGroupsFromTOML(path string) ([]process_group.GroupSpec, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+	fc, err := parseFileConfig(path)
+	if err != nil {
 		return nil, err
 	}
 	// Build map name->Spec for member lookup
@@ -340,21 +415,53 @@ func LoadGroupsFromTOML(path string) ([]process_group.GroupSpec, error) {
 	return groups, nil
 }
 
-// LoadCronJobsFromTOML reads the same TOML but returns only entries that define a schedule.
+// LoadCronJobsFromTOML reads the TOML config and programs directory but returns only entries that define a schedule.
 // It validates cron-specific constraints (autorestart must be false; instances must be 1).
 func LoadCronJobsFromTOML(path string) ([]CronJob, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
+	// Load from main config file
+	jobs, err := loadCronJobsFromMainConfig(path)
+	if err != nil {
 		return nil, err
 	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+
+	// Load from programs directory
+	programsJobs, err := loadCronJobsFromProgramsDirectory(path)
+	if err != nil {
 		return nil, err
 	}
+
+	// Merge results
+	result := make([]CronJob, 0, len(jobs)+len(programsJobs))
+	result = append(result, jobs...)
+	result = append(result, programsJobs...)
+
+	return result, nil
+}
+
+// loadCronJobsFromMainConfig loads cron jobs from the main config file
+func loadCronJobsFromMainConfig(path string) ([]CronJob, error) {
+	fc, err := parseFileConfig(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildCronJobsFromProcessConfigs(fc.Processes)
+}
+
+// loadCronJobsFromProgramsDirectory loads cron jobs from programs directory
+func loadCronJobsFromProgramsDirectory(configPath string) ([]CronJob, error) {
+	processConfigs, err := loadProgramConfigs(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildCronJobsFromProcessConfigs(processConfigs)
+}
+
+// buildCronJobsFromProcessConfigs builds cron jobs from process configs
+func buildCronJobsFromProcessConfigs(processConfigs []ProcConfig) ([]CronJob, error) {
 	jobs := make([]CronJob, 0)
-	for _, pc := range fc.Processes {
+	for _, pc := range processConfigs {
 		if pc.Schedule == "" {
 			continue
 		}
@@ -365,27 +472,9 @@ func LoadCronJobsFromTOML(path string) ([]CronJob, error) {
 			return nil, fmt.Errorf("cron job %s cannot set instances > 1", pc.Name)
 		}
 		// detectors
-		dets := make([]detector.Detector, 0, len(pc.Detectors))
-		for _, d := range pc.Detectors {
-			switch d.Type {
-			case "pidfile":
-				if d.Path == "" {
-					return nil, fmt.Errorf("detector pidfile requires path for process %s", pc.Name)
-				}
-				dets = append(dets, detector.PIDFileDetector{PIDFile: d.Path})
-			case "pid":
-				if d.PID <= 0 {
-					return nil, fmt.Errorf("detector pid requires positive pid for process %s", pc.Name)
-				}
-				dets = append(dets, detector.PIDDetector{PID: d.PID})
-			case "command":
-				if d.Command == "" {
-					return nil, fmt.Errorf("detector command requires command for process %s", pc.Name)
-				}
-				dets = append(dets, detector.CommandDetector{Command: d.Command})
-			default:
-				return nil, fmt.Errorf("unknown detector type %q for process %s", d.Type, pc.Name)
-			}
+		dets, err := buildDetectors(pc)
+		if err != nil {
+			return nil, err
 		}
 		s := process.Spec{
 			Name:            pc.Name,
@@ -421,14 +510,8 @@ type HTTPAPIConfig struct {
 // LoadHTTPAPIFromTOML loads only the http_api section from the TOML file.
 // Returns (nil, nil) if the section is absent.
 func LoadHTTPAPIFromTOML(path string) (*HTTPAPIConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+	fc, err := parseFileConfig(path)
+	if err != nil {
 		return nil, err
 	}
 	return fc.HTTP, nil
@@ -436,14 +519,8 @@ func LoadHTTPAPIFromTOML(path string) (*HTTPAPIConfig, error) {
 
 // LoadStoreFromTOML loads optional store configuration. Returns (nil, nil) if absent.
 func LoadStoreFromTOML(path string) (*StoreConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+	fc, err := parseFileConfig(path)
+	if err != nil {
 		return nil, err
 	}
 	return fc.Store, nil
@@ -451,14 +528,8 @@ func LoadStoreFromTOML(path string) (*StoreConfig, error) {
 
 // LoadHistoryFromTOML loads optional history configuration. Returns (nil, nil) if absent.
 func LoadHistoryFromTOML(path string) (*HistoryConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
+	fc, err := parseFileConfig(path)
+	if err != nil {
 		return nil, err
 	}
 	return fc.History, nil
