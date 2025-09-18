@@ -167,7 +167,7 @@ func (m *Manager) StatusMatch(pattern string) ([]process.Status, error) {
 
 // StatusAll returns status for all processes matching a pattern
 func (m *Manager) StatusAll(base string) ([]process.Status, error) {
-	var statuses []process.Status
+	statuses := make([]process.Status, 0) // Initialize as empty slice instead of nil
 
 	m.mu.RLock()
 	for name, up := range m.processes {
