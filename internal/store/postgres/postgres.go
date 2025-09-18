@@ -37,20 +37,6 @@ func (p *DB) EnsureSchema(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_process_state_name ON process_state(name);`,
 		`CREATE INDEX IF NOT EXISTS idx_process_state_running ON process_state(running);`,
-		`CREATE TABLE IF NOT EXISTS process_history(
-			id BIGSERIAL PRIMARY KEY,
-			occurred_at TIMESTAMPTZ NOT NULL,
-			event TEXT NOT NULL,
-			name TEXT NOT NULL,
-			pid INTEGER NOT NULL,
-			started_at TIMESTAMPTZ NOT NULL,
-			stopped_at TIMESTAMPTZ NULL,
-			running BOOLEAN NOT NULL,
-			exit_err TEXT NULL,
-			uniq TEXT NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_process_history_name ON process_history(name);`,
-		`CREATE INDEX IF NOT EXISTS idx_process_history_uniq ON process_history(uniq);`,
 	}
 	for _, q := range stmts {
 		if _, err := p.db.ExecContext(ctx, q); err != nil {

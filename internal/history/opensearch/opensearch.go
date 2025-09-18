@@ -1,4 +1,4 @@
-package history
+package opensearch
 
 import (
 	"bytes"
@@ -8,22 +8,24 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/loykin/provisr/internal/history"
 )
 
-// OpenSearchSink sends events to OpenSearch via HTTP.
+// Sink sends events to OpenSearch via HTTP.
 // It constructs URL as: baseURL + "/" + index + "/_doc" and POSTs JSON body.
-type OpenSearchSink struct {
+type Sink struct {
 	client  *http.Client
 	baseURL string
 	index   string
 }
 
-func NewOpenSearchSink(baseURL, index string) *OpenSearchSink {
+func New(baseURL, index string) *Sink {
 	c := &http.Client{Timeout: 5 * time.Second}
-	return &OpenSearchSink{client: c, baseURL: strings.TrimRight(baseURL, "/"), index: index}
+	return &Sink{client: c, baseURL: strings.TrimRight(baseURL, "/"), index: index}
 }
 
-func (s *OpenSearchSink) Send(ctx context.Context, e Event) error {
+func (s *Sink) Send(ctx context.Context, e history.Event) error {
 	u := fmt.Sprintf("%s/%s/_doc", s.baseURL, s.index)
 	b, _ := json.Marshal(e)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))

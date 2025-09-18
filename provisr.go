@@ -2,11 +2,13 @@ package provisr
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cron"
 	"github.com/loykin/provisr/internal/history"
+	history_factory "github.com/loykin/provisr/internal/history/factory"
 	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
@@ -58,7 +60,6 @@ func (m *Manager) Status(name string) (Status, error)            { return m.inne
 func (m *Manager) StatusAll(base string) ([]Status, error)       { return m.inner.StatusAll(base) }
 func (m *Manager) Count(base string) (int, error)                { return m.inner.Count(base) }
 
-// Reconcile controls
 func (m *Manager) ReconcileOnce()                  { m.inner.ReconcileOnce() }
 func (m *Manager) StartReconciler(d time.Duration) { m.inner.StartReconciler(d) }
 func (m *Manager) StopReconciler()                 { m.inner.StopReconciler() }
@@ -131,15 +132,16 @@ func ServeMetrics(addr string) error {
 	return srv.ListenAndServe()
 }
 
-// History sink constructors (public convenience)
 func NewOpenSearchHistorySink(baseURL, index string) HistorySink {
-	return history.NewOpenSearchSink(baseURL, index)
+	sink, _ := history_factory.NewSinkFromDSN("opensearch://" + strings.TrimPrefix(baseURL, "http://") + "/" + index)
+	return sink
 }
 func NewClickHouseHistorySink(baseURL, table string) HistorySink {
-	return history.NewClickHouseSink(baseURL, table)
+	sink, _ := history_factory.NewSinkFromDSN("clickhouse://" + strings.TrimPrefix(baseURL, "http://") + "?table=" + table)
+	return sink
 }
 func NewSQLHistorySinkFromDSN(dsn string) HistorySink {
-	if s, err := history.NewSQLSinkFromDSN(dsn); err == nil {
+	if s, err := history_factory.NewSinkFromDSN(dsn); err == nil {
 		return s
 	}
 	return nil
