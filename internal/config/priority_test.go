@@ -8,6 +8,37 @@ import (
 	"github.com/loykin/provisr/internal/process"
 )
 
+// Helper function to create program files in directory
+func createProgramFiles(t *testing.T, programsDir string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(programsDir, 0o755); err != nil {
+		t.Fatalf("create programs dir: %v", err)
+	}
+	for filename, content := range files {
+		filePath := filepath.Join(programsDir, filename)
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", filename, err)
+		}
+	}
+}
+
+// Helper function to verify spec priorities
+func verifySpecPriorities(t *testing.T, specs []process.Spec, expected map[string]int) {
+	t.Helper()
+	specMap := make(map[string]int)
+	for _, spec := range specs {
+		specMap[spec.Name] = spec.Priority
+	}
+
+	for name, expectedPriority := range expected {
+		if actualPriority, exists := specMap[name]; !exists {
+			t.Errorf("process %s not found in loaded specs", name)
+		} else if actualPriority != expectedPriority {
+			t.Errorf("process %s: expected priority %d, got %d", name, expectedPriority, actualPriority)
+		}
+	}
+}
+
 // TestLoadSpecsFromTOML_WithPriority tests loading process specs with priority field
 func TestLoadSpecsFromTOML_WithPriority(t *testing.T) {
 	dir := t.TempDir()
@@ -39,21 +70,12 @@ command = "sleep 1"
 		t.Fatalf("expected 3 specs, got %d", len(specs))
 	}
 
-	// Verify priority values
-	specMap := make(map[string]int)
-	for _, spec := range specs {
-		specMap[spec.Name] = spec.Priority
+	expected := map[string]int{
+		"high-priority":    5,
+		"low-priority":     20,
+		"default-priority": 0,
 	}
-
-	if specMap["high-priority"] != 5 {
-		t.Errorf("expected high-priority to have priority 5, got %d", specMap["high-priority"])
-	}
-	if specMap["low-priority"] != 20 {
-		t.Errorf("expected low-priority to have priority 20, got %d", specMap["low-priority"])
-	}
-	if specMap["default-priority"] != 0 {
-		t.Errorf("expected default-priority to have priority 0, got %d", specMap["default-priority"])
-	}
+	verifySpecPriorities(t, specs, expected)
 }
 
 // TestLoadSpecsFromTOML_ProgramsDirectoryWithPriority tests loading from programs directory with priority
@@ -70,57 +92,36 @@ env = ["GLOBAL=test"]
 		t.Fatalf("write main config: %v", err)
 	}
 
-	// Create programs directory
+	// Create programs directory with different priorities
 	programsDir := filepath.Join(dir, "programs")
-	if err := os.MkdirAll(programsDir, 0o755); err != nil {
-		t.Fatalf("create programs dir: %v", err)
-	}
-
-	// Create individual program files with different priorities
 	files := map[string]string{
 		"database.toml": `
 name = "database"
 command = "sleep 5"
 priority = 1
 retries = 3`,
-
 		"api.toml": `
 name = "api"
 command = "sleep 2"
 priority = 10
 autorestart = true`,
-
 		"worker.toml": `
 name = "worker" 
 command = "sleep 1"
 priority = 20`,
-
 		"monitoring.toml": `
 name = "monitoring"
 command = "sleep 1"
 priority = 30`,
 	}
-
-	for filename, content := range files {
-		filePath := filepath.Join(programsDir, filename)
-		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-			t.Fatalf("write %s: %v", filename, err)
-		}
-	}
+	createProgramFiles(t, programsDir, files)
 
 	specs, err := LoadSpecsFromTOML(mainConfig)
 	if err != nil {
 		t.Fatalf("load specs from programs directory: %v", err)
 	}
-
 	if len(specs) != 4 {
 		t.Fatalf("expected 4 specs from programs directory, got %d", len(specs))
-	}
-
-	// Verify all processes loaded with correct priorities
-	specMap := make(map[string]int)
-	for _, spec := range specs {
-		specMap[spec.Name] = spec.Priority
 	}
 
 	expected := map[string]int{
@@ -129,14 +130,7 @@ priority = 30`,
 		"worker":     20,
 		"monitoring": 30,
 	}
-
-	for name, expectedPriority := range expected {
-		if actualPriority, exists := specMap[name]; !exists {
-			t.Errorf("process %s not found in loaded specs", name)
-		} else if actualPriority != expectedPriority {
-			t.Errorf("process %s: expected priority %d, got %d", name, expectedPriority, actualPriority)
-		}
-	}
+	verifySpecPriorities(t, specs, expected)
 }
 
 // TestLoadSpecsFromTOML_MixedSourcesWithPriority tests loading from both main config and programs directory
@@ -159,41 +153,27 @@ priority = 15
 
 	// Create programs directory with additional processes
 	programsDir := filepath.Join(dir, "programs")
-	if err := os.MkdirAll(programsDir, 0o755); err != nil {
-		t.Fatalf("create programs dir: %v", err)
-	}
-
-	programFile := filepath.Join(programsDir, "program-service.toml")
-	programData := `
+	files := map[string]string{
+		"program-service.toml": `
 name = "program-service"
 command = "sleep 2"
-priority = 5
-`
-	if err := os.WriteFile(programFile, []byte(programData), 0o644); err != nil {
-		t.Fatalf("write program file: %v", err)
+priority = 5`,
 	}
+	createProgramFiles(t, programsDir, files)
 
 	specs, err := LoadSpecsFromTOML(mainConfig)
 	if err != nil {
 		t.Fatalf("load specs: %v", err)
 	}
-
 	if len(specs) != 2 {
 		t.Fatalf("expected 2 specs (1 main + 1 programs), got %d", len(specs))
 	}
 
-	// Verify both processes loaded with correct priorities
-	specMap := make(map[string]int)
-	for _, spec := range specs {
-		specMap[spec.Name] = spec.Priority
+	expected := map[string]int{
+		"main-service":    15,
+		"program-service": 5,
 	}
-
-	if specMap["main-service"] != 15 {
-		t.Errorf("main-service: expected priority 15, got %d", specMap["main-service"])
-	}
-	if specMap["program-service"] != 5 {
-		t.Errorf("program-service: expected priority 5, got %d", specMap["program-service"])
-	}
+	verifySpecPriorities(t, specs, expected)
 }
 
 // TestSortSpecsByPriority tests the priority-based sorting functionality
@@ -236,7 +216,7 @@ func TestSortSpecsByPriority(t *testing.T) {
 
 // TestSortSpecsByPriority_EmptySlice tests sorting empty slice
 func TestSortSpecsByPriority_EmptySlice(t *testing.T) {
-	specs := []process.Spec{}
+	var specs []process.Spec
 	sorted := SortSpecsByPriority(specs)
 
 	if len(sorted) != 0 {
@@ -326,20 +306,14 @@ instances = 1
 
 	// Create programs directory with cron job
 	programsDir := filepath.Join(dir, "programs")
-	if err := os.MkdirAll(programsDir, 0o755); err != nil {
-		t.Fatalf("create programs dir: %v", err)
-	}
-
-	cronFile := filepath.Join(programsDir, "cleanup.toml")
-	cronData := `
+	files := map[string]string{
+		"cleanup.toml": `
 name = "cleanup"
 command = "echo cleanup"
 schedule = "@every 30m"
-priority = 10
-`
-	if err := os.WriteFile(cronFile, []byte(cronData), 0o644); err != nil {
-		t.Fatalf("write cron file: %v", err)
+priority = 10`,
 	}
+	createProgramFiles(t, programsDir, files)
 
 	jobs, err := LoadCronJobsFromTOML(mainConfig)
 	if err != nil {

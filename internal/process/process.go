@@ -301,6 +301,7 @@ func (r *Process) detectors() []detector.Detector {
 // isZombieLinux returns true if /proc/<pid>/status reports a zombie state (Z) on Linux.
 func isZombieLinux(pid int) bool {
 	path := "/proc/" + strconv.Itoa(pid) + "/status"
+	// #nosec 304 procfs path built from pid, safe to read
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return false

@@ -33,7 +33,7 @@ func TestAPIClientIsReachable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/status" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		}
 	}))
 	defer server.Close()
@@ -66,7 +66,7 @@ func TestAPIClientStartProcess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/start" && r.Method == "POST" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"result":"success"}`))
+			_, _ = w.Write([]byte(`{"result":"success"}`))
 		}
 	}))
 	defer server.Close()
@@ -86,7 +86,7 @@ func TestAPIClientStartProcess(t *testing.T) {
 	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/start" && r.Method == "POST" {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error":"process already running"}`))
+			_, _ = w.Write([]byte(`{"error":"process already running"}`))
 		}
 	}))
 	defer errorServer.Close()
@@ -94,10 +94,11 @@ func TestAPIClientStartProcess(t *testing.T) {
 	client = NewAPIClient(errorServer.URL, time.Second)
 	err = client.StartProcess(spec)
 	if err == nil {
-		t.Error("Expected error for API error response")
+		t.Fatal("Expected error for API error response, but got nil")
 	}
-	if err.Error() != "API error: process already running" {
-		t.Errorf("Expected specific error message, got: %v", err)
+	expectedMsg := "API error: process already running"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error message %q, got: %q", expectedMsg, err.Error())
 	}
 }
 
@@ -107,9 +108,9 @@ func TestAPIClientGetStatus(t *testing.T) {
 		if r.URL.Path == "/status" && r.Method == "GET" {
 			w.WriteHeader(http.StatusOK)
 			if r.URL.Query().Get("name") == "test-process" {
-				w.Write([]byte(`{"name":"test-process","running":true}`))
+				_, _ = w.Write([]byte(`{"name":"test-process","running":true}`))
 			} else {
-				w.Write([]byte(`[{"name":"process1","running":true}]`))
+				_, _ = w.Write([]byte(`[{"name":"process1","running":true}]`))
 			}
 		}
 	}))
@@ -139,7 +140,7 @@ func TestAPIClientGetStatus(t *testing.T) {
 	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/status" {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error":"internal server error"}`))
+			_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 		}
 	}))
 	defer errorServer.Close()
@@ -147,7 +148,7 @@ func TestAPIClientGetStatus(t *testing.T) {
 	client = NewAPIClient(errorServer.URL, time.Second)
 	_, err = client.GetStatus("test")
 	if err == nil {
-		t.Error("Expected error for API error response")
+		t.Fatal("Expected error for API error response, but got nil")
 	}
 }
 
@@ -156,13 +157,17 @@ func TestAPIClientStopProcess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/stop" && r.Method == "POST" {
 			var req map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&req)
+			err := json.NewDecoder(r.Body).Decode(&req)
+			if err != nil {
+				t.Fatal(err)
+			}
+
 			if req["name"] == "test-process" {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"result":"success"}`))
+				_, _ = w.Write([]byte(`{"result":"success"}`))
 			} else {
 				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(`{"error":"process not found"}`))
+				_, _ = w.Write([]byte(`{"error":"process not found"}`))
 			}
 		}
 	}))
@@ -179,10 +184,11 @@ func TestAPIClientStopProcess(t *testing.T) {
 	// Test process not found
 	err = client.StopProcess("non-existent")
 	if err == nil {
-		t.Error("Expected error for non-existent process")
+		t.Fatal("Expected error for non-existent process, but got nil")
 	}
-	if err.Error() != "API error: process not found" {
-		t.Errorf("Expected specific error message, got: %v", err)
+	expectedMsg := "API error: process not found"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error message %q, got: %q", expectedMsg, err.Error())
 	}
 }
 

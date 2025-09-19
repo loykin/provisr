@@ -183,7 +183,7 @@ func TestMainFunction(t *testing.T) {
 	bind()
 
 	if root == nil {
-		t.Error("buildRoot should return non-nil root command")
+		t.Fatal("buildRoot should return non-nil root command")
 	}
 	if root.Use != "provisr" {
 		t.Errorf("Expected command name 'provisr', got %s", root.Use)
