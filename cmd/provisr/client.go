@@ -78,7 +78,7 @@ func (c *APIClient) GetStatus(name string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		var errorResp struct {
@@ -112,7 +112,7 @@ func (c *APIClient) StopProcess(name string) error {
 	if err != nil {
 		return err
 	}
-	func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		var errorResp struct {

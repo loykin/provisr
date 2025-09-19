@@ -140,3 +140,23 @@ func TestGroupCommandsMissingFlags(t *testing.T) {
 		t.Fatalf("expected error for missing --group in group-stop")
 	}
 }
+
+func TestCommandsViaAPI(t *testing.T) {
+	mgr := provisr.New()
+	provisrCommand := command{mgr: mgr}
+
+	// Create API client to unreachable server
+	apiClient := NewAPIClient("http://localhost:99999", 100*time.Millisecond)
+
+	// Test startViaAPI with unreachable API
+	err := provisrCommand.startViaAPI(StartFlags{Name: "test", Cmd: "echo hello"}, apiClient)
+	if err == nil {
+		t.Error("Expected error for unreachable API")
+	}
+
+	// Test statusViaAPI with unreachable API
+	err = provisrCommand.statusViaAPI(StatusFlags{Name: "test"}, apiClient)
+	if err == nil {
+		t.Error("Expected error for unreachable API")
+	}
+}

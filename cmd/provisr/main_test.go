@@ -174,6 +174,49 @@ func TestStoreConfigParsing(t *testing.T) {
 	}
 }
 
+func TestMainFunction(t *testing.T) {
+	// This test ensures the main function doesn't panic
+	// We can't really test main() directly, but we can test that it exists
+	// and the buildRoot function works properly
+	mgr := provisr.New()
+	root, bind := buildRoot(mgr)
+	bind()
+
+	if root == nil {
+		t.Error("buildRoot should return non-nil root command")
+	}
+	if root.Use != "provisr" {
+		t.Errorf("Expected command name 'provisr', got %s", root.Use)
+	}
+
+	// Test that all expected subcommands exist
+	expectedCommands := []string{"start", "status", "stop", "cron", "group-start", "group-stop", "group-status"}
+	for _, cmdName := range expectedCommands {
+		found := false
+		for _, cmd := range root.Commands() {
+			if cmd.Use == cmdName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected command %s to exist", cmdName)
+		}
+	}
+
+	// Check serve command separately (might be conditional)
+	serveFound := false
+	for _, cmd := range root.Commands() {
+		if cmd.Use == "serve" {
+			serveFound = true
+			break
+		}
+	}
+	if !serveFound {
+		t.Log("serve command not found (may be conditional)")
+	}
+}
+
 func TestServeConfigDisabledRequiresFlag(t *testing.T) {
 	mgr := provisr.New()
 	root, bind := buildRoot(mgr)
