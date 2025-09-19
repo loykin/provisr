@@ -14,13 +14,13 @@ type command struct {
 // startViaAPI starts processes using the daemon API
 func (c *command) startViaAPI(f StartFlags, apiClient *APIClient) error {
 	if f.ConfigPath != "" {
-		// For config-based starts, we need to load specs and start each one
-		specs, err := provisr.LoadSpecs(f.ConfigPath)
+		// For config-based starts, we need to load config and start each spec
+		config, err := provisr.LoadConfig(f.ConfigPath)
 		if err != nil {
 			return err
 		}
 
-		for _, spec := range specs {
+		for _, spec := range config.Specs {
 			if err := apiClient.StartProcess(spec); err != nil {
 				return fmt.Errorf("failed to start %s: %w", spec.Name, err)
 			}
@@ -88,21 +88,23 @@ func (c *command) Start(f StartFlags) error {
 func (c *command) startViaManager(f StartFlags) error {
 	mgr := c.mgr
 	if f.ConfigPath != "" {
-		if genv, err := provisr.LoadGlobalEnv(f.ConfigPath); err == nil && len(genv) > 0 {
-			mgr.SetGlobalEnv(genv)
-		}
-		specs, err := provisr.LoadSpecs(f.ConfigPath)
+		config, err := provisr.LoadConfig(f.ConfigPath)
 		if err != nil {
 			return err
 		}
-		if err := startFromSpecs(mgr, specs); err != nil {
+
+		if len(config.GlobalEnv) > 0 {
+			mgr.SetGlobalEnv(config.GlobalEnv)
+		}
+
+		if err := startFromSpecs(mgr, config.Specs); err != nil {
 			return err
 		}
-		printJSON(statusesByBase(mgr, specs))
+		printJSON(statusesByBase(mgr, config.Specs))
 		return nil
 	}
 	// Apply global env from flags when not using config
-	applyGlobalEnvFromFlags(mgr, f.UseOSEnv, f.EnvFiles, f.EnvKVs)
+	applyGlobalEnvFromFlags(mgr, f.UseOSEnv, f.EnvKVs)
 	sp := provisr.Spec{
 		Name:            f.Name,
 		Command:         f.Cmd,
@@ -139,14 +141,14 @@ func (c *command) Status(f StatusFlags) error {
 func (c *command) statusViaManager(f StatusFlags) error {
 	mgr := c.mgr
 	if f.ConfigPath != "" {
-		specs, err := provisr.LoadSpecs(f.ConfigPath)
+		config, err := provisr.LoadConfig(f.ConfigPath)
 		if err != nil {
 			return err
 		}
 		if f.Detailed {
-			printDetailedStatusByBase(mgr, specs)
+			printDetailedStatusByBase(mgr, config.Specs)
 		} else {
-			printJSON(statusesByBase(mgr, specs))
+			printJSON(statusesByBase(mgr, config.Specs))
 		}
 		return nil
 	}
@@ -167,14 +169,14 @@ func (c *command) Stop(f StopFlags) error {
 		f.Wait = 3 * time.Second
 	}
 	if f.ConfigPath != "" {
-		specs, err := provisr.LoadSpecs(f.ConfigPath)
+		config, err := provisr.LoadConfig(f.ConfigPath)
 		if err != nil {
 			return err
 		}
-		for _, sp := range specs {
+		for _, sp := range config.Specs {
 			_ = mgr.StopAll(sp.Name, f.Wait)
 		}
-		printJSON(statusesByBase(mgr, specs))
+		printJSON(statusesByBase(mgr, config.Specs))
 		return nil
 	}
 	_ = mgr.StopAll(f.Name, f.Wait)
@@ -189,15 +191,18 @@ func (c *command) Cron(f CronFlags) error {
 	if f.ConfigPath == "" {
 		return fmt.Errorf("cron requires --config file with processes having schedule")
 	}
-	if genv, err := provisr.LoadGlobalEnv(f.ConfigPath); err == nil && len(genv) > 0 {
-		mgr.SetGlobalEnv(genv)
-	}
-	jobs, err := provisr.LoadCronJobs(f.ConfigPath)
+
+	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
 	}
+
+	if len(config.GlobalEnv) > 0 {
+		mgr.SetGlobalEnv(config.GlobalEnv)
+	}
+
 	sch := provisr.NewCronScheduler(mgr)
-	for _, j := range jobs {
+	for _, j := range config.CronJobs {
 		jb := provisr.CronJob{Name: j.Name, Spec: j.Spec, Schedule: j.Schedule, Singleton: j.Singleton}
 		if err := sch.Add(&jb); err != nil {
 			return err
@@ -224,14 +229,17 @@ func (c *command) GroupStart(f GroupFlags) error {
 	if f.GroupName == "" {
 		return fmt.Errorf("group-start requires --group name")
 	}
-	if genv, err := provisr.LoadGlobalEnv(f.ConfigPath); err == nil && len(genv) > 0 {
-		mgr.SetGlobalEnv(genv)
-	}
-	groups, err := provisr.LoadGroups(f.ConfigPath)
+
+	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
 	}
-	gs := findGroupByName(groups, f.GroupName)
+
+	if len(config.GlobalEnv) > 0 {
+		mgr.SetGlobalEnv(config.GlobalEnv)
+	}
+
+	gs := findGroupByName(config.GroupSpecs, f.GroupName)
 	if gs == nil {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
@@ -251,11 +259,11 @@ func (c *command) GroupStop(f GroupFlags) error {
 	if f.GroupName == "" {
 		return fmt.Errorf("group-stop requires --group name")
 	}
-	groups, err := provisr.LoadGroups(f.ConfigPath)
+	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
 	}
-	gs := findGroupByName(groups, f.GroupName)
+	gs := findGroupByName(config.GroupSpecs, f.GroupName)
 	if gs == nil {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
@@ -272,11 +280,11 @@ func (c *command) GroupStatus(f GroupFlags) error {
 	if f.GroupName == "" {
 		return fmt.Errorf("group-status requires --group name")
 	}
-	groups, err := provisr.LoadGroups(f.ConfigPath)
+	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
 	}
-	gs := findGroupByName(groups, f.GroupName)
+	gs := findGroupByName(config.GroupSpecs, f.GroupName)
 	if gs == nil {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
