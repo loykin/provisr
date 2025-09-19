@@ -95,15 +95,15 @@ func (r *Router) handleStart(c *gin.Context) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid pid_file: must be absolute path without traversal"})
 		return
 	}
-	if !isSafeAbsPath(spec.Log.Dir) {
+	if !isSafeAbsPath(spec.Log.File.Dir) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.dir: must be absolute path without traversal"})
 		return
 	}
-	if !isSafeAbsPath(spec.Log.StdoutPath) {
+	if !isSafeAbsPath(spec.Log.File.StdoutPath) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stdoutPath: must be absolute path without traversal"})
 		return
 	}
-	if !isSafeAbsPath(spec.Log.StderrPath) {
+	if !isSafeAbsPath(spec.Log.File.StderrPath) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stderrPath: must be absolute path without traversal"})
 		return
 	}

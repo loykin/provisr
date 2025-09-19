@@ -53,12 +53,14 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 		cmd.Env = mergedEnv
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Setup logging if configured
-	if spec.Log.Dir != "" || spec.Log.StdoutPath != "" || spec.Log.StderrPath != "" {
-		if spec.Log.Dir != "" {
-			_ = os.MkdirAll(spec.Log.Dir, 0o750)
+
+	// Setup slog-based logging if configured
+	if spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" {
+		if spec.Log.File.Dir != "" {
+			_ = os.MkdirAll(spec.Log.File.Dir, 0o750)
 		}
-		outW, errW, _ := spec.Log.Writers(spec.Name)
+		// Use unified config for both structured logging and file writers
+		outW, errW, _ := spec.Log.ProcessWriters(spec.Name)
 		r.EnsureLogClosers(outW, errW)
 		ow, ew := r.OutErrClosers()
 		if ow != nil {

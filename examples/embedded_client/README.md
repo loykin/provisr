@@ -288,6 +288,43 @@ func newClient() *client.Client {
 }
 ```
 
+## Structured Logging
+
+This example demonstrates provisr's advanced structured logging capabilities using Go's `slog` package:
+
+### Features
+
+- **Colored Output**: Beautiful colored logs in terminal environments
+- **Multiple Formats**: Support for both text and JSON formats
+- **Configurable Levels**: Debug, Info, Warn, and Error levels
+- **Source Information**: Optional file/line information for debugging
+- **CI-Friendly**: Automatically disables colors in CI environments
+
+### Logger Configuration
+
+```go
+loggerCfg := logger.LoggerConfig{
+    Level:      logger.LevelInfo,     // debug, info, warn, error
+    Format:     logger.FormatText,    // text, json
+    Color:      true,                 // colorized output
+    TimeStamps: true,                 // include timestamps
+    Source:     false,                // include source file/line
+}
+
+slogger := logger.NewSlogger(loggerCfg)
+slog.SetDefault(slogger)
+```
+
+### Client Integration
+
+The provisr client supports structured logging:
+
+```go
+cfg := client.DefaultConfig()
+cfg.Logger = slogger  // Use custom logger
+provisrClient := client.New(cfg)
+```
+
 ## Testing
 
 ```bash

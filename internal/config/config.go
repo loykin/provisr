@@ -26,16 +26,123 @@ type CronJob struct {
 // See internal docs for example in previous location.
 
 type FileConfig struct {
-	Env       []string       `toml:"env" mapstructure:"env"`
-	EnvFiles  []string       `toml:"env_files" mapstructure:"env_files"`
-	UseOSEnv  bool           `toml:"use_os_env" mapstructure:"use_os_env"`
-	Log       *LogConfig     `toml:"log" mapstructure:"log"`
-	Processes []ProcConfig   `toml:"processes" mapstructure:"processes"`
-	Groups    []GroupConfig  `toml:"groups" mapstructure:"groups"`
-	HTTP      *HTTPAPIConfig `toml:"http_api" mapstructure:"http_api"`
-	Store     *StoreConfig   `toml:"store" mapstructure:"store"`
-	History   *HistoryConfig `toml:"history" mapstructure:"history"`
-	Metrics   *MetricsConfig `toml:"metrics" mapstructure:"metrics"`
+	Env      []string       `toml:"env" mapstructure:"env"`
+	EnvFiles []string       `toml:"env_files" mapstructure:"env_files"`
+	UseOSEnv bool           `toml:"use_os_env" mapstructure:"use_os_env"`
+	Log      *LogConfig     `toml:"log" mapstructure:"log"`
+	Groups   []GroupConfig  `toml:"groups" mapstructure:"groups"`
+	HTTP     *HTTPAPIConfig `toml:"http_api" mapstructure:"http_api"`
+	Store    *StoreConfig   `toml:"store" mapstructure:"store"`
+	History  *HistoryConfig `toml:"history" mapstructure:"history"`
+	Metrics  *MetricsConfig `toml:"metrics" mapstructure:"metrics"`
+}
+
+// Config represents a unified configuration
+type Config struct {
+	*FileConfig
+	configPath string // Store path for lazy loading
+}
+
+// LoadConfig loads the configuration from file
+func LoadConfig(path string) (*Config, error) {
+	fc, err := parseFileConfig(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Config{
+		FileConfig: fc,
+		configPath: path,
+	}, nil
+}
+
+// GetGlobalEnv returns merged environment variables (lazy computed)
+func (c *Config) GetGlobalEnv() ([]string, error) {
+	m := make(map[string]string)
+	// base: optional OS env
+	if c.UseOSEnv {
+		for _, kv := range os.Environ() {
+			if i := strings.IndexByte(kv, '='); i >= 0 {
+				k := kv[:i]
+				v := kv[i+1:]
+				m[k] = v
+			}
+		}
+	}
+	// load files in order
+	for _, ef := range c.EnvFiles {
+		fileEnv, err := loadEnvFile(ef)
+		if err != nil {
+			return nil, fmt.Errorf("error loading env file %s: %w", ef, err)
+		}
+		for k, v := range fileEnv {
+			m[k] = v
+		}
+	}
+	// top-level env overrides
+	for _, kv := range c.Env {
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			k := kv[:i]
+			v := kv[i+1:]
+			m[k] = v
+		}
+	}
+	result := make([]string, 0, len(m))
+	for k, v := range m {
+		result = append(result, k+"="+v)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// GetSpecs returns process specs from programs directory (lazy loaded)
+func (c *Config) GetSpecs() ([]process.Spec, error) {
+	return loadSpecsFromProgramsDirectory(c.configPath)
+}
+
+// GetGroups returns process groups (lazy computed)
+func (c *Config) GetGroups() ([]process_group.GroupSpec, error) {
+	specs, err := c.GetSpecs()
+	if err != nil {
+		return nil, err
+	}
+	return buildGroupsFromSpecs(c.Groups, specs)
+}
+
+// GetCronJobs returns cron jobs from programs directory (lazy loaded)
+func (c *Config) GetCronJobs() ([]CronJob, error) {
+	return loadCronJobsFromProgramsDirectory(c.configPath)
+}
+
+// buildGroupsFromSpecs builds process groups from GroupConfig and available specs
+func buildGroupsFromSpecs(groupConfigs []GroupConfig, specs []process.Spec) ([]process_group.GroupSpec, error) {
+	// Build map name->Spec for member lookup
+	m := make(map[string]process.Spec, len(specs))
+	for _, s := range specs {
+		m[s.Name] = s
+	}
+	groups := make([]process_group.GroupSpec, 0, len(groupConfigs))
+	for _, gc := range groupConfigs {
+		if gc.Name == "" {
+			return nil, fmt.Errorf("group requires name")
+		}
+		if len(gc.Members) == 0 {
+			return nil, fmt.Errorf("group %s requires at least one member", gc.Name)
+		}
+		memberSpecs := make([]process.Spec, 0, len(gc.Members))
+		for _, member := range gc.Members {
+			spec, found := m[member]
+			if !found {
+				return nil, fmt.Errorf("group %s references unknown member %s", gc.Name, member)
+			}
+			memberSpecs = append(memberSpecs, spec)
+		}
+		groups = append(groups, process_group.GroupSpec{
+			Name:    gc.Name,
+			Members: memberSpecs,
+		})
+	}
+	return groups, nil
 }
 
 type StoreConfig struct {
@@ -113,57 +220,14 @@ func parseFileConfig(path string) (*FileConfig, error) {
 	return &fc, nil
 }
 
-// LoadEnvFromTOML parses only the top-level env list from TOML.
-func LoadEnvFromTOML(path string) ([]string, error) {
-	fc, err := parseFileConfig(path)
-	if err != nil {
-		return nil, err
-	}
-	return fc.Env, nil
-}
-
 // LoadGlobalEnv merges env from config: top-level env, env_files contents, and optionally OS env when UseOSEnv is true.
 // Precedence: OS env (when enabled) provides base; then apply file vars; then top-level env list overrides last.
 func LoadGlobalEnv(path string) ([]string, error) {
-	fc, err := parseFileConfig(path)
+	config, err := LoadConfig(path)
 	if err != nil {
 		return nil, err
 	}
-	m := make(map[string]string)
-	// base: optional OS env
-	if fc.UseOSEnv {
-		for _, kv := range os.Environ() {
-			if i := strings.IndexByte(kv, '='); i >= 0 {
-				k := kv[:i]
-				v := kv[i+1:]
-				m[k] = v
-			}
-		}
-	}
-	// load files in order
-	for _, p := range fc.EnvFiles {
-		pairs, err := loadEnvFile(p)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range pairs {
-			m[k] = v
-		}
-	}
-	// apply top-level env overrides
-	for _, kv := range fc.Env {
-		if i := strings.IndexByte(kv, '='); i >= 0 {
-			k := kv[:i]
-			v := kv[i+1:]
-			m[k] = v
-		}
-	}
-	// build slice
-	out := make([]string, 0, len(m))
-	for k, v := range m {
-		out = append(out, k+"="+v)
-	}
-	return out, nil
+	return config.GetGlobalEnv()
 }
 
 // LoadEnvFile parses a simple .env file and returns a slice of "KEY=VALUE" entries.
@@ -230,75 +294,50 @@ func buildDetectors(pc ProcConfig) ([]detector.Detector, error) {
 }
 
 func mergeLogCfg(fc *FileConfig, pc ProcConfig) logger.Config {
-	var logCfg logger.Config
+	var logCfg = logger.DefaultConfig()
 	if fc != nil && fc.Log != nil {
-		logCfg = logger.Config{
-			Dir:        fc.Log.Dir,
-			StdoutPath: fc.Log.Stdout,
-			StderrPath: fc.Log.Stderr,
-			MaxSizeMB:  fc.Log.MaxSizeMB,
-			MaxBackups: fc.Log.MaxBackups,
-			MaxAgeDays: fc.Log.MaxAgeDays,
-			Compress:   fc.Log.Compress,
-		}
+		logCfg.File.Dir = fc.Log.Dir
+		logCfg.File.StdoutPath = fc.Log.Stdout
+		logCfg.File.StderrPath = fc.Log.Stderr
+		logCfg.File.MaxSizeMB = fc.Log.MaxSizeMB
+		logCfg.File.MaxBackups = fc.Log.MaxBackups
+		logCfg.File.MaxAgeDays = fc.Log.MaxAgeDays
+		logCfg.File.Compress = fc.Log.Compress
 	}
 	if pc.Log != nil {
 		if pc.Log.Dir != "" {
-			logCfg.Dir = pc.Log.Dir
+			logCfg.File.Dir = pc.Log.Dir
 		}
 		if pc.Log.Stdout != "" {
-			logCfg.StdoutPath = pc.Log.Stdout
+			logCfg.File.StdoutPath = pc.Log.Stdout
 		}
 		if pc.Log.Stderr != "" {
-			logCfg.StderrPath = pc.Log.Stderr
+			logCfg.File.StderrPath = pc.Log.Stderr
 		}
 		if pc.Log.MaxSizeMB != 0 {
-			logCfg.MaxSizeMB = pc.Log.MaxSizeMB
+			logCfg.File.MaxSizeMB = pc.Log.MaxSizeMB
 		}
 		if pc.Log.MaxBackups != 0 {
-			logCfg.MaxBackups = pc.Log.MaxBackups
+			logCfg.File.MaxBackups = pc.Log.MaxBackups
 		}
 		if pc.Log.MaxAgeDays != 0 {
-			logCfg.MaxAgeDays = pc.Log.MaxAgeDays
+			logCfg.File.MaxAgeDays = pc.Log.MaxAgeDays
 		}
 		if pc.Log.Compress {
-			logCfg.Compress = true
+			logCfg.File.Compress = true
 		}
 	}
 	return logCfg
 }
 
 // LoadSpecsFromTOML parses a TOML config file into a slice of process.Spec.
-// It now supports loading from programs directory as well as the main config file.
+// It loads process specifications from programs directory only.
 func LoadSpecsFromTOML(path string) ([]process.Spec, error) {
-	// First, load from main config file
-	specs, err := loadSpecsFromMainConfig(path)
+	config, err := LoadConfig(path)
 	if err != nil {
 		return nil, err
 	}
-
-	// Then, load from programs directory if it exists
-	programsSpecs, err := loadSpecsFromProgramsDirectory(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Merge both results
-	result := make([]process.Spec, 0, len(specs)+len(programsSpecs))
-	result = append(result, specs...)
-	result = append(result, programsSpecs...)
-
-	return result, nil
-}
-
-// loadSpecsFromMainConfig loads process specs from the main config file
-func loadSpecsFromMainConfig(path string) ([]process.Spec, error) {
-	fc, err := parseFileConfig(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildSpecsFromProcessConfigs(fc.Processes, fc)
+	return config.GetSpecs()
 }
 
 // loadProgramConfigs reads all .toml files from programs directory and returns ProcConfig slice
@@ -390,71 +429,21 @@ func buildSpecsFromProcessConfigs(processConfigs []ProcConfig, fc *FileConfig) (
 
 // LoadGroupsFromTOML parses group definitions and returns process_group.GroupSpec list.
 func LoadGroupsFromTOML(path string) ([]process_group.GroupSpec, error) {
-	fc, err := parseFileConfig(path)
+	config, err := LoadConfig(path)
 	if err != nil {
 		return nil, err
 	}
-	// Build map name->Spec for member lookup
-	specs, err := LoadSpecsFromTOML(path)
-	if err != nil {
-		return nil, err
-	}
-	m := make(map[string]process.Spec, len(specs))
-	for _, s := range specs {
-		m[s.Name] = s
-	}
-	groups := make([]process_group.GroupSpec, 0, len(fc.Groups))
-	for _, gc := range fc.Groups {
-		if gc.Name == "" {
-			return nil, fmt.Errorf("group requires name")
-		}
-		if len(gc.Members) == 0 {
-			return nil, fmt.Errorf("group %s must list members", gc.Name)
-		}
-		members := make([]process.Spec, 0, len(gc.Members))
-		for _, mn := range gc.Members {
-			s, ok := m[mn]
-			if !ok {
-				return nil, fmt.Errorf("group %s references unknown process %s", gc.Name, mn)
-			}
-			members = append(members, s)
-		}
-		groups = append(groups, process_group.GroupSpec{Name: gc.Name, Members: members})
-	}
-	return groups, nil
+	return config.GetGroups()
 }
 
 // LoadCronJobsFromTOML reads the TOML config and programs directory but returns only entries that define a schedule.
 // It validates cron-specific constraints (autorestart must be false; instances must be 1).
 func LoadCronJobsFromTOML(path string) ([]CronJob, error) {
-	// Load from main config file
-	jobs, err := loadCronJobsFromMainConfig(path)
+	config, err := LoadConfig(path)
 	if err != nil {
 		return nil, err
 	}
-
-	// Load from programs directory
-	programsJobs, err := loadCronJobsFromProgramsDirectory(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Merge results
-	result := make([]CronJob, 0, len(jobs)+len(programsJobs))
-	result = append(result, jobs...)
-	result = append(result, programsJobs...)
-
-	return result, nil
-}
-
-// loadCronJobsFromMainConfig loads cron jobs from the main config file
-func loadCronJobsFromMainConfig(path string) ([]CronJob, error) {
-	fc, err := parseFileConfig(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildCronJobsFromProcessConfigs(fc.Processes)
+	return config.GetCronJobs()
 }
 
 // loadCronJobsFromProgramsDirectory loads cron jobs from programs directory
@@ -517,41 +506,13 @@ type HTTPAPIConfig struct {
 	BasePath string `toml:"base_path" mapstructure:"base_path"` // e.g., "/api"
 }
 
-// LoadHTTPAPIFromTOML loads only the http_api section from the TOML file.
-// Returns (nil, nil) if the section is absent.
-func LoadHTTPAPIFromTOML(path string) (*HTTPAPIConfig, error) {
-	fc, err := parseFileConfig(path)
-	if err != nil {
-		return nil, err
-	}
-	return fc.HTTP, nil
-}
-
 // LoadStoreFromTOML loads optional store configuration. Returns (nil, nil) if absent.
 func LoadStoreFromTOML(path string) (*StoreConfig, error) {
-	fc, err := parseFileConfig(path)
+	config, err := LoadConfig(path)
 	if err != nil {
 		return nil, err
 	}
-	return fc.Store, nil
-}
-
-// LoadHistoryFromTOML loads optional history configuration. Returns (nil, nil) if absent.
-func LoadHistoryFromTOML(path string) (*HistoryConfig, error) {
-	fc, err := parseFileConfig(path)
-	if err != nil {
-		return nil, err
-	}
-	return fc.History, nil
-}
-
-// LoadMetricsFromTOML loads optional metrics configuration. Returns (nil, nil) if absent.
-func LoadMetricsFromTOML(path string) (*MetricsConfig, error) {
-	fc, err := parseFileConfig(path)
-	if err != nil {
-		return nil, err
-	}
-	return fc.Metrics, nil
+	return config.FileConfig.Store, nil
 }
 
 // SortSpecsByPriority sorts process specs by priority (lower numbers first).
