@@ -9,6 +9,58 @@ import (
 	"github.com/loykin/provisr"
 )
 
+// Helper function to create program files in directory
+func createProgramFiles(t *testing.T, programsDir string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(programsDir, 0o755); err != nil {
+		t.Fatalf("create programs dir: %v", err)
+	}
+	for filename, content := range files {
+		filePath := filepath.Join(programsDir, filename)
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", filename, err)
+		}
+	}
+}
+
+// Helper function to verify processes are running and clean them up
+func verifyAndCleanupProcesses(t *testing.T, mgr *provisr.Manager, processNames []string) {
+	t.Helper()
+
+	// Give processes time to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify all processes are running
+	for _, processName := range processNames {
+		statuses, err := mgr.StatusAll(processName)
+		if err != nil {
+			t.Errorf("StatusAll for %s failed: %v", processName, err)
+			continue
+		}
+		if len(statuses) == 0 {
+			t.Errorf("process %s has no status", processName)
+			continue
+		}
+
+		running := false
+		for _, status := range statuses {
+			if status.Running {
+				running = true
+				break
+			}
+		}
+
+		if !running {
+			t.Errorf("process %s is not running", processName)
+		}
+	}
+
+	// Clean up
+	for _, processName := range processNames {
+		_ = mgr.StopAll(processName, 1000)
+	}
+}
+
 // TestStartFromSpecs_WithPriority tests that startFromSpecs respects priority ordering
 func TestStartFromSpecs_WithPriority(t *testing.T) {
 	mgr := provisr.New()
@@ -25,38 +77,7 @@ func TestStartFromSpecs_WithPriority(t *testing.T) {
 		t.Fatalf("startFromSpecs failed: %v", err)
 	}
 
-	// Give processes time to start
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify all processes are running
-	for _, spec := range specs {
-		statuses, err := mgr.StatusAll(spec.Name)
-		if err != nil {
-			t.Errorf("StatusAll for %s failed: %v", spec.Name, err)
-			continue
-		}
-		if len(statuses) == 0 {
-			t.Errorf("process %s has no status", spec.Name)
-			continue
-		}
-
-		running := false
-		for _, status := range statuses {
-			if status.Running {
-				running = true
-				break
-			}
-		}
-
-		if !running {
-			t.Errorf("process %s is not running", spec.Name)
-		}
-	}
-
-	// Clean up
-	for _, spec := range specs {
-		_ = mgr.StopAll(spec.Name, 1000)
-	}
+	verifyAndCleanupProcesses(t, mgr, []string{"worker", "database", "api"})
 }
 
 // TestStartFromSpecs_PriorityWithInstances tests priority ordering with multiple instances
@@ -144,29 +165,17 @@ priority = 10
 
 	// Create programs directory with priority configs
 	programsDir := filepath.Join(dir, "programs")
-	if err := os.MkdirAll(programsDir, 0o755); err != nil {
-		t.Fatalf("create programs dir: %v", err)
-	}
-
-	earlyProgram := filepath.Join(programsDir, "early.toml")
-	earlyData := `
+	programFiles := map[string]string{
+		"early.toml": `
 name = "early"
 command = "sleep 2"
-priority = 1
-`
-	if err := os.WriteFile(earlyProgram, []byte(earlyData), 0o644); err != nil {
-		t.Fatalf("write early program: %v", err)
-	}
-
-	lateProgram := filepath.Join(programsDir, "late.toml")
-	lateData := `
+priority = 1`,
+		"late.toml": `
 name = "late"
 command = "sleep 2"
-priority = 20
-`
-	if err := os.WriteFile(lateProgram, []byte(lateData), 0o644); err != nil {
-		t.Fatalf("write late program: %v", err)
+priority = 20`,
 	}
+	createProgramFiles(t, programsDir, programFiles)
 
 	// Load specs and start them
 	specs, err := provisr.LoadSpecs(mainConfig)
@@ -179,39 +188,7 @@ priority = 20
 		t.Fatalf("startFromSpecs failed: %v", err)
 	}
 
-	// Give processes time to start
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify all processes are running
-	expectedProcesses := []string{"early", "main-service", "late"}
-	for _, processName := range expectedProcesses {
-		statuses, err := mgr.StatusAll(processName)
-		if err != nil {
-			t.Errorf("StatusAll for %s failed: %v", processName, err)
-			continue
-		}
-		if len(statuses) == 0 {
-			t.Errorf("process %s has no status", processName)
-			continue
-		}
-
-		running := false
-		for _, status := range statuses {
-			if status.Running {
-				running = true
-				break
-			}
-		}
-
-		if !running {
-			t.Errorf("process %s should be running", processName)
-		}
-	}
-
-	// Clean up
-	for _, processName := range expectedProcesses {
-		_ = mgr.StopAll(processName, 1000)
-	}
+	verifyAndCleanupProcesses(t, mgr, []string{"early", "main-service", "late"})
 }
 
 // TestStatusesByBase_WithPrioritySpecs tests status retrieval for priority-ordered specs
@@ -230,21 +207,5 @@ func TestStatusesByBase_WithPrioritySpecs(t *testing.T) {
 		t.Fatalf("failed to start test spec: %v", err)
 	}
 
-	// Give process time to start
-	time.Sleep(200 * time.Millisecond)
-
-	statuses, err := mgr.StatusAll("test-spec")
-	if err != nil {
-		t.Fatalf("StatusAll failed: %v", err)
-	}
-	if len(statuses) != 1 {
-		t.Errorf("expected 1 status, got %d", len(statuses))
-	}
-
-	if len(statuses) > 0 && !statuses[0].Running {
-		t.Error("process should be running")
-	}
-
-	// Clean up
-	_ = mgr.StopAll("test-spec", 1000)
+	verifyAndCleanupProcesses(t, mgr, []string{"test-spec"})
 }

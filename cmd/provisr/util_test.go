@@ -137,7 +137,7 @@ func TestPrintDetailedStatus(t *testing.T) {
 	printDetailedStatus(statuses)
 
 	// Restore stdout and read output
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	buf := make([]byte, 2048)
 	n, _ := r.Read(buf)
@@ -169,7 +169,7 @@ func TestPrintDetailedStatusByBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start test process: %v", err)
 	}
-	defer mgr.Stop("detail-test", 100*time.Millisecond)
+	defer func() { _ = mgr.Stop("detail-test", 100*time.Millisecond) }()
 
 	// Wait a moment for process to start
 	time.Sleep(50 * time.Millisecond)
@@ -184,7 +184,7 @@ func TestPrintDetailedStatusByBase(t *testing.T) {
 	printDetailedStatusByBase(mgr, specs)
 
 	// Restore stdout and read output
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	buf := make([]byte, 1024)
 	n, _ := r.Read(buf)
