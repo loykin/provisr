@@ -59,3 +59,10 @@ type GroupFlags struct {
 	APIUrl     string
 	APITimeout time.Duration
 }
+
+type ServeFlags struct {
+	ConfigPath string
+	Daemonize  bool
+	PidFile    string
+	LogFile    string
+}

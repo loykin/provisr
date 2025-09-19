@@ -28,11 +28,6 @@ type GlobalFlags struct {
 	ConfigPath string // Only config path for CLI commands
 }
 
-// ServeFlags holds minimal serve-specific flags (mostly config path)
-type ServeFlags struct {
-	ConfigPath string
-}
-
 // ProcessFlags holds process-related flags
 type ProcessFlags struct {
 	Name            string
@@ -298,18 +293,28 @@ All configuration is loaded from config.toml file.
 
 Examples:
   provisr serve                     # Start daemon (uses --config)
-  provisr serve config.toml         # Start with specific config file`,
+  provisr serve config.toml         # Start with specific config file
+  provisr serve --daemonize         # Run as daemon in background
+  provisr serve --daemonize --pidfile=/var/run/provisr.pid  # Daemon with PID file`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSimpleServeCommand(serveFlags, args)
 		},
 	}
 
-	// No flags needed - everything configured via TOML file
+	// Add daemonize flags
+	cmd.Flags().BoolVar(&serveFlags.Daemonize, "daemonize", false, "run as daemon in background")
+	cmd.Flags().StringVar(&serveFlags.PidFile, "pidfile", "", "write daemon PID to file")
+	cmd.Flags().StringVar(&serveFlags.LogFile, "logfile", "", "redirect daemon logs to file")
 
 	return cmd
 }
 
 func runSimpleServeCommand(flags *ServeFlags, args []string) error {
+	// Handle daemonization first
+	if flags.Daemonize {
+		return daemonize(flags.PidFile, flags.LogFile)
+	}
+
 	configPath := flags.ConfigPath
 	if len(args) > 0 {
 		configPath = args[0]
@@ -317,6 +322,11 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	if configPath == "" {
 		return fmt.Errorf("config file required for serve command. Use --config=config.toml or provide as argument")
+	}
+
+	// Setup daemon cleanup if running as daemon (child process)
+	if flags.PidFile != "" && os.Getppid() == 1 {
+		defer func() { _ = removePidFile(flags.PidFile) }()
 	}
 
 	// Create manager
