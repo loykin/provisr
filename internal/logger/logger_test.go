@@ -18,10 +18,10 @@ func closeIf(c io.Closer) {
 
 func TestWriters_WithDirOnly(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{Dir: dir}
-	outW, errW, err := cfg.Writers("demo")
+	cfg := Config{File: FileConfig{Dir: dir}}
+	outW, errW, err := cfg.ProcessWriters("demo")
 	if err != nil {
-		t.Fatalf("Writers error: %v", err)
+		t.Fatalf("ProcessWriters error: %v", err)
 	}
 	if outW == nil || errW == nil {
 		t.Fatalf("expected both writers non-nil when Dir is set")
@@ -46,10 +46,10 @@ func TestWriters_WithExplicitPaths(t *testing.T) {
 	dir := t.TempDir()
 	sp := filepath.Join(dir, "s.out.log")
 	ep := filepath.Join(dir, "s.err.log")
-	cfg := Config{StdoutPath: sp, StderrPath: ep}
-	outW, errW, err := cfg.Writers("ignored-name")
+	cfg := Config{File: FileConfig{StdoutPath: sp, StderrPath: ep}}
+	outW, errW, err := cfg.ProcessWriters("ignored-name")
 	if err != nil {
-		t.Fatalf("Writers error: %v", err)
+		t.Fatalf("ProcessWriters error: %v", err)
 	}
 	if outW == nil || errW == nil {
 		t.Fatalf("expected both writers non-nil when explicit paths provided")
@@ -68,14 +68,14 @@ func TestWriters_WithExplicitPaths(t *testing.T) {
 
 func TestWriters_Defaults(t *testing.T) {
 	cfg := Config{ /* zero values to trigger defaults */ }
-	outW, errW, _ := cfg.Writers("n")
-	// With no Dir and no explicit paths, Writers returns nils; ensure that's the case
+	outW, errW, _ := cfg.ProcessWriters("n")
+	// With no Dir and no explicit paths, ProcessWriters returns nils; ensure that's the case
 	if outW != nil || errW != nil {
 		t.Fatalf("expected nil writers when no Dir/stdout/stderr set")
 	}
 	// Now set explicit paths to instantiate lumberjack with defaults
-	cfg = Config{StdoutPath: "x", StderrPath: "y"}
-	outW, errW, _ = cfg.Writers("n")
+	cfg = Config{File: FileConfig{StdoutPath: "x", StderrPath: "y"}}
+	outW, errW, _ = cfg.ProcessWriters("n")
 	ol, ok1 := outW.(*lj.Logger)
 	el, ok2 := errW.(*lj.Logger)
 	if !ok1 || !ok2 {
@@ -94,8 +94,8 @@ func TestWriters_Defaults(t *testing.T) {
 
 func TestWriters_Overrides(t *testing.T) {
 	// Custom values propagate
-	cfg := Config{StdoutPath: "x2", StderrPath: "y2", MaxSizeMB: 1, MaxBackups: 9, MaxAgeDays: 11, Compress: true}
-	outW, errW, _ := cfg.Writers("n")
+	cfg := Config{File: FileConfig{StdoutPath: "x2", StderrPath: "y2", MaxSizeMB: 1, MaxBackups: 9, MaxAgeDays: 11, Compress: true}}
+	outW, errW, _ := cfg.ProcessWriters("n")
 	ol := outW.(*lj.Logger)
 	el := errW.(*lj.Logger)
 	if ol.MaxSize != 1 || ol.MaxBackups != 9 || ol.MaxAge != 11 || !ol.Compress {
@@ -111,8 +111,8 @@ func TestWriters_Overrides(t *testing.T) {
 func TestWriters_OnlyOneStream(t *testing.T) {
 	dir := t.TempDir()
 	// Only stdout
-	cfg := Config{StdoutPath: filepath.Join(dir, "only-stdout.log")}
-	outW, errW, _ := cfg.Writers("n")
+	cfg := Config{File: FileConfig{StdoutPath: filepath.Join(dir, "only-stdout.log")}}
+	outW, errW, _ := cfg.ProcessWriters("n")
 	if outW == nil || errW != nil {
 		t.Fatalf("expected stdout writer only")
 	}
@@ -122,8 +122,8 @@ func TestWriters_OnlyOneStream(t *testing.T) {
 		t.Fatalf("stdout not created: %v", err)
 	}
 	// Only stderr
-	cfg = Config{StderrPath: filepath.Join(dir, "only-stderr.log")}
-	outW, errW, _ = cfg.Writers("n")
+	cfg = Config{File: FileConfig{StderrPath: filepath.Join(dir, "only-stderr.log")}}
+	outW, errW, _ = cfg.ProcessWriters("n")
 	if outW != nil || errW == nil {
 		t.Fatalf("expected stderr writer only")
 	}

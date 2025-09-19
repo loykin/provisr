@@ -34,8 +34,8 @@ func main() {
 		panic("could not locate config.toml: tried examples/embedded_config_file/config/config.toml and ./config/config.toml")
 	}
 
-	// Load top-level env and apply
-	if genv, err := provisr.LoadEnv(cfgPath); err == nil && len(genv) > 0 {
+	// Load global env and apply (includes env, env_files, and use_os_env processing)
+	if genv, err := provisr.LoadGlobalEnv(cfgPath); err == nil && len(genv) > 0 {
 		mgr.SetGlobalEnv(genv)
 	}
 	// Load specs

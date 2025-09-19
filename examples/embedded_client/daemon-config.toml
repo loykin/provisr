@@ -1,6 +1,13 @@
 # Example daemon configuration for embedded client testing
 env = ["DAEMON_MODE=embedded_example"]
 
+[log]
+level = "info"
+format = "text"
+color = true
+timestamps = true
+source = false
+
 [http_api]
 enabled = true
 listen = "127.0.0.1:8080"

@@ -16,7 +16,7 @@ func applyGlobalEnvFromFlags(mgr *provisr.Manager, useOSEnv bool, envFiles []str
 	}
 	if len(envFiles) > 0 {
 		for _, f := range envFiles {
-			if pairs, err := provisr.LoadEnv(f); err == nil && len(pairs) > 0 {
+			if pairs, err := provisr.LoadEnvFile(f); err == nil && len(pairs) > 0 {
 				mgr.SetGlobalEnv(pairs)
 			}
 		}

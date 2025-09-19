@@ -332,26 +332,34 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	// Create manager
 	mgr := provisr.New()
 
-	// Load and apply global environment from config
-	if globalEnv, err := provisr.LoadGlobalEnv(configPath); err == nil {
-		mgr.SetGlobalEnv(globalEnv)
+	// Load unified config once
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("error loading config: %w", err)
 	}
 
-	// Load and setup store from config
-	if storeCfg, err := config.LoadStoreFromTOML(configPath); err == nil && storeCfg != nil && storeCfg.Enabled {
-		if err := mgr.SetStoreFromDSN(storeCfg.DSN); err != nil {
+	// Apply global environment
+	globalEnv, err := cfg.GetGlobalEnv()
+	if err != nil {
+		return fmt.Errorf("failed to get global env: %w", err)
+	}
+	mgr.SetGlobalEnv(globalEnv)
+
+	// Setup store from config
+	if cfg.FileConfig.Store != nil && cfg.FileConfig.Store.Enabled {
+		if err := mgr.SetStoreFromDSN(cfg.FileConfig.Store.DSN); err != nil {
 			return fmt.Errorf("error setting up store: %w", err)
 		}
 	}
 
-	// Load and setup history from config
+	// Setup history from config
 	var historySinks []provisr.HistorySink
-	if historyCfg, err := config.LoadHistoryFromTOML(configPath); err == nil && historyCfg != nil && historyCfg.Enabled {
-		if historyCfg.OpenSearchURL != "" && historyCfg.OpenSearchIndex != "" {
-			historySinks = append(historySinks, provisr.NewOpenSearchHistorySink(historyCfg.OpenSearchURL, historyCfg.OpenSearchIndex))
+	if cfg.FileConfig.History != nil && cfg.FileConfig.History.Enabled {
+		if cfg.FileConfig.History.OpenSearchURL != "" && cfg.FileConfig.History.OpenSearchIndex != "" {
+			historySinks = append(historySinks, provisr.NewOpenSearchHistorySink(cfg.FileConfig.History.OpenSearchURL, cfg.FileConfig.History.OpenSearchIndex))
 		}
-		if historyCfg.ClickHouseURL != "" && historyCfg.ClickHouseTable != "" {
-			historySinks = append(historySinks, provisr.NewClickHouseHistorySink(historyCfg.ClickHouseURL, historyCfg.ClickHouseTable))
+		if cfg.FileConfig.History.ClickHouseURL != "" && cfg.FileConfig.History.ClickHouseTable != "" {
+			historySinks = append(historySinks, provisr.NewClickHouseHistorySink(cfg.FileConfig.History.ClickHouseURL, cfg.FileConfig.History.ClickHouseTable))
 		}
 
 		// Note: Store history control would need additional Manager method
@@ -363,29 +371,24 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 
 	// Setup metrics from config
-	if metricsCfg, err := config.LoadMetricsFromTOML(configPath); err == nil && metricsCfg != nil && metricsCfg.Enabled {
-		if metricsCfg.Listen != "" {
+	if cfg.FileConfig.Metrics != nil && cfg.FileConfig.Metrics.Enabled {
+		if cfg.FileConfig.Metrics.Listen != "" {
 			go func() {
-				if err := provisr.ServeMetrics(metricsCfg.Listen); err != nil {
+				if err := provisr.ServeMetrics(cfg.FileConfig.Metrics.Listen); err != nil {
 					fmt.Printf("Metrics server error: %v\n", err)
 				}
 			}()
 		}
 	}
 
-	// Load HTTP API config and start server
-	httpCfg, err := config.LoadHTTPAPIFromTOML(configPath)
-	if err != nil {
-		return fmt.Errorf("error loading HTTP API config: %w", err)
-	}
-
-	if httpCfg == nil || !httpCfg.Enabled {
+	// Check HTTP API config
+	if cfg.FileConfig.HTTP == nil || !cfg.FileConfig.HTTP.Enabled {
 		return fmt.Errorf("HTTP API must be enabled in config file to run serve command")
 	}
 
 	// Create and start HTTP server
-	fmt.Printf("Starting provisr server on %s%s\n", httpCfg.Listen, httpCfg.BasePath)
-	server, err := provisr.NewHTTPServer(httpCfg.Listen, httpCfg.BasePath, mgr)
+	fmt.Printf("Starting provisr server on %s%s\n", cfg.FileConfig.HTTP.Listen, cfg.FileConfig.HTTP.BasePath)
+	server, err := provisr.NewHTTPServer(cfg.FileConfig.HTTP.Listen, cfg.FileConfig.HTTP.BasePath, mgr)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP server: %w", err)
 	}

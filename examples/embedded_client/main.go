@@ -2,44 +2,68 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
+	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/pkg/client"
 )
 
 func main() {
-	// Create a provisr client
+	// Create a colorful slog logger for demonstration using unified config
+	logCfg := logger.DefaultConfig()
+	logCfg.Slog.Level = logger.LevelInfo
+	logCfg.Slog.Format = logger.FormatText
+	logCfg.Slog.Color = true
+	logCfg.Slog.TimeStamps = true
+	logCfg.Slog.Source = false
+
+	// In CI, use plain text without color
+	if os.Getenv("CI") == "true" {
+		logCfg.Slog.Color = false
+	}
+
+	slogger := logCfg.NewSlogger()
+	slog.SetDefault(slogger)
+
+	slog.Info("Starting provisr client demo",
+		slog.Bool("color_enabled", logCfg.Slog.Color),
+		slog.String("format", string(logCfg.Slog.Format)),
+	)
+
+	// Create a provisr client with logger
 	cfg := client.DefaultConfig()
+	cfg.Logger = slogger
 	provisrClient := client.New(cfg)
 
 	ctx := context.Background()
 
 	// In CI environment, be more tolerant of daemon not being available
 	if os.Getenv("CI") == "true" {
-		fmt.Println("🔧 CI environment detected - checking daemon connectivity with timeout...")
+		slog.Info("CI environment detected - checking daemon connectivity with timeout")
 
 		// Use a shorter context timeout in CI
 		timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 
 		if !provisrClient.IsReachable(timeoutCtx) {
-			fmt.Println("⚠️  Provisr daemon not reachable in CI environment")
-			fmt.Println("   This is expected if running without daemon setup")
-			fmt.Println("   In production, ensure daemon is running with:")
-			fmt.Println("   provisr serve daemon-config.toml")
+			slog.Warn("Provisr daemon not reachable in CI environment")
+			slog.Info("This is expected if running without daemon setup")
+			slog.Info("In production, ensure daemon is running with: provisr serve daemon-config.toml")
 			return
 		}
 	} else {
 		// Check if provisr daemon is reachable
 		if !provisrClient.IsReachable(ctx) {
-			log.Fatal("❌ Provisr daemon not reachable. Start it with: provisr serve examples/embedded_client/daemon-config.toml")
+			slog.Error("Provisr daemon not reachable",
+				slog.String("command", "provisr serve examples/embedded_client/daemon-config.toml"),
+			)
+			os.Exit(1)
 		}
 	}
 
-	fmt.Println("✅ Connected to provisr daemon")
+	slog.Info("Connected to provisr daemon successfully")
 
 	// Start a process
 	startReq := client.StartRequest{
@@ -48,16 +72,25 @@ func main() {
 		Instances: 1,         // Fewer instances for CI
 	}
 
-	fmt.Println("Starting process...")
+	slog.Info("Starting process",
+		slog.String("name", startReq.Name),
+		slog.String("command", startReq.Command),
+	)
+
 	if err := provisrClient.StartProcess(ctx, startReq); err != nil {
-		log.Fatalf("Start failed: %v", err)
+		slog.Error("Start failed", slog.Any("error", err))
+		os.Exit(1)
 	}
-	fmt.Println("✅ Process started successfully")
+
+	slog.Info("Process started successfully", slog.String("name", startReq.Name))
 
 	// In CI, give some time for process to run then exit
 	if os.Getenv("CI") == "true" {
-		fmt.Println("🔄 CI mode - waiting briefly for process to run...")
+		slog.Info("CI mode - waiting briefly for process to run")
 		time.Sleep(2 * time.Second)
-		fmt.Println("✅ Example completed successfully in CI environment")
+		slog.Info("Example completed successfully in CI environment")
+	} else {
+		slog.Info("Demo completed - process is running in background")
+		slog.Info("Check status with: curl http://localhost:8080/api/status")
 	}
 }

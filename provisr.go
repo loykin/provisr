@@ -95,8 +95,8 @@ func (s *CronScheduler) Stop()                { s.inner.Stop() }
 
 // Config helpers (forwarders to internal/config)
 
-func LoadEnv(path string) ([]string, error)           { return cfg.LoadEnvFromTOML(path) }
 func LoadGlobalEnv(path string) ([]string, error)     { return cfg.LoadGlobalEnv(path) }
+func LoadEnvFile(path string) ([]string, error)       { return cfg.LoadEnvFile(path) }
 func LoadSpecs(path string) ([]Spec, error)           { return cfg.LoadSpecsFromTOML(path) }
 func LoadGroups(path string) ([]pg.GroupSpec, error)  { return cfg.LoadGroupsFromTOML(path) }
 func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsFromTOML(path) }
@@ -104,11 +104,9 @@ func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsF
 // SortSpecsByPriority sorts process specs by priority (lower numbers start first)
 func SortSpecsByPriority(specs []Spec) []Spec { return cfg.SortSpecsByPriority(specs) }
 
-// HTTP API helpers
+// Store helper (kept for backward compatibility)
 
-func LoadHTTPAPI(path string) (*cfg.HTTPAPIConfig, error) { return cfg.LoadHTTPAPIFromTOML(path) }
-func LoadStore(path string) (*cfg.StoreConfig, error)     { return cfg.LoadStoreFromTOML(path) }
-func LoadHistory(path string) (*cfg.HistoryConfig, error) { return cfg.LoadHistoryFromTOML(path) }
+func LoadStore(path string) (*cfg.StoreConfig, error) { return cfg.LoadStoreFromTOML(path) }
 
 // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
 func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {

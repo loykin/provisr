@@ -10,6 +10,7 @@ import (
 )
 
 // Spec describes a process to be managed.
+// All logging is now handled through slog-based structured logging.
 type Spec struct {
 	Name            string              `json:"name"`
 	Command         string              `json:"command"`          // command to start the process (shell)
@@ -24,7 +25,7 @@ type Spec struct {
 	RestartInterval time.Duration       `json:"restart_interval"` // wait before attempting an auto-restart
 	Instances       int                 `json:"instances"`        // number of instances to run concurrently (default 1)
 	Detectors       []detector.Detector `json:"-"`
-	Log             logger.Config       `json:"log"` // logging configuration for this process instance
+	Log             logger.Config       `json:"log"` // unified slog-based logging configuration
 }
 
 // BuildCommand constructs an *exec.Cmd for the given spec.Command.

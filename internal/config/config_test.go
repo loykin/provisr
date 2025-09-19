@@ -208,7 +208,7 @@ env = ["PORT=2000", "LOCAL=${GLOB}-y"]
 	}
 
 	mgr := mgrpkg.NewManager()
-	genv, err := LoadEnvFromTOML(cfg)
+	genv, err := LoadGlobalEnv(cfg)
 	if err != nil {
 		t.Fatalf("load env: %v", err)
 	}
@@ -331,27 +331,6 @@ func TestLoadEnvFileInvalidPath(t *testing.T) {
 	}
 }
 
-func TestLoadEnvFromTOML_TopLevelOnly(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "c.toml")
-	// env_files should be ignored by LoadEnvFromTOML; only top-level env returned
-	dotenv := filepath.Join(dir, ".env")
-	_ = os.WriteFile(dotenv, []byte("A=1\n"), 0o644)
-	data := "" +
-		"env = [\"X=9\", \"Y=2\"]\n" +
-		"env_files = [\"" + dotenv + "\"]\n"
-	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	pairs, err := LoadEnvFromTOML(p)
-	if err != nil {
-		t.Fatalf("LoadEnvFromTOML: %v", err)
-	}
-	if len(pairs) != 2 { // only X and Y
-		t.Fatalf("expected 2 items, got %d: %v", len(pairs), pairs)
-	}
-}
-
 func TestLoadEnvFile_MalformedLinesIgnored(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, ".env")
@@ -402,7 +381,7 @@ log = { dir = "/tmp/ovr", stdout = "/tmp/ovr.out", max_size_mb = 20 }
 	}
 	lg := specs[0].Log
 	// per-process overrides Dir, StdoutPath, MaxSizeMB; others inherited from top-level
-	if lg.Dir != "/tmp/ovr" || lg.StdoutPath != "/tmp/ovr.out" || lg.StderrPath != "/tmp/base.err" || lg.MaxSizeMB != 20 || lg.MaxBackups != 2 || lg.MaxAgeDays != 7 || !lg.Compress {
+	if lg.File.Dir != "/tmp/ovr" || lg.File.StdoutPath != "/tmp/ovr.out" || lg.File.StderrPath != "/tmp/base.err" || lg.File.MaxSizeMB != 20 || lg.File.MaxBackups != 2 || lg.File.MaxAgeDays != 7 || !lg.File.Compress {
 		t.Fatalf("unexpected merged log cfg: %+v", lg)
 	}
 }
@@ -481,10 +460,11 @@ base_path = "/api"
 	if err := os.WriteFile(p1, []byte(data1), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	cfg, err := LoadHTTPAPIFromTOML(p1)
+	config, err := LoadConfig(p1)
 	if err != nil {
-		t.Fatalf("LoadHTTPAPIFromTOML: %v", err)
+		t.Fatalf("LoadConfig: %v", err)
 	}
+	cfg := config.FileConfig.HTTP
 	if cfg == nil || !cfg.Enabled || cfg.Listen != ":9000" || cfg.BasePath != "/api" {
 		t.Fatalf("unexpected http api cfg: %+v", cfg)
 	}
@@ -492,10 +472,11 @@ base_path = "/api"
 	if err := os.WriteFile(p2, []byte("# no http_api\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	cfg2, err := LoadHTTPAPIFromTOML(p2)
+	config2, err := LoadConfig(p2)
 	if err != nil {
-		t.Fatalf("LoadHTTPAPIFromTOML: %v", err)
+		t.Fatalf("LoadConfig: %v", err)
 	}
+	cfg2 := config2.FileConfig.HTTP
 	if cfg2 != nil {
 		t.Fatalf("expected nil cfg when section absent, got %+v", cfg2)
 	}
@@ -582,10 +563,11 @@ clickhouse_table = "default.provisr_history"
 	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hc, err := LoadHistoryFromTOML(p)
+	config, err := LoadConfig(p)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
+	hc := config.FileConfig.History
 	if hc == nil || !hc.Enabled || hc.InStore == nil || *hc.InStore != false {
 		t.Fatalf("unexpected hc: %#v", hc)
 	}
