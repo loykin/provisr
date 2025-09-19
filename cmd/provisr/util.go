@@ -4,22 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/loykin/provisr"
 )
 
-func applyGlobalEnvFromFlags(mgr *provisr.Manager, useOSEnv bool, envFiles []string, envKVs []string) {
+func applyGlobalEnvFromFlags(mgr *provisr.Manager, useOSEnv bool, envKVs []string) {
 	if useOSEnv {
 		mgr.SetGlobalEnv(os.Environ())
-	}
-	if len(envFiles) > 0 {
-		for _, f := range envFiles {
-			if pairs, err := provisr.LoadEnvFile(f); err == nil && len(pairs) > 0 {
-				mgr.SetGlobalEnv(pairs)
-			}
-		}
 	}
 	if len(envKVs) > 0 {
 		mgr.SetGlobalEnv(envKVs)
@@ -27,8 +21,12 @@ func applyGlobalEnvFromFlags(mgr *provisr.Manager, useOSEnv bool, envFiles []str
 }
 
 func startFromSpecs(mgr *provisr.Manager, specs []provisr.Spec) error {
-	// Sort specs by priority before starting
-	sortedSpecs := provisr.SortSpecsByPriority(specs)
+	// Simple priority sort
+	sortedSpecs := make([]provisr.Spec, len(specs))
+	copy(sortedSpecs, specs)
+	sort.SliceStable(sortedSpecs, func(i, j int) bool {
+		return sortedSpecs[i].Priority < sortedSpecs[j].Priority
+	})
 
 	for _, sp := range sortedSpecs {
 		if sp.Instances > 1 {

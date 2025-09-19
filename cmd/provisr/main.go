@@ -339,27 +339,24 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 
 	// Apply global environment
-	globalEnv, err := cfg.GetGlobalEnv()
-	if err != nil {
-		return fmt.Errorf("failed to get global env: %w", err)
-	}
-	mgr.SetGlobalEnv(globalEnv)
+	// Set global environment - 직접 필드 접근
+	mgr.SetGlobalEnv(cfg.GlobalEnv)
 
 	// Setup store from config
-	if cfg.FileConfig.Store != nil && cfg.FileConfig.Store.Enabled {
-		if err := mgr.SetStoreFromDSN(cfg.FileConfig.Store.DSN); err != nil {
+	if cfg.Store != nil && cfg.Store.Enabled {
+		if err := mgr.SetStoreFromDSN(cfg.Store.DSN); err != nil {
 			return fmt.Errorf("error setting up store: %w", err)
 		}
 	}
 
 	// Setup history from config
 	var historySinks []provisr.HistorySink
-	if cfg.FileConfig.History != nil && cfg.FileConfig.History.Enabled {
-		if cfg.FileConfig.History.OpenSearchURL != "" && cfg.FileConfig.History.OpenSearchIndex != "" {
-			historySinks = append(historySinks, provisr.NewOpenSearchHistorySink(cfg.FileConfig.History.OpenSearchURL, cfg.FileConfig.History.OpenSearchIndex))
+	if cfg.History != nil && cfg.History.Enabled {
+		if cfg.History.OpenSearchURL != "" && cfg.History.OpenSearchIndex != "" {
+			historySinks = append(historySinks, provisr.NewOpenSearchHistorySink(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex))
 		}
-		if cfg.FileConfig.History.ClickHouseURL != "" && cfg.FileConfig.History.ClickHouseTable != "" {
-			historySinks = append(historySinks, provisr.NewClickHouseHistorySink(cfg.FileConfig.History.ClickHouseURL, cfg.FileConfig.History.ClickHouseTable))
+		if cfg.History.ClickHouseURL != "" && cfg.History.ClickHouseTable != "" {
+			historySinks = append(historySinks, provisr.NewClickHouseHistorySink(cfg.History.ClickHouseURL, cfg.History.ClickHouseTable))
 		}
 
 		// Note: Store history control would need additional Manager method
@@ -371,24 +368,24 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 
 	// Setup metrics from config
-	if cfg.FileConfig.Metrics != nil && cfg.FileConfig.Metrics.Enabled {
-		if cfg.FileConfig.Metrics.Listen != "" {
+	if cfg.Metrics != nil && cfg.Metrics.Enabled {
+		if cfg.Metrics.Listen != "" {
 			go func() {
-				if err := provisr.ServeMetrics(cfg.FileConfig.Metrics.Listen); err != nil {
+				if err := provisr.ServeMetrics(cfg.Metrics.Listen); err != nil {
 					fmt.Printf("Metrics server error: %v\n", err)
 				}
 			}()
 		}
 	}
 
-	// Check HTTP API config
-	if cfg.FileConfig.HTTP == nil || !cfg.FileConfig.HTTP.Enabled {
-		return fmt.Errorf("HTTP API must be enabled in config file to run serve command")
+	// Check Server config (was HTTP config)
+	if cfg.Server == nil {
+		return fmt.Errorf("Server must be configured to run serve command")
 	}
 
 	// Create and start HTTP server
-	fmt.Printf("Starting provisr server on %s%s\n", cfg.FileConfig.HTTP.Listen, cfg.FileConfig.HTTP.BasePath)
-	server, err := provisr.NewHTTPServer(cfg.FileConfig.HTTP.Listen, cfg.FileConfig.HTTP.BasePath, mgr)
+	fmt.Printf("Starting provisr server on %s%s\n", cfg.Server.Listen, cfg.Server.BasePath)
+	server, err := provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP server: %w", err)
 	}

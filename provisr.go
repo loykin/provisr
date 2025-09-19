@@ -79,8 +79,6 @@ func (g *Group) Status(gs GroupSpec) (map[string][]Status, error) {
 	return m, err
 }
 
-// Cron facade
-
 type CronScheduler struct{ inner *cron.Scheduler }
 
 type CronJob = cron.Job // alias; use pointer when adding to avoid copying atomics
@@ -93,22 +91,9 @@ func (s *CronScheduler) Add(j *CronJob) error { return s.inner.Add(j) }
 func (s *CronScheduler) Start() error         { return s.inner.Start() }
 func (s *CronScheduler) Stop()                { s.inner.Stop() }
 
-// Config helpers (forwarders to internal/config)
-
-func LoadGlobalEnv(path string) ([]string, error)     { return cfg.LoadGlobalEnv(path) }
-func LoadEnvFile(path string) ([]string, error)       { return cfg.LoadEnvFile(path) }
-func LoadSpecs(path string) ([]Spec, error)           { return cfg.LoadSpecsFromTOML(path) }
-func LoadGroups(path string) ([]pg.GroupSpec, error)  { return cfg.LoadGroupsFromTOML(path) }
-func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsFromTOML(path) }
-
-// SortSpecsByPriority sorts process specs by priority (lower numbers start first)
-func SortSpecsByPriority(specs []Spec) []Spec { return cfg.SortSpecsByPriority(specs) }
-
-// Store helper (kept for backward compatibility)
-
-func LoadStore(path string) (*cfg.StoreConfig, error) { return cfg.LoadStoreFromTOML(path) }
-
-// NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
+func LoadConfig(path string) (*cfg.Config, error) {
+	return cfg.LoadConfig(path)
+} // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
 func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
 	return iapi.NewServer(addr, basePath, m.inner)
 }
@@ -140,10 +125,4 @@ func NewOpenSearchHistorySink(baseURL, index string) HistorySink {
 func NewClickHouseHistorySink(baseURL, table string) HistorySink {
 	sink, _ := history_factory.NewSinkFromDSN("clickhouse://" + strings.TrimPrefix(baseURL, "http://") + "?table=" + table)
 	return sink
-}
-func NewSQLHistorySinkFromDSN(dsn string) HistorySink {
-	if s, err := history_factory.NewSinkFromDSN(dsn); err == nil {
-		return s
-	}
-	return nil
 }

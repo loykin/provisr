@@ -34,19 +34,20 @@ func main() {
 		panic("could not locate config.toml: tried examples/embedded_config_file/config/config.toml and ./config/config.toml")
 	}
 
-	// Load global env and apply (includes env, env_files, and use_os_env processing)
-	if genv, err := provisr.LoadGlobalEnv(cfgPath); err == nil && len(genv) > 0 {
-		mgr.SetGlobalEnv(genv)
-	}
-	// Load specs
-	specs, err := provisr.LoadSpecs(cfgPath)
+	// Load complete configuration at once
+	config, err := provisr.LoadConfig(cfgPath)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "failed to load specs from %s: %v\n", cfgPath, err)
-		if err != nil {
-			return
-		}
+		_, _ = fmt.Fprintf(os.Stderr, "failed to load config from %s: %v\n", cfgPath, err)
 		os.Exit(1)
 	}
+
+	// Apply global environment
+	if len(config.GlobalEnv) > 0 {
+		mgr.SetGlobalEnv(config.GlobalEnv)
+	}
+
+	// Get specs from config
+	specs := config.Specs
 	// Start all (graceful error handling: don't panic; report and continue)
 	var hadError bool
 	for _, sp := range specs {
