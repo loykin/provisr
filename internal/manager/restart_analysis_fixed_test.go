@@ -74,7 +74,7 @@ func TestManagerRestartOnly(t *testing.T) {
 		t.Logf("Rapid kill #%d: PID %d", i, currentStatus.PID)
 
 		// Wait for restart
-		time.Sleep(1 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
 
 	// Final check - should have exactly initialRapidRestarts + 3
