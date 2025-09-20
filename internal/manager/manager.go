@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -25,31 +24,20 @@ import (
 // better debuggability and performance.
 type Manager struct {
 	// Manager-level state (protected by mu)
-	mu               sync.RWMutex
-	processes        map[string]*ManagedProcess
-	specs            map[string]process.Spec // Track process specs for restart
-	lastRestartTimes map[string]time.Time    // Track last restart time per process
-	restarting       map[string]bool         // Track processes currently being restarted
+	mu        sync.RWMutex
+	processes map[string]*ManagedProcess
 
 	// Shared resources
 	envManager *env.Env
 	store      store.Store
 	histSinks  []history.Sink
-
-	// Reconciler control
-	reconTicker *time.Ticker
-	reconStop   chan struct{}
-	reconWG     sync.WaitGroup
 }
 
 // NewManager creates a new manager
 func NewManager() *Manager {
 	return &Manager{
-		processes:        make(map[string]*ManagedProcess),
-		specs:            make(map[string]process.Spec),
-		lastRestartTimes: make(map[string]time.Time),
-		restarting:       make(map[string]bool),
-		envManager:       env.New(),
+		processes:  make(map[string]*ManagedProcess),
+		envManager: env.New(),
 	}
 }
 
@@ -90,10 +78,6 @@ func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
 
 // Start starts a single process
 func (m *Manager) Start(spec process.Spec) error {
-	m.mu.Lock()
-	m.specs[spec.Name] = spec // Store spec for restart purposes
-	m.mu.Unlock()
-
 	up := m.ensureProcess(spec.Name)
 	return up.Start(spec)
 }
@@ -209,145 +193,8 @@ func (m *Manager) Count(base string) (int, error) {
 	return count, nil
 }
 
-// StartReconciler starts background reconciliation
-func (m *Manager) StartReconciler(interval time.Duration) {
-	if interval <= 0 {
-		interval = 500 * time.Millisecond
-	}
-
-	m.mu.Lock()
-	if m.reconTicker != nil {
-		m.mu.Unlock()
-		return // Already running
-	}
-
-	m.reconTicker = time.NewTicker(interval)
-	m.reconStop = make(chan struct{})
-	m.mu.Unlock()
-
-	m.reconWG.Add(1)
-	go m.runReconciler()
-}
-
-// StopReconciler stops background reconciliation
-func (m *Manager) StopReconciler() {
-	m.mu.Lock()
-	if m.reconTicker == nil {
-		m.mu.Unlock()
-		return
-	}
-
-	m.reconTicker.Stop()
-	close(m.reconStop)
-	m.reconTicker = nil
-	m.reconStop = nil
-	m.mu.Unlock()
-
-	m.reconWG.Wait()
-}
-
-// ReconcileOnce performs a single reconciliation cycle
-func (m *Manager) ReconcileOnce() {
-	m.mu.RLock()
-	processes := make([]*ManagedProcess, 0, len(m.processes))
-	for _, up := range m.processes {
-		processes = append(processes, up)
-	}
-	m.mu.RUnlock()
-
-	// Check each process for health and cleanup
-	for _, up := range processes {
-		m.reconcileProcess(up)
-	}
-}
-
-// reconcileProcess performs reconciliation for a single process
-func (m *Manager) reconcileProcess(up *ManagedProcess) {
-	status := up.Status()
-
-	// Check if process is in an inconsistent state
-	if status.Running && status.PID == 0 {
-		// Running but no PID - likely stale state
-		_ = up.Stop(5 * time.Second)
-		return
-	}
-
-	// Check if process died unexpectedly and handle restart
-	if !status.Running && status.PID != 0 {
-		// Process died but state not updated - trigger health check
-		up.Reconcile() // This will update the state to stopped
-
-		// Get updated status after reconciliation
-		status = up.Status()
-	}
-
-	// Handle auto-restart for stopped processes that should be running
-	if !status.Running {
-		m.mu.RLock()
-		spec, hasSpec := m.specs[status.Name]
-		lastRestart, hasLastRestart := m.lastRestartTimes[status.Name]
-		isRestarting := m.restarting[status.Name]
-		m.mu.RUnlock()
-
-		if hasSpec && spec.AutoRestart && !m.isProcessStopRequested(up) && !isRestarting {
-			// Check if enough time has passed since last restart attempt (prevent rapid restarts)
-			const minRestartInterval = 200 * time.Millisecond // Faster in tests while still preventing rapid loops
-			now := time.Now()
-			if !hasLastRestart || now.Sub(lastRestart) >= minRestartInterval {
-				// Check if process is already in starting state to prevent duplicate restarts
-				if status.State != "starting" {
-					// Set restarting flag to prevent concurrent restarts
-					m.mu.Lock()
-					m.restarting[status.Name] = true
-					m.lastRestartTimes[status.Name] = now
-					m.mu.Unlock()
-
-					up.IncrementRestarts()
-
-					// Attempt restart
-					err := up.Start(spec)
-
-					// Clear restarting flag regardless of success/failure
-					m.mu.Lock()
-					delete(m.restarting, status.Name)
-					m.mu.Unlock()
-
-					if err != nil {
-						slog.Error("failed to restart process", "name", status.Name, "err", err)
-					}
-				}
-			}
-		}
-	}
-} // runReconciler runs the background reconciliation loop
-func (m *Manager) runReconciler() {
-	defer m.reconWG.Done()
-
-	// Local copies to avoid race conditions
-	m.mu.RLock()
-	ticker := m.reconTicker
-	stopChan := m.reconStop
-	m.mu.RUnlock()
-
-	if ticker == nil || stopChan == nil {
-		return
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			m.ReconcileOnce()
-		case <-stopChan:
-			return
-		}
-	}
-}
-
 // Shutdown gracefully shuts down all processes
 func (m *Manager) Shutdown() error {
-	// Stop reconciler first
-	m.StopReconciler()
-
 	// Shut down all processes
 	m.mu.RLock()
 	processes := make([]*ManagedProcess, 0, len(m.processes))
@@ -450,11 +297,4 @@ func (m *Manager) recordStart(_ *process.Process) {
 func (m *Manager) recordStop(_ *process.Process, _ error) {
 	// This is a stub - simplified for now
 	// In a full implementation, this would record to store and history sinks
-}
-
-// isProcessStopRequested checks if a process stop has been explicitly requested
-func (m *Manager) isProcessStopRequested(up *ManagedProcess) bool {
-	// For now, assume no explicit stop requests during auto-restart scenarios
-	// In a full implementation, this could check for pending stop commands
-	return false
 }

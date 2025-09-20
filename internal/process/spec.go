@@ -25,7 +25,7 @@ type Spec struct {
 	Env             []string            `json:"env"`              // optional extra env
 	PIDFile         string              `json:"pid_file"`         // optional pidfile path; if set a PIDFileDetector will be used
 	Priority        int                 `json:"priority"`         // startup priority (lower numbers start first, default 0)
-	RetryCount      int                 `json:"retry_count"`      // number of retries on start failure
+	RetryCount      uint32              `json:"retry_count"`      // number of retries on start failure
 	RetryInterval   time.Duration       `json:"retry_interval"`   // interval between retries
 	StartDuration   time.Duration       `json:"start_duration"`   // minimum time the process must stay up to be considered started
 	AutoRestart     bool                `json:"auto_restart"`     // restart automatically if the process dies unexpectedly
@@ -34,6 +34,27 @@ type Spec struct {
 	Detectors       []detector.Detector `json:"-" mapstructure:"-"`
 	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"` // for config parsing
 	Log             logger.Config       `json:"log"`                                // unified slog-based logging configuration
+}
+
+func (s *Spec) DeepCopy() *Spec {
+	if s == nil {
+		return nil
+	}
+
+	copySpec := *s
+
+	if s.Env != nil {
+		copySpec.Env = append([]string(nil), s.Env...)
+	}
+
+	// DetectorConfigs 슬라이스 복사
+	if s.DetectorConfigs != nil {
+		copySpec.DetectorConfigs = append([]DetectorConfig(nil), s.DetectorConfigs...)
+	}
+
+	s.Log = *s.Log.DeepCopy()
+
+	return &copySpec
 }
 
 // BuildCommand constructs an *exec.Cmd for the given spec.Command.

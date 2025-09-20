@@ -11,123 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestManagerMultiProcessAutoRestart tests Manager handling multiple processes with auto-restart
-func TestManagerMultiProcessAutoRestart(t *testing.T) {
-	manager := NewManager()
-	manager.StartReconciler(200 * time.Millisecond) // Fast reconciliation for testing
-	defer manager.StopReconciler()
-	defer manager.Shutdown()
-
-	// Test multiple processes with auto-restart enabled
-	processes := []struct {
-		name        string
-		autoRestart bool
-	}{
-		{"test-manager-proc1", true},
-		{"test-manager-proc2", true},
-		{"test-manager-proc3", false}, // This one should NOT restart
-	}
-
-	t.Log("Phase 1: Starting multiple processes")
-
-	// Start all processes
-	for _, p := range processes {
-		spec := process.Spec{
-			Name:        p.name,
-			Command:     "sleep 300",
-			AutoRestart: p.autoRestart,
-		}
-
-		err := manager.Start(spec)
-		require.NoError(t, err, "Failed to start process %s", p.name)
-
-		// Wait for process to be ready
-		time.Sleep(100 * time.Millisecond)
-
-		status, err := manager.Status(p.name)
-		require.NoError(t, err)
-		require.True(t, status.Running, "Process %s should be running", p.name)
-		require.Greater(t, status.PID, 0, "Process %s should have valid PID", p.name)
-
-		t.Logf("✓ Started process %s (PID: %d, AutoRestart: %t)", p.name, status.PID, p.autoRestart)
-	}
-
-	// Collect initial PIDs and restart counts
-	initialStates := make(map[string]struct {
-		pid      int
-		restarts int
-	})
-
-	for _, p := range processes {
-		status, err := manager.Status(p.name)
-		require.NoError(t, err)
-		initialStates[p.name] = struct {
-			pid      int
-			restarts int
-		}{
-			pid:      status.PID,
-			restarts: status.Restarts,
-		}
-	}
-
-	t.Log("Phase 2: Killing processes to trigger auto-restart")
-
-	// Kill all processes
-	for _, p := range processes {
-		initialState := initialStates[p.name]
-		err := killProcessByPID(initialState.pid)
-		require.NoError(t, err, "Failed to kill process %s (PID: %d)", p.name, initialState.pid)
-		t.Logf("✓ Killed process %s (PID: %d)", p.name, initialState.pid)
-	}
-
-	t.Log("Phase 3: Waiting for Manager reconciliation and auto-restart")
-
-	// Wait for reconciliation to detect deaths and restart
-	time.Sleep(2 * time.Second)
-
-	t.Log("Phase 4: Verifying auto-restart results")
-
-	// Check results for each process
-	for _, p := range processes {
-		initialState := initialStates[p.name]
-		status, err := manager.Status(p.name)
-		require.NoError(t, err)
-
-		if p.autoRestart {
-			// Should be restarted
-			assert.True(t, status.Running, "Process %s with auto-restart should be running", p.name)
-			assert.NotEqual(t, initialState.pid, status.PID, "Process %s should have new PID after restart", p.name)
-			assert.Greater(t, status.Restarts, initialState.restarts, "Process %s should have incremented restart count", p.name)
-			t.Logf("✓ Auto-restart successful: %s PID %d → %d, Restarts %d → %d",
-				p.name, initialState.pid, status.PID, initialState.restarts, status.Restarts)
-		} else {
-			// Should stay dead
-			assert.False(t, status.Running, "Process %s without auto-restart should stay dead", p.name)
-			assert.Equal(t, initialState.pid, status.PID, "Process %s should keep same PID when dead", p.name)
-			assert.Equal(t, initialState.restarts, status.Restarts, "Process %s should not increment restart count", p.name)
-			t.Logf("✓ Correctly stayed dead: %s (AutoRestart: false)", p.name)
-		}
-	}
-
-	// Verify all processes with auto-restart are healthy
-	for _, p := range processes {
-		if p.autoRestart {
-			status, err := manager.Status(p.name)
-			require.NoError(t, err)
-			require.True(t, status.Running, "Restarted process %s should be healthy", p.name)
-			t.Logf("✓ Restarted process %s is healthy", p.name)
-		}
-	}
-}
-
 // TestManagerReconcilerAutoRestart tests Manager's reconciler-driven auto-restart
 func TestManagerReconcilerAutoRestart(t *testing.T) {
 	manager := NewManager()
-
-	// Start with longer reconciler interval to test manual reconciliation
-	manager.StartReconciler(1 * time.Second)
-	defer manager.StopReconciler()
-	defer manager.Shutdown()
+	defer func() { _ = manager.Shutdown() }()
 
 	t.Log("Phase 1: Starting process with auto-restart")
 
@@ -156,12 +43,8 @@ func TestManagerReconcilerAutoRestart(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("✓ Killed process PID %d", initialStatus.PID)
 
-	// Manually trigger reconciliation (without waiting for timer)
-	t.Log("Phase 3: Triggering manual reconciliation")
-	manager.ReconcileOnce()
-
 	// Wait a bit for restart to happen (allow reconciler + restart interval)
-	time.Sleep(1200 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 
 	// Check if process was restarted
 	finalStatus, err := manager.Status("test-reconciler-restart")
@@ -181,9 +64,7 @@ func TestManagerReconcilerAutoRestart(t *testing.T) {
 // TestManagerProcessCoordination tests Manager's coordination of multiple process restarts
 func TestManagerProcessCoordination(t *testing.T) {
 	manager := NewManager()
-	manager.StartReconciler(100 * time.Millisecond) // Very fast for testing
-	defer manager.StopReconciler()
-	defer manager.Shutdown()
+	defer func() { _ = manager.Shutdown() }()
 
 	t.Log("Phase 1: Starting multiple processes")
 

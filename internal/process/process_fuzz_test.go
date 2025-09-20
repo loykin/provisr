@@ -119,7 +119,6 @@ func FuzzSpecValidation(f *testing.F) {
 
 			// Test other safe operations
 			proc.StopRequested()
-			proc.IncRestarts()
 		}()
 	})
 }
