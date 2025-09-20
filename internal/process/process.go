@@ -261,7 +261,13 @@ func (r *Process) DetectAlive() (bool, string) {
 
 	// First, try exec:pid detection if we have a command process
 	if cmd != nil && cmd.Process != nil {
+		// Check if process has already been reaped
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			return false, "exec:exited"
+		}
+
 		pid := cmd.Process.Pid
+
 		// On Linux, a quickly-exiting child can be a zombie; treat that as not alive.
 		if runtime.GOOS == "linux" {
 			if isZombieLinux(pid) {
@@ -271,8 +277,18 @@ func (r *Process) DetectAlive() (bool, string) {
 				return true, "exec:pid"
 			}
 		} else {
-			// Non-Linux: use process group signal check as before to handle quick-exit detection.
+			// Non-Linux: use process group signal check for primary detection
+			// but add individual PID verification for macOS
 			if syscall.Kill(-pid, 0) == nil {
+				// Process group check passed, now verify individual process on macOS
+				if runtime.GOOS == "darwin" {
+					// On macOS, double-check with individual PID and ps verification
+					if syscall.Kill(pid, 0) == nil && r.verifyProcessExists(pid) {
+						return true, "exec:pid"
+					} else {
+						return false, "exec:pid"
+					}
+				}
 				return true, "exec:pid"
 			}
 		}
@@ -323,8 +339,11 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if cmd == nil || cmd.Process == nil {
 		return errBeforeStart(d)
 	}
+
+	// Poll-based approach to avoid race conditions with cmd.Wait()
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
+		// Check if the process is still alive
 		alive, _ := r.DetectAlive()
 		if !alive {
 			return errBeforeStart(d)
@@ -476,4 +495,12 @@ func (r *Process) Kill() error {
 	}
 	rs := r.Snapshot()
 	return rs.ExitErr
+}
+
+// verifyProcessExists uses ps command to double-check if a process exists
+// This helps avoid false positives on macOS where kill(pid, 0) can succeed
+// even when the process is dead due to timing issues
+func (r *Process) verifyProcessExists(pid int) bool {
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid))
+	return cmd.Run() == nil
 }
