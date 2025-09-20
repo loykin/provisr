@@ -8,7 +8,7 @@ color = true
 timestamps = true
 source = false
 
-[http_api]
+[server]
 enabled = true
 listen = "127.0.0.1:8080"
 base_path = "/api"

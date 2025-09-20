@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -57,7 +58,26 @@ func NewServer(addr, basePath string, mgr *mng.Manager) (*http.Server, error) {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	go func() { _ = server.ListenAndServe() }()
+
+	// Start the server in a goroutine and handle potential errors
+	serverErrCh := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrCh <- err
+		}
+		close(serverErrCh)
+	}()
+
+	// Give the server a moment to start and catch immediate errors
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			return nil, err
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Server started successfully or no immediate error
+	}
+
 	return server, nil
 }
 

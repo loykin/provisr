@@ -405,8 +405,3 @@ func (c *command) groupStatusViaAPI(f GroupFlags, apiClient *APIClient) error {
 	printJSON(groupStatus)
 	return nil
 }
-
-func (c *command) runGroupStatus(f GroupFlags) error {
-	mgr := c.mgr
-	return (&command{mgr: mgr}).GroupStatus(f)
-}

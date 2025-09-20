@@ -85,14 +85,14 @@ provisr serve --config config/config.toml
 
 Notes:
 
-- The server reads the [http_api] section from the TOML file.
+- The server reads the [server] section from the TOML file.
 - You can override config via flags: `--api-listen` and `--api-base`.
-- If `http_api.enabled` is false or missing, you must provide `--api-listen` to start anyway.
+- If `server.enabled` is false or missing, you must provide `--api-listen` to start anyway.
 
 Example TOML snippet (also present in config/config.toml):
 
 ```toml
-[http_api]
+[server]
 enabled = true
 listen = ":8080"
 base_path = "/api"

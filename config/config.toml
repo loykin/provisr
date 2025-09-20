@@ -60,7 +60,7 @@ in_store = true
 # clickhouse_url = "http://localhost:8123"
 # clickhouse_table = "default.provisr_history"
 
-[http_api]
+[server]
 # Enable the HTTP API server (set to true to allow starting from config)
 enabled = true
 # Listen address, e.g. ":8080" or "127.0.0.1:8080"

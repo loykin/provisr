@@ -18,7 +18,7 @@ The `pkg/client` package provides a clean, context-aware HTTP client for communi
    ```bash
    # Create a simple config file
    cat > daemon-config.toml << EOF
-   [http_api]
+   [server]
    enabled = true
    listen = "127.0.0.1:8080"
    base_path = "/api"
