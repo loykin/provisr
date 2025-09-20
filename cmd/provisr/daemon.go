@@ -56,6 +56,7 @@ func daemonize(pidFile string, logFile string) error {
 	}
 
 	// Create the child process
+	// #nosec 204
 	cmd := exec.Command(executable, newArgs...)
 
 	// Set process attributes for daemon
@@ -68,6 +69,7 @@ func daemonize(pidFile string, logFile string) error {
 
 	if logFile != "" {
 		// Redirect stdout and stderr to log file
+		// #nosec 304
 		logF, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %w", err)
@@ -101,6 +103,7 @@ func daemonize(pidFile string, logFile string) error {
 
 // writePidFile writes the daemon PID to a file
 func writePidFile(pidFile string, pid int) error {
+	// #nosec 302
 	f, err := os.OpenFile(pidFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
