@@ -152,24 +152,24 @@ func TestStoreConfigParsing(t *testing.T) {
 	cfg := writeStoreCfg(t, dir, true, "sqlite://"+storeFile)
 
 	// Test that config loading works
-	storeCfg, err := provisr.LoadStore(cfg)
+	config, err := provisr.LoadConfig(cfg)
 	if err != nil {
-		t.Fatalf("failed to load store config: %v", err)
+		t.Fatalf("failed to load config: %v", err)
 	}
-	if !storeCfg.Enabled {
+	if config.Store == nil || !config.Store.Enabled {
 		t.Fatalf("expected store to be enabled")
 	}
-	if storeCfg.DSN != "sqlite://"+storeFile {
-		t.Fatalf("expected DSN to be sqlite://%s, got %s", storeFile, storeCfg.DSN)
+	if config.Store.DSN != "sqlite://"+storeFile {
+		t.Fatalf("expected DSN to be sqlite://%s, got %s", storeFile, config.Store.DSN)
 	}
 
 	// Case 2: disabled store config
 	cfg2 := writeStoreCfg(t, dir, false, "sqlite://unused.db")
-	storeCfg2, err := provisr.LoadStore(cfg2)
+	config2, err := provisr.LoadConfig(cfg2)
 	if err != nil {
 		t.Fatalf("failed to load disabled store config: %v", err)
 	}
-	if storeCfg2.Enabled {
+	if config2.Store != nil && config2.Store.Enabled {
 		t.Fatalf("expected store to be disabled")
 	}
 }

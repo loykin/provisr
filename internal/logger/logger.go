@@ -57,8 +57,8 @@ type FileConfig struct {
 
 // Config provides unified configuration by composing SlogConfig and FileConfig
 type Config struct {
-	Slog SlogConfig `json:"slog" mapstructure:",squash"`
-	File FileConfig `json:"file" mapstructure:",squash"`
+	Slog SlogConfig `json:"slog,omitempty" mapstructure:",squash"`
+	File FileConfig `json:"file,omitempty" mapstructure:",squash"`
 }
 
 // DefaultConfig returns default unified configuration
@@ -205,7 +205,7 @@ func stringToSlogLevel(level string) slog.Level {
 
 func isTerminal(w io.Writer) bool {
 	if f, ok := w.(*os.File); ok {
-		return f.Fd() == uintptr(os.Stdout.Fd()) || f.Fd() == uintptr(os.Stderr.Fd())
+		return f.Fd() == (os.Stdout.Fd()) || f.Fd() == uintptr(os.Stderr.Fd())
 	}
 	return false
 }

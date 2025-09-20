@@ -380,7 +380,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	// Check Server config (was HTTP config)
 	if cfg.Server == nil {
-		return fmt.Errorf("Server must be configured to run serve command")
+		return fmt.Errorf("server must be configured to run serve command")
 	}
 
 	// Create and start HTTP server

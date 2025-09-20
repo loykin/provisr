@@ -178,13 +178,13 @@ priority = 20`,
 	createProgramFiles(t, programsDir, programFiles)
 
 	// Load specs and start them
-	specs, err := provisr.LoadSpecs(mainConfig)
+	config, err := provisr.LoadConfig(mainConfig)
 	if err != nil {
-		t.Fatalf("LoadSpecs failed: %v", err)
+		t.Fatalf("LoadConfig failed: %v", err)
 	}
 
 	mgr := provisr.New()
-	if err := startFromSpecs(mgr, specs); err != nil {
+	if err := startFromSpecs(mgr, config.Specs); err != nil {
 		t.Fatalf("startFromSpecs failed: %v", err)
 	}
 

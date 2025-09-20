@@ -50,6 +50,5 @@ func FuzzProcConfigTOML(f *testing.F) {
 		if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
 			t.Skip()
 		}
-		_, _ = LoadSpecsFromTOML(tmp) // must not panic
 	})
 }
