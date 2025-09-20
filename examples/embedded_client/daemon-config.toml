@@ -24,7 +24,9 @@ enabled = false
 
 # Optional: Pre-defined processes that start with the daemon
 [[processes]]
+type = "process"
+[processes.spec]
 name = "example-service"
 command = "echo 'Hello from pre-configured process!'"
 instances = 1
-autorestart = false
+auto_restart = false
