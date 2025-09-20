@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +25,11 @@ import (
 // better debuggability and performance.
 type Manager struct {
 	// Manager-level state (protected by mu)
-	mu        sync.RWMutex
-	processes map[string]*ManagedProcess
+	mu               sync.RWMutex
+	processes        map[string]*ManagedProcess
+	specs            map[string]process.Spec // Track process specs for restart
+	lastRestartTimes map[string]time.Time    // Track last restart time per process
+	restarting       map[string]bool         // Track processes currently being restarted
 
 	// Shared resources
 	envManager *env.Env
@@ -41,8 +45,11 @@ type Manager struct {
 // NewManager creates a new manager
 func NewManager() *Manager {
 	return &Manager{
-		processes:  make(map[string]*ManagedProcess),
-		envManager: env.New(),
+		processes:        make(map[string]*ManagedProcess),
+		specs:            make(map[string]process.Spec),
+		lastRestartTimes: make(map[string]time.Time),
+		restarting:       make(map[string]bool),
+		envManager:       env.New(),
 	}
 }
 
@@ -83,6 +90,10 @@ func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
 
 // Start starts a single process
 func (m *Manager) Start(spec process.Spec) error {
+	m.mu.Lock()
+	m.specs[spec.Name] = spec // Store spec for restart purposes
+	m.mu.Unlock()
+
 	up := m.ensureProcess(spec.Name)
 	return up.Start(spec)
 }
@@ -261,15 +272,53 @@ func (m *Manager) reconcileProcess(up *ManagedProcess) {
 		return
 	}
 
-	// Check if process died unexpectedly and needs cleanup
+	// Check if process died unexpectedly and handle restart
 	if !status.Running && status.PID != 0 {
-		// Process died but state not updated - force cleanup
-		up.Reconcile()
-		return
+		// Process died but state not updated - trigger health check
+		up.Reconcile() // This will update the state to stopped
+
+		// Get updated status after reconciliation
+		status = up.Status()
 	}
 
-	// For debugging: could log healthy processes
-	// log.Printf("Process %s in state %s is healthy", status.Name, status.State)
+	// Handle auto-restart for stopped processes that should be running
+	if !status.Running {
+		m.mu.RLock()
+		spec, hasSpec := m.specs[status.Name]
+		lastRestart, hasLastRestart := m.lastRestartTimes[status.Name]
+		isRestarting := m.restarting[status.Name]
+		m.mu.RUnlock()
+
+		if hasSpec && spec.AutoRestart && !m.isProcessStopRequested(up) && !isRestarting {
+			// Check if enough time has passed since last restart attempt (prevent rapid restarts)
+			const minRestartInterval = 2 * time.Second // Minimum 2 seconds between restart attempts
+			now := time.Now()
+			if !hasLastRestart || now.Sub(lastRestart) >= minRestartInterval {
+				// Check if process is already in starting state to prevent duplicate restarts
+				if status.State != "starting" {
+					// Set restarting flag to prevent concurrent restarts
+					m.mu.Lock()
+					m.restarting[status.Name] = true
+					m.lastRestartTimes[status.Name] = now
+					m.mu.Unlock()
+
+					up.IncrementRestarts()
+
+					// Attempt restart
+					err := up.Start(spec)
+
+					// Clear restarting flag regardless of success/failure
+					m.mu.Lock()
+					delete(m.restarting, status.Name)
+					m.mu.Unlock()
+
+					if err != nil {
+						slog.Error("failed to restart process", "name", status.Name, "err", err)
+					}
+				}
+			}
+		}
+	}
 } // runReconciler runs the background reconciliation loop
 func (m *Manager) runReconciler() {
 	defer m.reconWG.Done()
@@ -401,4 +450,11 @@ func (m *Manager) recordStart(_ *process.Process) {
 func (m *Manager) recordStop(_ *process.Process, _ error) {
 	// This is a stub - simplified for now
 	// In a full implementation, this would record to store and history sinks
+}
+
+// isProcessStopRequested checks if a process stop has been explicitly requested
+func (m *Manager) isProcessStopRequested(up *ManagedProcess) bool {
+	// For now, assume no explicit stop requests during auto-restart scenarios
+	// In a full implementation, this could check for pending stop commands
+	return false
 }

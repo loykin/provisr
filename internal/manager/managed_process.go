@@ -516,3 +516,13 @@ func (up *ManagedProcess) monitorProcessExit() {
 		}
 	}
 }
+
+// RestartCount returns the current restart count
+func (mp *ManagedProcess) RestartCount() int64 {
+	return atomic.LoadInt64(&mp.restarts)
+}
+
+// IncrementRestarts increments the restart counter
+func (mp *ManagedProcess) IncrementRestarts() {
+	atomic.AddInt64(&mp.restarts, 1)
+}
