@@ -11,7 +11,7 @@ env:
   - QUEUE_NAME=main
 log:
   dir: /tmp/provisr-programs-demo/worker
-  stdout: worker.out.log
-  stderr: worker.err.log
+  stdout: /tmp/provisr-programs-demo/worker/worker.out.log
+  stderr: /tmp/provisr-programs-demo/worker/worker.err.log
   max_size_mb: 5
   max_backups: 2

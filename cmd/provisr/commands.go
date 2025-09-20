@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/loykin/provisr"
@@ -26,12 +27,15 @@ func (c *command) startViaAPI(f StartFlags, apiClient *APIClient) error {
 			}
 		}
 
-		// Get status and print
-		result, err := apiClient.GetStatus("")
-		if err != nil {
-			return err
+		// Only get status if we have specs
+		if len(config.Specs) > 0 {
+			// Get status and print
+			result, err := apiClient.GetStatus("")
+			if err != nil {
+				return err
+			}
+			printJSON(result)
 		}
-		printJSON(result)
 		return nil
 	}
 
@@ -78,9 +82,12 @@ func (c *command) stopViaAPI(f StopFlags, apiClient *APIClient) error {
 			return err
 		}
 
+		var firstUnexpectedErr error
 		for _, spec := range config.Specs {
 			if err := apiClient.StopProcess(spec.Name, f.Wait); err != nil {
-				return fmt.Errorf("failed to stop %s: %w", spec.Name, err)
+				if !isExpectedShutdownError(err) && firstUnexpectedErr == nil {
+					firstUnexpectedErr = fmt.Errorf("failed to stop %s: %w", spec.Name, err)
+				}
 			}
 		}
 
@@ -90,12 +97,14 @@ func (c *command) stopViaAPI(f StopFlags, apiClient *APIClient) error {
 			return err
 		}
 		printJSON(result)
-		return nil
+		return firstUnexpectedErr
 	}
 
 	// Single process stop
 	if err := apiClient.StopProcess(f.Name, f.Wait); err != nil {
-		return err
+		if !isExpectedShutdownError(err) {
+			return err
+		}
 	}
 
 	// Get status and print
@@ -196,7 +205,6 @@ func (c *command) Cron(f CronFlags) error {
 
 // GroupStart starts a group from config
 func (c *command) GroupStart(f GroupFlags) error {
-	mgr := c.mgr
 	if f.ConfigPath == "" {
 		return fmt.Errorf("group-start requires --config")
 	}
@@ -204,26 +212,44 @@ func (c *command) GroupStart(f GroupFlags) error {
 		return fmt.Errorf("group-start requires --group name")
 	}
 
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
+	}
+
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
+	}
+
+	return c.groupStartViaAPI(f, apiClient)
+}
+
+// groupStartViaAPI starts a group using the daemon API
+func (c *command) groupStartViaAPI(f GroupFlags, apiClient *APIClient) error {
 	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
-	}
-
-	if len(config.GlobalEnv) > 0 {
-		mgr.SetGlobalEnv(config.GlobalEnv)
 	}
 
 	gs := findGroupByName(config.GroupSpecs, f.GroupName)
 	if gs == nil {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
-	g := provisr.NewGroup(mgr)
-	return g.Start(*gs)
+
+	// Start each member of the group
+	for _, member := range gs.Members {
+		if err := apiClient.StartProcess(member); err != nil {
+			return fmt.Errorf("failed to start %s: %w", member.Name, err)
+		}
+	}
+
+	return nil
 }
 
 // GroupStop stops a group from config
 func (c *command) GroupStop(f GroupFlags) error {
-	mgr := c.mgr
 	if f.Wait <= 0 {
 		f.Wait = 3 * time.Second
 	}
@@ -233,41 +259,150 @@ func (c *command) GroupStop(f GroupFlags) error {
 	if f.GroupName == "" {
 		return fmt.Errorf("group-stop requires --group name")
 	}
+
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
+	}
+
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
+	}
+
+	return c.groupStopViaAPI(f, apiClient)
+}
+
+// isExpectedShutdownError checks if the error is expected during shutdown
+func isExpectedShutdownError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Check for common shutdown signals and patterns
+	return errStr == "signal: terminated" ||
+		errStr == "signal: killed" ||
+		errStr == "signal: interrupt" ||
+		errStr == "exit status 1" || // Common exit code
+		errStr == "exit status 130" || // Ctrl+C
+		errStr == "exit status 143" || // SIGTERM
+		// Also handle wrapped errors from stop process
+		errStr == "failed to stop process: signal: terminated" ||
+		errStr == "failed to stop process: signal: killed" ||
+		errStr == "failed to stop process: signal: interrupt" ||
+		// Handle API error responses that contain shutdown signals
+		errStr == "API error: signal: terminated" ||
+		errStr == "API error: signal: killed" ||
+		errStr == "API error: signal: interrupt" ||
+		// Handle nested API error responses
+		errStr == "API error: failed to stop process: signal: terminated" ||
+		errStr == "API error: failed to stop process: signal: killed" ||
+		errStr == "API error: failed to stop process: signal: interrupt" ||
+		// Check if error string contains shutdown signals (more flexible)
+		strings.Contains(errStr, "signal: terminated") ||
+		strings.Contains(errStr, "signal: killed") ||
+		strings.Contains(errStr, "signal: interrupt")
+}
+
+// groupStopViaAPI stops a group using the daemon API
+func (c *command) groupStopViaAPI(f GroupFlags, apiClient *APIClient) error {
 	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
 	}
+
 	gs := findGroupByName(config.GroupSpecs, f.GroupName)
 	if gs == nil {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
-	g := provisr.NewGroup(mgr)
-	return g.Stop(*gs, f.Wait)
+
+	// Stop each member of the group, ignoring expected shutdown errors
+	var firstUnexpectedErr error
+	for _, member := range gs.Members {
+		if err := apiClient.StopProcess(member.Name, f.Wait); err != nil {
+			if !isExpectedShutdownError(err) && firstUnexpectedErr == nil {
+				firstUnexpectedErr = fmt.Errorf("failed to stop %s: %w", member.Name, err)
+			}
+			// Continue with other members even if this one had an error
+		}
+	}
+
+	return firstUnexpectedErr
 }
 
 // GroupStatus prints status for a group from config
 func (c *command) GroupStatus(f GroupFlags) error {
-	mgr := c.mgr
 	if f.ConfigPath == "" {
 		return fmt.Errorf("group-status requires --config")
 	}
 	if f.GroupName == "" {
 		return fmt.Errorf("group-status requires --group name")
 	}
+
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
+	}
+
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
+	}
+
+	return c.groupStatusViaAPI(f, apiClient)
+}
+
+// groupStatusViaAPI gets group status using the daemon API
+func (c *command) groupStatusViaAPI(f GroupFlags, apiClient *APIClient) error {
 	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
 		return err
 	}
+
 	gs := findGroupByName(config.GroupSpecs, f.GroupName)
 	if gs == nil {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
-	g := provisr.NewGroup(mgr)
-	stmap, err := g.Status(*gs)
-	if err != nil {
-		return err
+
+	// Get status for each member of the group
+	groupStatus := make(map[string]interface{})
+	for _, member := range gs.Members {
+		if member.Instances > 1 {
+			// Handle multiple instances
+			instanceStatuses := make(map[string]interface{})
+			for i := 1; i <= member.Instances; i++ {
+				instanceName := fmt.Sprintf("%s-%d", member.Name, i)
+				result, err := apiClient.GetStatus(instanceName)
+				if err != nil {
+					instanceStatuses[instanceName] = map[string]interface{}{
+						"name":    instanceName,
+						"running": false,
+						"error":   err.Error(),
+					}
+				} else {
+					instanceStatuses[instanceName] = result
+				}
+			}
+			groupStatus[member.Name] = instanceStatuses
+		} else {
+			// Single instance
+			result, err := apiClient.GetStatus(member.Name)
+			if err != nil {
+				groupStatus[member.Name] = map[string]interface{}{
+					"name":    member.Name,
+					"running": false,
+					"error":   err.Error(),
+				}
+			} else {
+				groupStatus[member.Name] = result
+			}
+		}
 	}
-	printJSON(stmap)
+
+	printJSON(groupStatus)
 	return nil
 }
 

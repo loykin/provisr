@@ -46,7 +46,9 @@ type ProcessFlags struct {
 
 // GroupCommandFlags holds group-related flags
 type GroupCommandFlags struct {
-	GroupName string
+	GroupName  string
+	APIUrl     string
+	APITimeout time.Duration
 }
 
 // buildRoot creates the root command with improved structure
@@ -226,15 +228,19 @@ func createGroupStartCommand(provisrCommand command, globalFlags *GlobalFlags, g
 		Long: `Start all processes in a named group from config file.
 
 Example:
-  provisr group-start --config=config.toml --group=webstack`,
+  provisr group-start --config=config.toml --group=webstack --api-url=http://127.0.0.1:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.GroupStart(GroupFlags{
 				ConfigPath: globalFlags.ConfigPath,
 				GroupName:  groupFlags.GroupName,
+				APIUrl:     groupFlags.APIUrl,
+				APITimeout: groupFlags.APITimeout,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name from config")
+	cmd.Flags().StringVar(&groupFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&groupFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
 	return cmd
 }
 
@@ -246,16 +252,20 @@ func createGroupStopCommand(provisrCommand command, globalFlags *GlobalFlags, gr
 		Long: `Stop all processes in a named group from config file.
 
 Example:
-  provisr group-stop --config=config.toml --group=webstack`,
+  provisr group-stop --config=config.toml --group=webstack --api-url=http://127.0.0.1:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.GroupStop(GroupFlags{
 				ConfigPath: globalFlags.ConfigPath,
 				GroupName:  groupFlags.GroupName,
+				APIUrl:     groupFlags.APIUrl,
+				APITimeout: groupFlags.APITimeout,
 				Wait:       3 * time.Second,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name from config")
+	cmd.Flags().StringVar(&groupFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&groupFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
 	return cmd
 }
 
@@ -267,15 +277,19 @@ func createGroupStatusCommand(provisrCommand command, globalFlags *GlobalFlags, 
 		Long: `Show status of all processes in a named group from config file.
 
 Example:
-  provisr group-status --config=config.toml --group=webstack`,
+  provisr group-status --config=config.toml --group=webstack --api-url=http://127.0.0.1:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.GroupStatus(GroupFlags{
 				ConfigPath: globalFlags.ConfigPath,
 				GroupName:  groupFlags.GroupName,
+				APIUrl:     groupFlags.APIUrl,
+				APITimeout: groupFlags.APITimeout,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name from config")
+	cmd.Flags().StringVar(&groupFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&groupFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
 	return cmd
 }
 
@@ -381,6 +395,15 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	// Check Server config (was HTTP config)
 	if cfg.Server == nil {
 		return fmt.Errorf("server must be configured to run serve command")
+	}
+
+	// Auto-start all processes from config
+	for _, spec := range cfg.Specs {
+		if err := mgr.StartN(spec); err != nil {
+			fmt.Printf("Warning: failed to start process %s: %v\n", spec.Name, err)
+		} else {
+			fmt.Printf("Auto-started process: %s\n", spec.Name)
+		}
 	}
 
 	// Create and start HTTP server

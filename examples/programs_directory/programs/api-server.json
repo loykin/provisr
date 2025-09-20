@@ -11,8 +11,8 @@
   "env": ["API_PORT=8000", "DEBUG=true"],
   "log": {
     "dir": "/tmp/provisr-programs-demo/api",
-    "stdout": "api.out.log", 
-    "stderr": "api.err.log",
+    "stdout": "/tmp/provisr-programs-demo/api/api.out.log", 
+    "stderr": "/tmp/provisr-programs-demo/api/api.err.log",
     "max_size_mb": 20,
     "max_backups": 3
   }

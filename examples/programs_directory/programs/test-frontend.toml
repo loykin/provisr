@@ -10,5 +10,5 @@ env = ["SERVICE=frontend", "PORT=3000"]
 
 [log]
 dir = "/tmp/provisr-programs-demo/frontend"
-stdout = "frontend.out.log"
-stderr = "frontend.err.log"
+stdout = "/tmp/provisr-programs-demo/frontend/frontend.out.log"
+stderr = "/tmp/provisr-programs-demo/frontend/frontend.err.log"

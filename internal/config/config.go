@@ -9,20 +9,22 @@ import (
 
 	"github.com/spf13/viper"
 
+	"github.com/loykin/provisr/internal/detector"
 	"github.com/loykin/provisr/internal/process"
 	"github.com/loykin/provisr/internal/process_group"
 )
 
 type Config struct {
-	UseOSEnv bool           `mapstructure:"use_os_env"`
-	EnvFiles []string       `mapstructure:"env_files"`
-	Env      []string       `mapstructure:"env"`
-	Groups   []GroupConfig  `mapstructure:"groups"`
-	Store    *StoreConfig   `mapstructure:"store"`
-	History  *HistoryConfig `mapstructure:"history"`
-	Metrics  *MetricsConfig `mapstructure:"metrics"`
-	Log      *LogConfig     `mapstructure:"log"`
-	Server   *ServerConfig  `mapstructure:"server"`
+	UseOSEnv          bool           `mapstructure:"use_os_env"`
+	EnvFiles          []string       `mapstructure:"env_files"`
+	Env               []string       `mapstructure:"env"`
+	ProgramsDirectory string         `mapstructure:"programs_directory"`
+	Groups            []GroupConfig  `mapstructure:"groups"`
+	Store             *StoreConfig   `mapstructure:"store"`
+	History           *HistoryConfig `mapstructure:"history"`
+	Metrics           *MetricsConfig `mapstructure:"metrics"`
+	Log               *LogConfig     `mapstructure:"log"`
+	Server            *ServerConfig  `mapstructure:"server"`
 
 	// Inline process specs within the main config file (e.g., [[processes]] blocks)
 	Processes []process.Spec `mapstructure:"processes"`
@@ -99,8 +101,19 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.Specs = append(config.Specs, config.Processes...)
 	}
 
-	// 2) Programs directory next to the main config file
-	programsDir := filepath.Join(filepath.Dir(configPath), "programs")
+	// 2) Programs directory - use config setting or default to "programs"
+	var programsDir string
+	if config.ProgramsDirectory != "" {
+		if filepath.IsAbs(config.ProgramsDirectory) {
+			programsDir = config.ProgramsDirectory
+		} else {
+			programsDir = filepath.Join(filepath.Dir(configPath), config.ProgramsDirectory)
+		}
+	} else {
+		// Default: "programs" directory next to the main config file
+		programsDir = filepath.Join(filepath.Dir(configPath), "programs")
+	}
+
 	if specs, err := loadProgramSpecs(programsDir); err != nil {
 		return nil, fmt.Errorf("failed to load programs from %s: %w", programsDir, err)
 	} else if len(specs) > 0 {
@@ -112,6 +125,13 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to load cron jobs: %w", err)
 	} else if len(jobs) > 0 {
 		config.CronJobs = append(config.CronJobs, jobs...)
+	}
+
+	// Convert DetectorConfigs to actual Detector interfaces
+	for i := range config.Specs {
+		if err := convertDetectorConfigs(&config.Specs[i]); err != nil {
+			return nil, fmt.Errorf("failed to convert detectors for process %s: %w", config.Specs[i].Name, err)
+		}
 	}
 
 	// Compute Global Env after merging
@@ -331,4 +351,31 @@ func loadEnvFile(filePath string) (map[string]string, error) {
 	}
 
 	return env, nil
+}
+
+// convertDetectorConfigs converts DetectorConfig slice to actual Detector interfaces
+func convertDetectorConfigs(spec *process.Spec) error {
+	if len(spec.DetectorConfigs) == 0 {
+		return nil
+	}
+
+	spec.Detectors = make([]detector.Detector, len(spec.DetectorConfigs))
+	for i, config := range spec.DetectorConfigs {
+		switch config.Type {
+		case "pidfile":
+			if config.Path == "" {
+				return fmt.Errorf("pidfile detector requires 'path' field")
+			}
+			spec.Detectors[i] = &detector.PIDFileDetector{PIDFile: config.Path}
+		case "command":
+			if config.Command == "" {
+				return fmt.Errorf("command detector requires 'command' field")
+			}
+			spec.Detectors[i] = &detector.CommandDetector{Command: config.Command}
+		default:
+			return fmt.Errorf("unknown detector type: %s", config.Type)
+		}
+	}
+
+	return nil
 }
