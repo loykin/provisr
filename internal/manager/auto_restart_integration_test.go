@@ -13,6 +13,11 @@ func TestAutoRestartIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	// ManagedProcess-level auto-restart has been removed; manager-only restart is covered in TestManagerRestartOnly.
+	t.Skip("deprecated: auto-restart is manager-responsibility now")
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	// Create a test spec similar to api-server
 	spec := process.Spec{

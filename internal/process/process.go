@@ -26,6 +26,11 @@ type Process struct {
 	errCloser  io.WriteCloser
 	waitDone   chan struct{} // closed by monitor when cmd.Wait returns
 	monitoring bool          // true when monitor goroutine is running
+
+	// Race-free process tracking
+	pid     int   // Process ID for safe detection
+	exited  bool  // Track if process has exited
+	exitErr error // Exit error if any
 }
 
 func New(spec Spec) *Process { return &Process{spec: spec} }
@@ -99,6 +104,11 @@ func (r *Process) SetStarted(cmd *exec.Cmd) {
 	r.status.StartedAt = time.Now()
 	r.status.Restarts = r.restarts
 	r.stopping = false
+
+	// Store PID for race-free detection
+	r.pid = cmd.Process.Pid
+	r.exited = false
+	r.exitErr = nil
 	r.mu.Unlock()
 }
 
@@ -136,6 +146,10 @@ func (r *Process) MarkExited(err error) {
 	r.status.Running = false
 	r.status.StoppedAt = time.Now()
 	r.status.ExitErr = err
+
+	// Mark as exited for race-free detection
+	r.exited = true
+	r.exitErr = err
 	r.mu.Unlock()
 }
 
@@ -253,55 +267,60 @@ func (r *Process) Snapshot() Status {
 	return s
 }
 
-// DetectAlive probes liveness avoiding races with os/exec internals.
+// DetectAlive probes liveness without accessing cmd to avoid races.
 func (r *Process) DetectAlive() (bool, string) {
 	r.mu.Lock()
-	cmd := r.cmd
+	pid := r.pid
+	exited := r.exited
 	r.mu.Unlock()
 
-	// First, try exec:pid detection if we have a command process
-	if cmd != nil && cmd.Process != nil {
-		// Check if process has already been reaped
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			return false, "exec:exited"
+	// If we don't have a PID yet, process never started
+	if pid == 0 {
+		return false, "no-pid"
+	}
+
+	// If we already detected exit, process is dead
+	if exited {
+		return false, "exit-detected"
+	}
+
+	// Prefer individual PID signal check first (works reliably across platforms)
+	if syscall.Kill(pid, 0) == nil {
+		// On macOS, exclude zombies which can briefly report as signalable
+		if runtime.GOOS == "darwin" && isZombieDarwin(pid) {
+			return false, "zombie"
 		}
+		return true, "exec:pid"
+	}
 
-		pid := cmd.Process.Pid
-
-		// On Linux, a quickly-exiting child can be a zombie; treat that as not alive.
-		if runtime.GOOS == "linux" {
-			if isZombieLinux(pid) {
-				return false, ""
-			}
-			if syscall.Kill(pid, 0) == nil {
-				return true, "exec:pid"
-			}
-		} else {
-			// Non-Linux: use process group signal check for primary detection
-			// but add individual PID verification for macOS
-			if syscall.Kill(-pid, 0) == nil {
-				// Process group check passed, now verify individual process on macOS
-				if runtime.GOOS == "darwin" {
-					// On macOS, double-check with individual PID and ps verification
-					if syscall.Kill(pid, 0) == nil && r.verifyProcessExists(pid) {
-						return true, "exec:pid"
-					} else {
-						return false, "exec:pid"
-					}
+	// Platform-specific fallbacks
+	if runtime.GOOS == "linux" {
+		if isZombieLinux(pid) {
+			return false, "zombie"
+		}
+	} else {
+		// Non-Linux: try process group signal as a fallback (if Setpgid was used)
+		if syscall.Kill(-pid, 0) == nil {
+			// On macOS, optionally verify via ps to avoid rare false positives
+			if runtime.GOOS == "darwin" {
+				if r.verifyProcessExists(pid) {
+					return true, "exec:pid"
 				}
-				return true, "exec:pid"
+				// if ps check fails, treat as not alive
+				return false, "not-found"
 			}
+			return true, "exec:pid"
 		}
 	}
 
-	// If exec:pid detection fails or no process, try configured detectors
+	// If PID-based detection fails, try configured detectors
 	for _, d := range r.detectors() {
 		ok, _ := d.Alive()
 		if ok {
 			return true, d.Describe()
 		}
 	}
-	return false, ""
+	return false, "not-found"
 }
 
 func (r *Process) detectors() []detector.Detector {
@@ -325,6 +344,16 @@ func isZombieLinux(pid int) bool {
 		return false
 	}
 	return bytes.Contains(b, []byte("State:\tZ"))
+}
+
+// isZombieDarwin checks if the process is a zombie on macOS using ps.
+func isZombieDarwin(pid int) bool {
+	cmd := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(out, []byte("Z"))
 }
 
 // EnforceStartDuration waits until d ensuring process stays up; returns error if it exits early.

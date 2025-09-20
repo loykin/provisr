@@ -160,8 +160,8 @@ func TestManagerReconcilerAutoRestart(t *testing.T) {
 	t.Log("Phase 3: Triggering manual reconciliation")
 	manager.ReconcileOnce()
 
-	// Wait a bit for restart to happen
-	time.Sleep(500 * time.Millisecond)
+	// Wait a bit for restart to happen (allow reconciler + restart interval)
+	time.Sleep(1200 * time.Millisecond)
 
 	// Check if process was restarted
 	finalStatus, err := manager.Status("test-reconciler-restart")

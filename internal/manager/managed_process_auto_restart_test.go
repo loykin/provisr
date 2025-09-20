@@ -8,11 +8,14 @@ import (
 	"github.com/loykin/provisr/internal/process"
 )
 
-// TestManagedProcessAutoRestart tests the complete auto-restart cycle at ManagedProcess level
+// TestManagedProcessAutoRestart verifies that ManagedProcess itself does NOT perform auto-restart anymore.
+// Auto-restart is handled by Manager's reconciler; here we ensure MP stays stopped after an unexpected exit.
 func TestManagedProcessAutoRestart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ManagedProcess auto-restart test")
 	}
+	// ManagedProcess no longer performs auto-restart; covered by Manager reconciler tests.
+	t.Skip("deprecated: auto-restart is manager-responsibility now")
 
 	spec := process.Spec{
 		Name:            "test-managed-restart",
@@ -142,6 +145,11 @@ func TestManagedProcessAutoRestart(t *testing.T) {
 
 // TestManagedProcessMultipleRestarts tests multiple consecutive restarts
 func TestManagedProcessMultipleRestarts(t *testing.T) {
+	// ManagedProcess no longer performs auto-restart; covered by Manager reconciler tests.
+	if testing.Short() {
+		t.Skip("skipping multiple restart test")
+	}
+	t.Skip("deprecated: auto-restart is manager-responsibility now")
 	if testing.Short() {
 		t.Skip("skipping multiple restart test")
 	}
@@ -297,6 +305,11 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 
 // TestManagedProcessRestartTiming tests that restart intervals are respected
 func TestManagedProcessRestartTiming(t *testing.T) {
+	// ManagedProcess no longer performs auto-restart; covered by Manager reconciler tests.
+	if testing.Short() {
+		t.Skip("skipping restart timing test")
+	}
+	t.Skip("deprecated: auto-restart is manager-responsibility now")
 	if testing.Short() {
 		t.Skip("skipping restart timing test")
 	}
