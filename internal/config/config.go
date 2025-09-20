@@ -7,8 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	mapstructure "github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
+	cronpkg "github.com/loykin/provisr/internal/cron"
 	"github.com/loykin/provisr/internal/detector"
 	"github.com/loykin/provisr/internal/process"
 	"github.com/loykin/provisr/internal/process_group"
@@ -26,14 +28,14 @@ type Config struct {
 	Log               *LogConfig     `mapstructure:"log"`
 	Server            *ServerConfig  `mapstructure:"server"`
 
-	// Inline process specs within the main config file (e.g., [[processes]] blocks)
-	Processes []process.Spec `mapstructure:"processes"`
+	// Inline processes parsed as discriminated union entries
+	Processes []ProcessConfig `mapstructure:"processes"`
 
 	// Computed/aggregated fields
 	GlobalEnv  []string
 	Specs      []process.Spec
 	GroupSpecs []process_group.GroupSpec
-	CronJobs   []CronJob
+	CronJobs   []*cronpkg.Job
 
 	configPath string
 }
@@ -77,12 +79,26 @@ type ServerConfig struct {
 	BasePath string `mapstructure:"base_path"`
 }
 
-// CronJob represents a cron job configuration
-type CronJob struct {
-	Name      string       `json:"name"`
-	Spec      process.Spec `json:"spec"`
-	Schedule  string       `json:"schedule"`
-	Singleton bool         `json:"singleton"`
+type ProcessConfig struct {
+	Type string         `mapstructure:"type"` // process, cronjob
+	Spec map[string]any `mapstructure:"spec"` // specific config
+}
+
+// helper to decode map[string]any to a target type using mapstructure
+func decodeTo[T any](m map[string]any) (T, error) {
+	var out T
+	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		Result:           &out,
+	})
+	if err != nil {
+		return out, err
+	}
+	if err := dec.Decode(m); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func LoadConfig(configPath string) (*Config, error) {
@@ -94,11 +110,53 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	// Initialize aggregated fields
 	config.Specs = make([]process.Spec, 0)
-	config.CronJobs = []CronJob{}
+	config.CronJobs = []*cronpkg.Job{}
 
-	// 1) Inline processes from [[processes]] blocks
-	if len(config.Processes) > 0 {
-		config.Specs = append(config.Specs, config.Processes...)
+	// 1) Inline processes: discriminated union decoding
+	for _, pc := range config.Processes {
+		switch strings.ToLower(strings.TrimSpace(pc.Type)) {
+		case "", "process":
+			// default to process if type is empty
+			spec, err := decodeTo[process.Spec](pc.Spec)
+			if err != nil {
+				return nil, fmt.Errorf("decode process spec: %w", err)
+			}
+			if strings.TrimSpace(spec.Name) == "" {
+				return nil, fmt.Errorf("process requires name")
+			}
+			if strings.TrimSpace(spec.Command) == "" {
+				return nil, fmt.Errorf("process %q requires command", spec.Name)
+			}
+			if err := convertDetectorConfigs(&spec); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for process %s: %w", spec.Name, err)
+			}
+			config.Specs = append(config.Specs, spec)
+		case "cron", "cronjob":
+			job, err := decodeTo[cronpkg.Job](pc.Spec)
+			if err != nil {
+				return nil, fmt.Errorf("decode cronjob spec: %w", err)
+			}
+			// Allow job.Name to be omitted if Spec.Name is present
+			if strings.TrimSpace(job.Name) == "" {
+				job.Name = strings.TrimSpace(job.Spec.Name)
+			}
+			if strings.TrimSpace(job.Name) == "" {
+				return nil, fmt.Errorf("cronjob requires name")
+			}
+			if strings.TrimSpace(job.Spec.Command) == "" {
+				return nil, fmt.Errorf("cronjob %q requires command", job.Name)
+			}
+			if strings.TrimSpace(job.Schedule) == "" {
+				return nil, fmt.Errorf("cronjob %q requires schedule", job.Name)
+			}
+			if err := convertDetectorConfigs(&job.Spec); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", job.Name, err)
+			}
+			config.Specs = append(config.Specs, job.Spec)
+			config.CronJobs = append(config.CronJobs, &job)
+		default:
+			return nil, fmt.Errorf("unknown process type %q (allowed: process, cronjob)", pc.Type)
+		}
 	}
 
 	// 2) Programs directory - use config setting or default to "programs"
@@ -117,21 +175,13 @@ func LoadConfig(configPath string) (*Config, error) {
 	if specs, err := loadProgramSpecs(programsDir); err != nil {
 		return nil, fmt.Errorf("failed to load programs from %s: %w", programsDir, err)
 	} else if len(specs) > 0 {
-		config.Specs = append(config.Specs, specs...)
-	}
-
-	// Also extract cron jobs from inline processes if present
-	if jobs, err := loadCronJobsFromConfig(configPath); err != nil {
-		return nil, fmt.Errorf("failed to load cron jobs: %w", err)
-	} else if len(jobs) > 0 {
-		config.CronJobs = append(config.CronJobs, jobs...)
-	}
-
-	// Convert DetectorConfigs to actual Detector interfaces
-	for i := range config.Specs {
-		if err := convertDetectorConfigs(&config.Specs[i]); err != nil {
-			return nil, fmt.Errorf("failed to convert detectors for process %s: %w", config.Specs[i].Name, err)
+		// convert detectors per program spec for consistency
+		for i := range specs {
+			if err := convertDetectorConfigs(&specs[i]); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for program %s: %w", specs[i].Name, err)
+			}
 		}
+		config.Specs = append(config.Specs, specs...)
 	}
 
 	// Compute Global Env after merging
@@ -217,41 +267,6 @@ func loadProgramSpecs(programsDir string) ([]process.Spec, error) {
 		specs = append(specs, s)
 	}
 	return specs, nil
-}
-
-// loadCronJobsFromConfig parses the main config file and extracts any processes that
-// have a 'schedule' (and optional 'singleton') field, returning them as CronJobs.
-func loadCronJobsFromConfig(configPath string) ([]CronJob, error) {
-	v := viper.New()
-	v.SetConfigFile(configPath)
-	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("failed to read config for cron jobs: %w", err)
-	}
-	// Define a lightweight view of processes that includes schedule fields
-	type procRaw struct {
-		process.Spec `mapstructure:",squash"`
-		Schedule     string `mapstructure:"schedule"`
-		Singleton    bool   `mapstructure:"singleton"`
-	}
-	var raw struct {
-		Processes []procRaw `mapstructure:"processes"`
-	}
-	if err := v.Unmarshal(&raw); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cron jobs: %w", err)
-	}
-	jobs := make([]CronJob, 0)
-	for _, p := range raw.Processes {
-		if strings.TrimSpace(p.Schedule) == "" {
-			continue
-		}
-		jobs = append(jobs, CronJob{
-			Name:      p.Name,
-			Spec:      p.Spec,
-			Schedule:  p.Schedule,
-			Singleton: p.Singleton,
-		})
-	}
-	return jobs, nil
 }
 
 func computeGlobalEnv(useOSEnv bool, envFiles []string, env []string) ([]string, error) {
