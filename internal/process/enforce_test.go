@@ -14,7 +14,7 @@ func TestEnforceStartDurationFail(t *testing.T) {
 	p := New(spec)
 
 	// Start process (should succeed)
-	env := []string{}
+	var env []string
 	cmd := p.ConfigureCmd(env)
 	err := p.TryStart(cmd)
 	if err != nil {

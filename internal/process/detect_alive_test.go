@@ -56,7 +56,7 @@ func TestDetectAlive_ProcessLifecycle(t *testing.T) {
 
 			defer func() {
 				if proc.cmd != nil && proc.cmd.Process != nil {
-					proc.cmd.Process.Kill()
+					_ = proc.cmd.Process.Kill()
 				}
 			}()
 
@@ -87,7 +87,10 @@ func TestDetectAlive_ProcessLifecycle(t *testing.T) {
 			}
 
 			// Wait for process to die
-			proc.cmd.Wait()
+			err = proc.cmd.Wait()
+			if err != nil {
+				t.Fatalf("Process failed to exit: %v", err)
+			}
 
 			// Give some time for the system to clean up
 			time.Sleep(200 * time.Millisecond)
@@ -159,7 +162,7 @@ func TestDetectAlive_FalsePositiveScenarios(t *testing.T) {
 
 	defer func() {
 		if proc.cmd != nil && proc.cmd.Process != nil {
-			proc.cmd.Process.Kill()
+			_ = proc.cmd.Process.Kill()
 		}
 	}()
 
@@ -183,7 +186,11 @@ func TestDetectAlive_FalsePositiveScenarios(t *testing.T) {
 	}
 
 	// Wait for process to die
-	proc.cmd.Wait()
+	err = proc.cmd.Wait()
+	if err != nil {
+		t.Fatalf("Process failed to exit: %v", err)
+	}
+
 	time.Sleep(300 * time.Millisecond)
 
 	// This is the critical test - should detect as dead
@@ -225,7 +232,7 @@ func BenchmarkDetectAlive(b *testing.B) {
 
 	defer func() {
 		if proc.cmd != nil && proc.cmd.Process != nil {
-			proc.cmd.Process.Kill()
+			_ = proc.cmd.Process.Kill()
 		}
 	}()
 

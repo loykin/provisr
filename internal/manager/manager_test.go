@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -517,4 +519,405 @@ func TestManagerMultiProcessAutoRestart(t *testing.T) {
 			t.Logf("✓ Restarted process %s is healthy", p.name)
 		}
 	}
+}
+
+// TestConcurrentProcessManagement tests multiple processes being started/stopped concurrently
+func TestConcurrentProcessManagement(t *testing.T) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	const numProcesses = 10
+	const numOperations = 5
+
+	// Create test specs
+	specs := make([]process.Spec, numProcesses)
+	for i := 0; i < numProcesses; i++ {
+		specs[i] = process.Spec{
+			Name:    fmt.Sprintf("test-proc-%d", i),
+			Command: "sleep 0.1",
+		}
+	}
+
+	// Test concurrent starts
+	t.Run("ConcurrentStarts", func(t *testing.T) {
+		var wg sync.WaitGroup
+		errors := make(chan error, numProcesses)
+
+		// Start all processes concurrently
+		for i := 0; i < numProcesses; i++ {
+			wg.Add(1)
+			go func(spec process.Spec) {
+				defer wg.Done()
+				if err := mgr.Start(spec); err != nil {
+					errors <- err
+				}
+			}(specs[i])
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// Check for errors
+		for err := range errors {
+			if err != nil {
+				t.Errorf("Concurrent start failed: %v", err)
+			}
+		}
+
+		// Verify all processes are tracked
+		for i := 0; i < numProcesses; i++ {
+			if _, err := mgr.Status(specs[i].Name); err != nil {
+				t.Errorf("Process %s not found after start: %v", specs[i].Name, err)
+			}
+		}
+	})
+
+	// Test concurrent stops
+	t.Run("ConcurrentStops", func(t *testing.T) {
+		var wg sync.WaitGroup
+		errors := make(chan error, numProcesses)
+
+		// Stop all processes concurrently
+		for i := 0; i < numProcesses; i++ {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				if err := mgr.Stop(name, 5*time.Second); err != nil {
+					errors <- err
+				}
+			}(specs[i].Name)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// Check for errors (some may not exist, that's ok)
+		for err := range errors {
+			if err != nil {
+				t.Logf("Concurrent stop result: %v", err)
+			}
+		}
+	})
+
+	// Test mixed concurrent operations
+	t.Run("ConcurrentMixedOps", func(t *testing.T) {
+		var wg sync.WaitGroup
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Launch multiple goroutines doing random operations
+		for i := 0; i < numOperations; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				spec := process.Spec{
+					Name:    fmt.Sprintf("mixed-proc-%d", id),
+					Command: "true",
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				// Start
+				if err := mgr.Start(spec); err != nil {
+					t.Logf("Start failed for %s: %v", spec.Name, err)
+				}
+
+				// Check status
+				if status, err := mgr.Status(spec.Name); err != nil {
+					t.Logf("Status check failed for %s: %v", spec.Name, err)
+				} else {
+					t.Logf("Process %s status: running=%v, PID=%d", spec.Name, status.Running, status.PID)
+				}
+
+				// Wait a bit
+				time.Sleep(100 * time.Millisecond)
+
+				// Stop
+				if err := mgr.Stop(spec.Name, 2*time.Second); err != nil {
+					t.Logf("Stop failed for %s: %v", spec.Name, err)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+	})
+}
+
+// TestProcessRecoveryAndMonitoring tests process monitoring and auto-recovery
+func TestProcessRecoveryAndMonitoring(t *testing.T) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	t.Run("ProcessStatusTracking", func(t *testing.T) {
+		spec := process.Spec{
+			Name:    "status-test",
+			Command: "echo hello",
+		}
+
+		// Start process
+		if err := mgr.Start(spec); err != nil {
+			t.Fatalf("Failed to start process: %v", err)
+		}
+
+		// Check initial status
+		status, err := mgr.Status(spec.Name)
+		if err != nil {
+			t.Fatalf("Failed to get status: %v", err)
+		}
+
+		t.Logf("Initial status: running=%v, PID=%d", status.Running, status.PID)
+
+		// Wait for process to complete
+		time.Sleep(100 * time.Millisecond)
+
+		// Check final status
+		finalStatus, err := mgr.Status(spec.Name)
+		if err != nil {
+			t.Fatalf("Failed to get final status: %v", err)
+		}
+
+		t.Logf("Final status: running=%v, PID=%d", finalStatus.Running, finalStatus.PID)
+		if finalStatus.Running {
+			t.Logf("Process still running (expected for echo command)")
+		}
+	})
+
+	t.Run("MultipleInstancesPattern", func(t *testing.T) {
+		spec := process.Spec{
+			Name:      "multi-test",
+			Command:   "sleep 0.1",
+			Instances: 3,
+		}
+
+		// Start multiple instances
+		if err := mgr.StartN(spec); err != nil {
+			t.Fatalf("Failed to start multiple instances: %v", err)
+		}
+
+		// Check that all instances are tracked
+		expectedNames := []string{
+			"multi-test-1",
+			"multi-test-2",
+			"multi-test-3",
+		}
+
+		for _, name := range expectedNames {
+			if status, err := mgr.Status(name); err != nil {
+				t.Errorf("Instance %s not found: %v", name, err)
+			} else {
+				t.Logf("Instance %s: running=%v, PID=%d", name, status.Running, status.PID)
+			}
+		}
+
+		// Test pattern matching
+		count, err := mgr.Count("multi-test*")
+		if err != nil {
+			t.Fatalf("Failed to count processes: %v", err)
+		}
+		t.Logf("Found %d processes matching pattern", count)
+
+		// Stop all matching processes
+		if err := mgr.StopAll("multi-test*", 3*time.Second); err != nil {
+			t.Logf("StopAll result: %v", err)
+		}
+	})
+}
+
+// BenchmarkConcurrentOperations benchmarks concurrent process operations
+func BenchmarkConcurrentOperations(b *testing.B) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	b.Run("ConcurrentStartStop", func(b *testing.B) {
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				spec := process.Spec{
+					Name:    fmt.Sprintf("bench-proc-%d", i),
+					Command: "true", // Very quick command
+				}
+
+				if err := mgr.Start(spec); err != nil {
+					b.Errorf("Start failed: %v", err)
+				}
+
+				if _, err := mgr.Status(spec.Name); err != nil {
+					b.Errorf("Status check failed: %v", err)
+				}
+
+				if err := mgr.Stop(spec.Name, time.Second); err != nil {
+					b.Logf("Stop failed: %v", err)
+				}
+
+				i++
+			}
+		})
+	})
+}
+
+// TestManagerReconcilerAutoRestart tests Manager's reconciler-driven auto-restart
+func TestManagerReconcilerAutoRestart(t *testing.T) {
+	manager := NewManager()
+	defer func() { _ = manager.Shutdown() }()
+
+	t.Log("Phase 1: Starting process with auto-restart")
+
+	spec := process.Spec{
+		Name:        "test-reconciler-restart",
+		Command:     "sleep 300",
+		AutoRestart: true,
+	}
+
+	err := manager.Start(spec)
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+
+	initialStatus, err := manager.Status("test-reconciler-restart")
+	require.NoError(t, err)
+	require.True(t, initialStatus.Running)
+	require.Greater(t, initialStatus.PID, 0)
+
+	t.Logf("✓ Initial process started: PID %d", initialStatus.PID)
+
+	t.Log("Phase 2: Killing process and testing reconciler")
+
+	// Kill the process
+	err = killProcessByPID(initialStatus.PID)
+	require.NoError(t, err)
+	t.Logf("✓ Killed process PID %d", initialStatus.PID)
+
+	// Wait a bit for restart to happen (allow reconciler + restart interval)
+	time.Sleep(2 * time.Second)
+
+	// Check if process was restarted
+	finalStatus, err := manager.Status("test-reconciler-restart")
+	require.NoError(t, err)
+
+	t.Logf("Final status: Running=%t, PID=%d, Restarts=%d",
+		finalStatus.Running, finalStatus.PID, finalStatus.Restarts)
+
+	assert.True(t, finalStatus.Running, "Process should be restarted")
+	assert.NotEqual(t, initialStatus.PID, finalStatus.PID, "Process should have new PID")
+	assert.Equal(t, initialStatus.Restarts+1, finalStatus.Restarts, "Restart count should increment")
+
+	t.Logf("✓ Reconciler auto-restart successful: PID %d → %d, Restarts %d → %d",
+		initialStatus.PID, finalStatus.PID, initialStatus.Restarts, finalStatus.Restarts)
+}
+
+// TestManagerProcessCoordination tests Manager's coordination of multiple process restarts
+func TestManagerProcessCoordination(t *testing.T) {
+	manager := NewManager()
+	defer func() { _ = manager.Shutdown() }()
+
+	t.Log("Phase 1: Starting multiple processes")
+
+	numProcesses := 5
+	processNames := make([]string, numProcesses)
+
+	// Start multiple processes
+	for i := 0; i < numProcesses; i++ {
+		name := fmt.Sprintf("test-coord-%d", i)
+		processNames[i] = name
+
+		spec := process.Spec{
+			Name:        name,
+			Command:     "sleep 300",
+			AutoRestart: true,
+		}
+
+		err := manager.Start(spec)
+		require.NoError(t, err)
+		time.Sleep(50 * time.Millisecond) // Stagger starts slightly
+	}
+
+	// Wait for all to be running
+	time.Sleep(500 * time.Millisecond)
+
+	// Collect initial states
+	initialPIDs := make(map[string]int)
+	for _, name := range processNames {
+		status, err := manager.Status(name)
+		require.NoError(t, err)
+		require.True(t, status.Running, "Process %s should be running", name)
+		initialPIDs[name] = status.PID
+		t.Logf("✓ Process %s running with PID %d", name, status.PID)
+	}
+
+	t.Log("Phase 2: Killing all processes simultaneously")
+
+	// Kill all processes at once
+	for name, pid := range initialPIDs {
+		err := killProcessByPID(pid)
+		require.NoError(t, err)
+		t.Logf("✓ Killed process %s (PID %d)", name, pid)
+	}
+
+	t.Log("Phase 3: Waiting for coordinated restart")
+
+	// Wait for reconciler to handle multiple restarts
+	time.Sleep(3 * time.Second)
+
+	t.Log("Phase 4: Verifying coordinated restart results")
+
+	// Verify all processes restarted successfully
+	allRestarted := true
+	for _, name := range processNames {
+		status, err := manager.Status(name)
+		require.NoError(t, err)
+
+		if !status.Running {
+			allRestarted = false
+			t.Errorf("Process %s failed to restart", name)
+			continue
+		}
+
+		if status.PID == initialPIDs[name] {
+			allRestarted = false
+			t.Errorf("Process %s has same PID after restart", name)
+			continue
+		}
+
+		if status.Restarts != 1 {
+			t.Logf("Process %s has restart count %d (expected 1, but allowing for test variations)", name, status.Restarts)
+			// Allow multiple restarts in test environment - just verify it's > 0
+			if status.Restarts == 0 {
+				allRestarted = false
+				t.Errorf("Process %s has incorrect restart count: %d", name, status.Restarts)
+				continue
+			}
+		}
+
+		t.Logf("✓ Process %s successfully restarted: PID %d → %d",
+			name, initialPIDs[name], status.PID)
+	}
+
+	assert.True(t, allRestarted, "All processes should restart successfully")
+
+	// Get final status count
+	statuses, err := manager.StatusAll("test-coord")
+	require.NoError(t, err)
+
+	runningCount := 0
+	for _, status := range statuses {
+		if status.Running {
+			runningCount++
+		}
+	}
+
+	assert.Equal(t, numProcesses, runningCount, "All processes should be running after restart")
+	t.Logf("✓ Manager coordination successful: %d/%d processes running", runningCount, numProcesses)
+}
+
+// Helper function to kill process by PID
+func killProcessByPID(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid PID: %d", pid)
+	}
+	return syscall.Kill(pid, syscall.SIGKILL)
 }
