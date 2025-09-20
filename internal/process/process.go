@@ -297,7 +297,7 @@ func (r *Process) DetectAlive() (bool, string) {
 	// Prefer individual PID signal check first (works reliably across platforms)
 	if syscall.Kill(pid, 0) == nil {
 		// On macOS, exclude zombies which can briefly report as signalable
-		if runtime.GOOS == "darwin" && isZombieDarwin(pid) {
+		if isZombieDarwin(pid) {
 			return false, "zombie"
 		}
 		return true, "exec:pid"
