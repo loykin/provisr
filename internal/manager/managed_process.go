@@ -190,7 +190,7 @@ func (up *ManagedProcess) Shutdown() error {
 func (up *ManagedProcess) runStateMachine() {
 	defer close(up.doneChan)
 
-	ticker := time.NewTicker(100 * time.Millisecond) // Health check interval
+	ticker := time.NewTicker(1 * time.Second) // Health check interval
 	defer ticker.Stop()
 
 	for {
