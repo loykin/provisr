@@ -204,7 +204,8 @@ func (r *Router) handleStatus(c *gin.Context) {
 		selCount++
 	}
 	if selCount == 0 {
-		writeJSON(c, http.StatusBadRequest, errorResp{Error: "one of name, base, wildcard query param required"})
+		// readiness/health probe: no selector provided
+		writeJSON(c, http.StatusOK, okResp{OK: true})
 		return
 	}
 	if selCount > 1 {

@@ -67,8 +67,8 @@ func TestStopRequiresParam(t *testing.T) {
 func TestStatusRequiresParam(t *testing.T) {
 	h := setupRouter(t, "/base")
 	rec := doReq(t, h, http.MethodGet, "/base/status", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 }
 
