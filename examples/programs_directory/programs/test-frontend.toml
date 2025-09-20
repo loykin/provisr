@@ -1,0 +1,14 @@
+name = "test-frontend"
+command = "sh -c 'echo \"Frontend starting...\"; for i in {1..5}; do echo \"[$(date)] Frontend tick $i\"; sleep 1; done'"
+priority = 10
+retry_count = 1
+retry_interval = "500ms"
+start_duration = "200ms"
+auto_restart = false
+instances = 1
+env = ["SERVICE=frontend", "PORT=3000"]
+
+[log]
+dir = "/tmp/provisr-programs-demo/frontend"
+stdout = "frontend.out.log"
+stderr = "frontend.err.log"

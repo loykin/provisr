@@ -1,0 +1,16 @@
+{
+  "name": "test-api",
+  "command": "sh -c 'echo \"API starting...\"; for i in {1..3}; do echo \"[$(date)] API processing request $i\"; sleep 1; done'",
+  "priority": 5,
+  "retry_count": 1,
+  "retry_interval": "500ms",
+  "start_duration": "200ms",
+  "auto_restart": false,
+  "instances": 2,
+  "env": ["SERVICE=api", "PORT=8000"],
+  "log": {
+    "dir": "/tmp/provisr-programs-demo/api",
+    "stdout": "api.out.log",
+    "stderr": "api.err.log"
+  }
+}
