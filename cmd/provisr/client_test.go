@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,8 +72,8 @@ func TestAPIClientStartProcess(t *testing.T) {
 
 	client := NewAPIClient(server.URL, time.Second)
 	spec := map[string]interface{}{
-		"name": "test-process",
-		"cmd":  "echo hello",
+		"name":    "test-process",
+		"command": "echo hello",
 	}
 
 	err := client.StartProcess(spec)
@@ -95,10 +94,11 @@ func TestAPIClientStartProcess(t *testing.T) {
 	err = client.StartProcess(spec)
 	if err == nil {
 		t.Fatal("Expected error for API error response, but got nil")
-	}
-	expectedMsg := "API error: process already running"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error message %q, got: %q", expectedMsg, err.Error())
+	} else {
+		expectedMsg := "API error: process already running"
+		if err.Error() != expectedMsg {
+			t.Errorf("Expected error message %q, got: %q", expectedMsg, err.Error())
+		}
 	}
 }
 
@@ -156,13 +156,9 @@ func TestAPIClientStopProcess(t *testing.T) {
 	// Test successful stop
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/stop" && r.Method == "POST" {
-			var req map[string]interface{}
-			err := json.NewDecoder(r.Body).Decode(&req)
-			if err != nil {
-				t.Fatal(err)
-			}
+			name := r.URL.Query().Get("name")
 
-			if req["name"] == "test-process" {
+			if name == "test-process" {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"result":"success"}`))
 			} else {
@@ -176,19 +172,20 @@ func TestAPIClientStopProcess(t *testing.T) {
 	client := NewAPIClient(server.URL, time.Second)
 
 	// Test successful stop
-	err := client.StopProcess("test-process")
+	err := client.StopProcess("test-process", 5*time.Second)
 	if err != nil {
 		t.Errorf("Expected successful stop, got error: %v", err)
 	}
 
 	// Test process not found
-	err = client.StopProcess("non-existent")
+	err = client.StopProcess("non-existent", 5*time.Second)
 	if err == nil {
-		t.Fatal("Expected error for non-existent process, but got nil")
-	}
-	expectedMsg := "API error: process not found"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error message %q, got: %q", expectedMsg, err.Error())
+		t.Error("Expected error for non-existent process, but got nil")
+	} else {
+		expectedMsg := "API error: process not found"
+		if err.Error() != expectedMsg {
+			t.Errorf("Expected error message %q, got: %q", expectedMsg, err.Error())
+		}
 	}
 }
 
@@ -196,7 +193,7 @@ func TestAPIClientNetworkErrors(t *testing.T) {
 	// Test network error during start
 	client := NewAPIClient("http://localhost:99999", 100*time.Millisecond)
 
-	err := client.StartProcess(map[string]interface{}{"name": "test"})
+	err := client.StartProcess(map[string]interface{}{"name": "test", "command": "echo test"})
 	if err == nil {
 		t.Error("Expected network error for start")
 	}
@@ -208,7 +205,7 @@ func TestAPIClientNetworkErrors(t *testing.T) {
 	}
 
 	// Test network error during stop
-	err = client.StopProcess("test")
+	err = client.StopProcess("test", time.Second)
 	if err == nil {
 		t.Error("Expected network error for stop")
 	}
