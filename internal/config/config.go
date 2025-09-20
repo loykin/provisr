@@ -215,6 +215,11 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to build groups: %w", err)
 	}
+	// Apply global log defaults (dir/stdout/stderr and rotation limits) to all specs
+	if err := applyGlobalLogDefaults(config); err != nil {
+		return nil, fmt.Errorf("failed to apply global log defaults: %w", err)
+	}
+
 	config.GroupSpecs = groupSpecs
 
 	return config, nil
@@ -327,6 +332,67 @@ func computeGlobalEnv(useOSEnv bool, envFiles []string, env []string) ([]string,
 	sort.Strings(result)
 
 	return result, nil
+}
+
+func applyGlobalLogDefaults(cfg *Config) error {
+	if cfg.Log == nil {
+		return nil
+	}
+	// Resolve global paths relative to the main config file directory
+	baseDir := filepath.Dir(cfg.configPath)
+	makeAbs := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		if filepath.IsAbs(p) {
+			return filepath.Clean(p)
+		}
+		return filepath.Clean(filepath.Join(baseDir, p))
+	}
+
+	globalDir := makeAbs(cfg.Log.Dir)
+	globalStdout := makeAbs(cfg.Log.Stdout)
+	globalStderr := makeAbs(cfg.Log.Stderr)
+
+	apply := func(sp *process.Spec) {
+		// Only set path fields when the spec hasn't set any of them
+		noPathsSet := sp.Log.File.Dir == "" && sp.Log.File.StdoutPath == "" && sp.Log.File.StderrPath == ""
+		if noPathsSet {
+			if globalStdout != "" {
+				sp.Log.File.StdoutPath = globalStdout
+			}
+			if globalStderr != "" {
+				sp.Log.File.StderrPath = globalStderr
+			}
+			if sp.Log.File.StdoutPath == "" && sp.Log.File.StderrPath == "" {
+				// Fall back to directory-based naming if explicit files not provided
+				sp.Log.File.Dir = globalDir
+			}
+		}
+		// Apply rotation defaults if zero
+		if sp.Log.File.MaxSizeMB == 0 && cfg.Log.MaxSizeMB > 0 {
+			sp.Log.File.MaxSizeMB = cfg.Log.MaxSizeMB
+		}
+		if sp.Log.File.MaxBackups == 0 && cfg.Log.MaxBackups > 0 {
+			sp.Log.File.MaxBackups = cfg.Log.MaxBackups
+		}
+		if sp.Log.File.MaxAgeDays == 0 && cfg.Log.MaxAgeDays > 0 {
+			sp.Log.File.MaxAgeDays = cfg.Log.MaxAgeDays
+		}
+		// Compress default copies boolean as-is only when any path configured
+		if noPathsSet {
+			// If we just set paths above, respect global Compress
+			sp.Log.File.Compress = cfg.Log.Compress
+		}
+	}
+
+	for i := range cfg.Specs {
+		apply(&cfg.Specs[i])
+	}
+	for _, j := range cfg.CronJobs {
+		apply(&j.Spec)
+	}
+	return nil
 }
 
 func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_group.GroupSpec, error) {

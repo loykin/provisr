@@ -72,6 +72,9 @@ func (c *APIClient) GetStatus(name string) (interface{}, error) {
 	url := c.baseURL + "/status"
 	if name != "" {
 		url += "?name=" + name
+	} else {
+		// When no name is provided, fetch all statuses using wildcard match
+		url += "?wildcard=*"
 	}
 
 	resp, err := c.client.Get(url)
@@ -84,8 +87,7 @@ func (c *APIClient) GetStatus(name string) (interface{}, error) {
 		var errorResp struct {
 			Error string `json:"error"`
 		}
-		err = json.NewDecoder(resp.Body).Decode(&errorResp)
-		if err != nil {
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("API error: %s", errorResp.Error)
