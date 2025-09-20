@@ -101,20 +101,26 @@ jobs:
           echo "Waiting for daemon to start..."
           sleep 3
           
-          # Check if daemon is responding (using Go instead of curl for CI compatibility)
+          # Check if daemon is responding (using status command without specific name)
           echo "Checking daemon readiness..."
           for i in {1..10}; do
-            if timeout 2s ./provisr-ci status --api-url=http://localhost:8080/api --name=non-existent 2>/dev/null; then
+            if timeout 5s ./provisr-ci status --api-url=http://localhost:8080/api 2>/dev/null; then
               echo "Daemon is ready"
               break
             fi
             if [ $i -eq 10 ]; then
               echo "Daemon failed to start after 10 attempts"
-              kill $DAEMON_PID || true
+              echo "Checking if daemon process is still running..."
+              if kill -0 $DAEMON_PID 2>/dev/null; then
+                echo "Daemon process is running but not responding to API calls"
+              else
+                echo "Daemon process has died"
+              fi
+              kill $DAEMON_PID 2>/dev/null || true
               exit 1
             fi
             echo "Waiting for daemon... ($i/10)"
-            sleep 1
+            sleep 2
           done
           
           echo "Running examples/embedded_client"
