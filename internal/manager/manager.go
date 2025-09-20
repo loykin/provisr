@@ -291,7 +291,7 @@ func (m *Manager) reconcileProcess(up *ManagedProcess) {
 
 		if hasSpec && spec.AutoRestart && !m.isProcessStopRequested(up) && !isRestarting {
 			// Check if enough time has passed since last restart attempt (prevent rapid restarts)
-			const minRestartInterval = 2 * time.Second // Minimum 2 seconds between restart attempts
+			const minRestartInterval = 200 * time.Millisecond // Faster in tests while still preventing rapid loops
 			now := time.Now()
 			if !hasLastRestart || now.Sub(lastRestart) >= minRestartInterval {
 				// Check if process is already in starting state to prevent duplicate restarts

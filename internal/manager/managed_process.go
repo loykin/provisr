@@ -415,11 +415,12 @@ func (up *ManagedProcess) setState(newState processState) {
 	metrics.SetCurrentState(name, newStateStr, true)
 }
 
-// checkProcessHealth monitors process health and handles auto-restart
+// checkProcessHealth monitors process health and transitions state.
+// IMPORTANT: Restart responsibility belongs solely to Manager's reconciler.
+// This method must not perform restarts to avoid duplicate/competing logic.
 func (up *ManagedProcess) checkProcessHealth() {
 	up.mu.RLock()
 	currentState := up.state
-	spec := up.spec
 	up.mu.RUnlock()
 
 	if currentState != StateRunning {
@@ -428,34 +429,12 @@ func (up *ManagedProcess) checkProcessHealth() {
 
 	alive, _ := up.proc.DetectAlive()
 	if !alive {
-		// Process died, handle auto-restart
+		// Process died; transition to stopped and log. Do NOT restart here.
 		up.setState(StateStopped)
-
 		if up.stopLogger != nil {
 			up.stopLogger(up.proc, fmt.Errorf("process exited unexpectedly"))
 		}
-
-		if spec.AutoRestart {
-			// Increment restart count
-			atomic.AddInt64(&up.restarts, 1)
-			metrics.IncRestart(up.name)
-
-			// Wait before restart if specified
-			if spec.RestartInterval > 0 {
-				time.Sleep(spec.RestartInterval)
-			}
-
-			// Attempt restart
-			go func() {
-				cmd := command{
-					action: ActionStart,
-					spec:   spec,
-					reply:  make(chan error, 1),
-				}
-				up.cmdChan <- cmd
-				<-cmd.reply // Wait for completion (ignore error for auto-restart)
-			}()
-		}
+		// Auto-restart, if any, will be coordinated by Manager.reconcileProcess.
 	}
 }
 
@@ -481,7 +460,6 @@ func (up *ManagedProcess) monitorProcessExit() {
 	// Transition state if we're still running and handle autorestart
 	up.mu.RLock()
 	currentState := up.state
-	spec := up.spec
 	up.mu.RUnlock()
 
 	if currentState == StateRunning {
@@ -492,28 +470,8 @@ func (up *ManagedProcess) monitorProcessExit() {
 			up.stopLogger(up.proc, err)
 		}
 
-		// Handle autorestart if enabled
-		if spec.AutoRestart {
-			// Increment restart count
-			atomic.AddInt64(&up.restarts, 1)
-			metrics.IncRestart(up.name)
-
-			// Wait before restart if specified
-			if spec.RestartInterval > 0 {
-				time.Sleep(spec.RestartInterval)
-			}
-
-			// Attempt restart
-			go func() {
-				cmd := command{
-					action: ActionStart,
-					spec:   spec,
-					reply:  make(chan error, 1),
-				}
-				up.cmdChan <- cmd
-				<-cmd.reply // Wait for completion (ignore error for auto-restart)
-			}()
-		}
+		// Note: Do NOT auto-restart here - let checkProcessHealth() handle it
+		// This prevents duplicate restarts between monitorProcessExit and checkProcessHealth
 	}
 }
 
