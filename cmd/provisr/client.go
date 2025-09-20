@@ -99,29 +99,48 @@ func (c *APIClient) GetStatus(name string) (interface{}, error) {
 	return result, nil
 }
 
-// StopProcess stops a process via API
+// StopProcess stops a single process instance by exact name via API
 func (c *APIClient) StopProcess(name string, wait ...time.Duration) error {
 	url := c.baseURL + "/stop?name=" + name
 	if len(wait) > 0 {
 		url += "&wait=" + wait[0].String()
 	}
-
 	resp, err := c.client.Post(url, "application/json", nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
 		var errorResp struct {
 			Error string `json:"error"`
 		}
-		err = json.NewDecoder(resp.Body).Decode(&errorResp)
-		if err != nil {
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
 			return err
 		}
 		return fmt.Errorf("API error: %s", errorResp.Error)
 	}
+	return nil
+}
 
+// StopAll stops all instances with the same base name via API
+func (c *APIClient) StopAll(base string, wait ...time.Duration) error {
+	url := c.baseURL + "/stop?base=" + base
+	if len(wait) > 0 {
+		url += "&wait=" + wait[0].String()
+	}
+	resp, err := c.client.Post(url, "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error string `json:"error"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return err
+		}
+		return fmt.Errorf("API error: %s", errorResp.Error)
+	}
 	return nil
 }

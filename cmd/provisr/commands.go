@@ -318,10 +318,10 @@ func (c *command) groupStopViaAPI(f GroupFlags, apiClient *APIClient) error {
 		return fmt.Errorf("group %s not found in config", f.GroupName)
 	}
 
-	// Stop each member of the group, ignoring expected shutdown errors
+	// Stop each member of the group by base name (stops all instances), ignoring expected shutdown errors
 	var firstUnexpectedErr error
 	for _, member := range gs.Members {
-		if err := apiClient.StopProcess(member.Name, f.Wait); err != nil {
+		if err := apiClient.StopAll(member.Name, f.Wait); err != nil {
 			if !isExpectedShutdownError(err) && firstUnexpectedErr == nil {
 				firstUnexpectedErr = fmt.Errorf("failed to stop %s: %w", member.Name, err)
 			}

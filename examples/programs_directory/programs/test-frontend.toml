@@ -1,3 +1,5 @@
+type = "process"
+[spec]
 name = "test-frontend"
 command = "sh -c 'echo \"Frontend starting...\"; for i in {1..5}; do echo \"[$(date)] Frontend tick $i\"; sleep 1; done'"
 priority = 10
@@ -8,7 +10,7 @@ auto_restart = false
 instances = 1
 env = ["SERVICE=frontend", "PORT=3000"]
 
-[log]
+[spec.log]
 dir = "/tmp/provisr-programs-demo/frontend"
 stdout = "/tmp/provisr-programs-demo/frontend/frontend.out.log"
 stderr = "/tmp/provisr-programs-demo/frontend/frontend.err.log"

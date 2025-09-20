@@ -1,18 +1,20 @@
-name: scheduler
-command: sh -c 'while true; do echo "[$(date)] Scheduler tick - checking for pending tasks"; sleep 10; done'
-priority: 15
-retry_count: 5
-retry_interval: 1s
-start_duration: 1s
-auto_restart: true
-restart_interval: 5s
-instances: 1
-env:
-  - SCHEDULER_INTERVAL=10s
-  - TIMEZONE=UTC
-log:
-  dir: /tmp/provisr-programs-demo/scheduler
-  stdout: /tmp/provisr-programs-demo/scheduler/scheduler.out.log
-  stderr: /tmp/provisr-programs-demo/scheduler/scheduler.err.log
-  max_size_mb: 8
-  max_backups: 3
+type: process
+spec:
+  name: scheduler
+  command: sh -c 'while true; do echo "[$(date)] Scheduler tick - checking for pending tasks"; sleep 10; done'
+  priority: 15
+  retry_count: 5
+  retry_interval: 1s
+  start_duration: 1s
+  auto_restart: true
+  restart_interval: 5s
+  instances: 1
+  env:
+    - SCHEDULER_INTERVAL=10s
+    - TIMEZONE=UTC
+  log:
+    dir: /tmp/provisr-programs-demo/scheduler
+    stdout: /tmp/provisr-programs-demo/scheduler/scheduler.out.log
+    stderr: /tmp/provisr-programs-demo/scheduler/scheduler.err.log
+    max_size_mb: 8
+    max_backups: 3

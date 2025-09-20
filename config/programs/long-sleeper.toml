@@ -1,4 +1,6 @@
 # Long running sleep process
+type = "process"
+[spec]
 name = "long-sleeper"
 command = "sleep 300"  # 5 minutes
 priority = 10
@@ -8,10 +10,10 @@ restart_interval = "1s"
 startsecs = "0.5s"
 instances = 1
 
-[log]
+[spec.log]
 dir = "/tmp/provisr-logs"
 
 # Process detectors
-[[detectors]]
+[[spec.detectors]]
 type = "command"
 command = "pgrep -f 'sleep 300'"
