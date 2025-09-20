@@ -27,12 +27,11 @@ func main() {
 		// Configure logging: using directory-based default file names
 		Log: provisr.Spec{}.Log, // placeholder to access type; replaced below
 	}
-	// Provide an explicit logger.Config instance via a small helper: the logger.Config
-	// type is embedded in Spec via provision's public API; we set only Dir here so that
-	// files will be <Dir>/<name>.stdout.log and <Dir>/<name>.stderr.log
-	// We don't have direct access to logger.Config here, but Spec.Log is exported,
+	// Provide an explicit config instance: the Log field uses UnifiedConfig
+	// which supports both file logging and structured logging with slog
+	// We don't have direct access to UnifiedConfig here, but Spec.Log is exported,
 	// so we can assign fields on it in place.
-	spec.Log.Dir = logDir
+	spec.Log.File.Dir = logDir
 
 	if err := mgr.Start(spec); err != nil {
 		panic(err)

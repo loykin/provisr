@@ -49,7 +49,7 @@ func TestConfigureCmdAppliesEnvWorkdirLogging(t *testing.T) {
 		Name:    "cfg",
 		Command: "sh -c 'echo out; echo err 1>&2; sleep 0.05'",
 		WorkDir: work,
-		Log:     logger.Config{Dir: logs},
+		Log:     logger.Config{File: logger.FileConfig{Dir: logs}},
 	}
 	r := New(spec)
 	mergedEnv := []string{"FOO=bar"}

@@ -4,462 +4,417 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
 
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/viper"
+
+	cronpkg "github.com/loykin/provisr/internal/cron"
 	"github.com/loykin/provisr/internal/detector"
-	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/internal/process"
 	"github.com/loykin/provisr/internal/process_group"
-	"github.com/spf13/viper"
 )
 
-type CronJob struct {
-	Name      string
-	Spec      process.Spec
-	Schedule  string
-	Singleton bool
-}
+type Config struct {
+	UseOSEnv          bool           `mapstructure:"use_os_env"`
+	EnvFiles          []string       `mapstructure:"env_files"`
+	Env               []string       `mapstructure:"env"`
+	ProgramsDirectory string         `mapstructure:"programs_directory"`
+	Groups            []GroupConfig  `mapstructure:"groups"`
+	Store             *StoreConfig   `mapstructure:"store"`
+	History           *HistoryConfig `mapstructure:"history"`
+	Metrics           *MetricsConfig `mapstructure:"metrics"`
+	Log               *LogConfig     `mapstructure:"log"`
+	Server            *ServerConfig  `mapstructure:"server"`
 
-// FileConfig represents the top-level TOML structure.
-// See internal docs for example in previous location.
+	// Inline processes parsed as discriminated union entries
+	Processes []ProcessConfig `mapstructure:"processes"`
 
-type FileConfig struct {
-	Env       []string       `toml:"env" mapstructure:"env"`
-	EnvFiles  []string       `toml:"env_files" mapstructure:"env_files"`
-	UseOSEnv  bool           `toml:"use_os_env" mapstructure:"use_os_env"`
-	Log       *LogConfig     `toml:"log" mapstructure:"log"`
-	Processes []ProcConfig   `toml:"processes" mapstructure:"processes"`
-	Groups    []GroupConfig  `toml:"groups" mapstructure:"groups"`
-	HTTP      *HTTPAPIConfig `toml:"http_api" mapstructure:"http_api"`
-	Store     *StoreConfig   `toml:"store" mapstructure:"store"`
-	History   *HistoryConfig `toml:"history" mapstructure:"history"`
-}
+	// Computed/aggregated fields
+	GlobalEnv  []string
+	Specs      []process.Spec
+	GroupSpecs []process_group.GroupSpec
+	CronJobs   []*cronpkg.Job
 
-type StoreConfig struct {
-	Enabled bool   `toml:"enabled" mapstructure:"enabled"`
-	DSN     string `toml:"dsn" mapstructure:"dsn"`
-}
-
-type HistoryConfig struct {
-	Enabled         bool   `toml:"enabled" mapstructure:"enabled"`
-	InStore         *bool  `toml:"in_store" mapstructure:"in_store"` // nil means default (true)
-	OpenSearchURL   string `toml:"opensearch_url" mapstructure:"opensearch_url"`
-	OpenSearchIndex string `toml:"opensearch_index" mapstructure:"opensearch_index"`
-	ClickHouseURL   string `toml:"clickhouse_url" mapstructure:"clickhouse_url"`
-	ClickHouseTable string `toml:"clickhouse_table" mapstructure:"clickhouse_table"`
-}
-
-type LogConfig struct {
-	Dir        string `toml:"dir" mapstructure:"dir"`
-	Stdout     string `toml:"stdout" mapstructure:"stdout"`
-	Stderr     string `toml:"stderr" mapstructure:"stderr"`
-	MaxSizeMB  int    `toml:"max_size_mb" mapstructure:"max_size_mb"`
-	MaxBackups int    `toml:"max_backups" mapstructure:"max_backups"`
-	MaxAgeDays int    `toml:"max_age_days" mapstructure:"max_age_days"`
-	Compress   bool   `toml:"compress" mapstructure:"compress"`
-}
-
-type ProcConfig struct {
-	Name            string          `toml:"name" mapstructure:"name"`
-	Command         string          `toml:"command" mapstructure:"command"`
-	WorkDir         string          `toml:"workdir" mapstructure:"workdir"`
-	Env             []string        `toml:"env" mapstructure:"env"`
-	PIDFile         string          `toml:"pidfile" mapstructure:"pidfile"`
-	RetryCount      int             `toml:"retries" mapstructure:"retries"`
-	RetryInterval   time.Duration   `toml:"retry_interval" mapstructure:"retry_interval"`
-	StartDuration   time.Duration   `toml:"startsecs" mapstructure:"startsecs"`
-	AutoRestart     bool            `toml:"autorestart" mapstructure:"autorestart"`
-	RestartInterval time.Duration   `toml:"restart_interval" mapstructure:"restart_interval"`
-	Instances       int             `toml:"instances" mapstructure:"instances"`
-	Detectors       []DetectorEntry `toml:"detectors" mapstructure:"detectors"`
-	Schedule        string          `toml:"schedule" mapstructure:"schedule"`
-	Singleton       *bool           `toml:"singleton" mapstructure:"singleton"`
-	Log             *LogConfig      `toml:"log" mapstructure:"log"`
-}
-
-type DetectorEntry struct {
-	Type    string `toml:"type" mapstructure:"type"`
-	Path    string `toml:"path" mapstructure:"path"`
-	PID     int    `toml:"pid" mapstructure:"pid"`
-	Command string `toml:"command" mapstructure:"command"`
+	configPath string
 }
 
 type GroupConfig struct {
-	Name    string   `toml:"name" mapstructure:"name"`
-	Members []string `toml:"members" mapstructure:"members"`
+	Name    string   `mapstructure:"name"`
+	Members []string `mapstructure:"members"`
 }
 
-// LoadEnvFromTOML parses only the top-level env list from TOML.
-func LoadEnvFromTOML(path string) ([]string, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	return fc.Env, nil
+type StoreConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	DSN     string `mapstructure:"dsn"`
 }
 
-// LoadGlobalEnv merges env from config: top-level env, env_files contents, and optionally OS env when UseOSEnv is true.
-// Precedence: OS env (when enabled) provides base; then apply file vars; then top-level env list overrides last.
-func LoadGlobalEnv(path string) ([]string, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
+type HistoryConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	InStore         *bool  `mapstructure:"in_store"`
+	OpenSearchURL   string `mapstructure:"opensearch_url"`
+	OpenSearchIndex string `mapstructure:"opensearch_index"`
+	ClickHouseURL   string `mapstructure:"clickhouse_url"`
+	ClickHouseTable string `mapstructure:"clickhouse_table"`
+}
+
+type MetricsConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Listen  string `mapstructure:"listen"`
+}
+
+type LogConfig struct {
+	Dir        string `mapstructure:"dir"`
+	Stdout     string `mapstructure:"stdout"`
+	Stderr     string `mapstructure:"stderr"`
+	MaxSizeMB  int    `mapstructure:"max_size_mb"`
+	MaxBackups int    `mapstructure:"max_backups"`
+	MaxAgeDays int    `mapstructure:"max_age_days"`
+	Compress   bool   `mapstructure:"compress"`
+}
+
+type ServerConfig struct {
+	Listen   string `mapstructure:"listen"`
+	BasePath string `mapstructure:"base_path"`
+}
+
+type ProcessConfig struct {
+	Type string         `mapstructure:"type"` // process, cronjob
+	Spec map[string]any `mapstructure:"spec"` // specific config
+}
+
+// helper to decode map[string]any to a target type using mapstructure
+func decodeTo[T any](m map[string]any) (T, error) {
+	var out T
+	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		Result:           &out,
+	})
+	if err != nil {
+		return out, err
 	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
+	if err := dec.Decode(m); err != nil {
+		return out, err
 	}
-	m := make(map[string]string)
-	// base: optional OS env
-	if fc.UseOSEnv {
-		for _, kv := range os.Environ() {
-			if i := strings.IndexByte(kv, '='); i >= 0 {
-				k := kv[:i]
-				v := kv[i+1:]
-				m[k] = v
-			}
+	return out, nil
+}
+
+// decodeProcessEntry decodes and validates a ProcessConfig entry (process or cronjob).
+// ctx is used to improve error messages with the source (e.g., filename or "inline processes").
+func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.Job, error) {
+	var zero process.Spec
+	typ := strings.ToLower(strings.TrimSpace(pc.Type))
+	switch typ {
+	case "", "process":
+		sp, err := decodeTo[process.Spec](pc.Spec)
+		if err != nil {
+			return zero, nil, fmt.Errorf("decode process spec in %s: %w", ctx, err)
 		}
+		if strings.TrimSpace(sp.Name) == "" {
+			return zero, nil, fmt.Errorf("%s: process requires name", ctx)
+		}
+		if strings.TrimSpace(sp.Command) == "" {
+			return zero, nil, fmt.Errorf("%s: process %q requires command", ctx, sp.Name)
+		}
+		return sp, nil, nil
+	case "cron", "cronjob":
+		jb, err := decodeTo[cronpkg.Job](pc.Spec)
+		if err != nil {
+			return zero, nil, fmt.Errorf("decode cronjob spec in %s: %w", ctx, err)
+		}
+		if strings.TrimSpace(jb.Name) == "" {
+			jb.Name = strings.TrimSpace(jb.Spec.Name)
+		}
+		if strings.TrimSpace(jb.Name) == "" {
+			return zero, nil, fmt.Errorf("%s: cronjob requires name", ctx)
+		}
+		if strings.TrimSpace(jb.Spec.Command) == "" {
+			return zero, nil, fmt.Errorf("%s: cronjob %q requires command", ctx, jb.Name)
+		}
+		if strings.TrimSpace(jb.Schedule) == "" {
+			return zero, nil, fmt.Errorf("%s: cronjob %q requires schedule", ctx, jb.Name)
+		}
+		return jb.Spec, &jb, nil
+	default:
+		return zero, nil, fmt.Errorf("%s: unknown process type %q (allowed: process, cronjob)", ctx, pc.Type)
 	}
-	// load files in order
-	for _, p := range fc.EnvFiles {
-		pairs, err := loadEnvFile(p)
+}
+
+func LoadConfig(configPath string) (*Config, error) {
+	config := &Config{configPath: configPath}
+
+	if err := parseConfigFile(configPath, config); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Initialize aggregated fields
+	config.Specs = make([]process.Spec, 0)
+	config.CronJobs = []*cronpkg.Job{}
+
+	// 1) Inline processes: discriminated union decoding (refactored)
+	for _, pc := range config.Processes {
+		spec, job, err := decodeProcessEntry(pc, "inline processes")
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range pairs {
-			m[k] = v
+		// convert detectors after decode
+		if err := convertDetectorConfigs(&spec); err != nil {
+			return nil, fmt.Errorf("failed to convert detectors for process %s: %w", spec.Name, err)
+		}
+		config.Specs = append(config.Specs, spec)
+		if job != nil {
+			if err := convertDetectorConfigs(&job.Spec); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", job.Name, err)
+			}
+			config.CronJobs = append(config.CronJobs, job)
 		}
 	}
-	// apply top-level env overrides
-	for _, kv := range fc.Env {
-		if i := strings.IndexByte(kv, '='); i >= 0 {
-			k := kv[:i]
-			v := kv[i+1:]
-			m[k] = v
+
+	// 2) Programs directory - use config setting or default to "programs"
+	var programsDir string
+	if config.ProgramsDirectory != "" {
+		if filepath.IsAbs(config.ProgramsDirectory) {
+			programsDir = config.ProgramsDirectory
+		} else {
+			programsDir = filepath.Join(filepath.Dir(configPath), config.ProgramsDirectory)
 		}
+	} else {
+		// Default: "programs" directory next to the main config file
+		programsDir = filepath.Join(filepath.Dir(configPath), "programs")
 	}
-	// build slice
-	out := make([]string, 0, len(m))
-	for k, v := range m {
-		out = append(out, k+"="+v)
+
+	if specs, jobs, err := loadProgramEntries(programsDir); err != nil {
+		return nil, fmt.Errorf("failed to load programs from %s: %w", programsDir, err)
+	} else {
+		// convert detectors per program spec for consistency
+		for i := range specs {
+			if err := convertDetectorConfigs(&specs[i]); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for program %s: %w", specs[i].Name, err)
+			}
+		}
+		for _, j := range jobs {
+			if err := convertDetectorConfigs(&j.Spec); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", j.Name, err)
+			}
+		}
+		config.Specs = append(config.Specs, specs...)
+		config.CronJobs = append(config.CronJobs, jobs...)
 	}
-	return out, nil
+
+	// Compute Global Env after merging
+	globalEnv, err := computeGlobalEnv(config.UseOSEnv, config.EnvFiles, config.Env)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute global env: %w", err)
+	}
+	config.GlobalEnv = globalEnv
+
+	// Build groups using the aggregated specs
+	groupSpecs, err := buildGroups(config.Groups, config.Specs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build groups: %w", err)
+	}
+	config.GroupSpecs = groupSpecs
+
+	return config, nil
 }
 
-// LoadEnvFile parses a simple .env file and returns a slice of "KEY=VALUE" entries.
-func LoadEnvFile(path string) ([]string, error) {
-	m, err := loadEnvFile(path)
-	if err != nil {
-		return nil, err
+func parseConfigFile(configPath string, out interface{}) error {
+	v := viper.New()
+	v.SetConfigFile(configPath)
+
+	if err := v.ReadInConfig(); err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
 	}
-	out := make([]string, 0, len(m))
-	for k, v := range m {
-		out = append(out, k+"="+v)
+
+	if err := v.Unmarshal(out); err != nil {
+		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	return out, nil
+
+	return nil
 }
 
-// loadEnvFile parses a simple .env file with KEY=VALUE lines (no export, no quotes). Lines starting with # are ignored.
-func loadEnvFile(path string) (map[string]string, error) {
-	// Mitigate G304: sanitize user-provided path by cleaning it before use.
-	clean := filepath.Clean(path)
-	b, err := os.ReadFile(clean)
+// loadProgramEntries loads program entries from the programs directory using the same
+// discriminated-union format as inline [[processes]] blocks: {type, spec}.
+// Supported file extensions: toml, yaml/yml, json. No legacy plain process.Spec files supported.
+func loadProgramEntries(programsDir string) ([]process.Spec, []*cronpkg.Job, error) {
+	infos, err := os.ReadDir(programsDir)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
 	}
-	m := make(map[string]string)
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+
+	// Supported file extensions
+	exts := []string{".toml", ".yaml", ".yml", ".json"}
+	supported := make(map[string]struct{}, len(exts))
+	for _, e := range exts {
+		supported[e] = struct{}{}
+	}
+
+	var specs []process.Spec
+	var jobs []*cronpkg.Job
+	for _, de := range infos {
+		if de.IsDir() {
 			continue
 		}
-		if i := strings.IndexByte(line, '='); i >= 0 {
-			k := strings.TrimSpace(line[:i])
-			v := strings.TrimSpace(line[i+1:])
-			m[k] = v
+		name := de.Name()
+		if strings.HasPrefix(name, ".") { // skip hidden files
+			continue
+		}
+		full := filepath.Join(programsDir, name)
+		ext := strings.ToLower(filepath.Ext(name))
+		if _, ok := supported[ext]; !ok {
+			continue // unsupported file
+		}
+
+		v := viper.New()
+		v.SetConfigFile(full)
+		if err := v.ReadInConfig(); err != nil {
+			return nil, nil, fmt.Errorf("read %s: %w", full, err)
+		}
+
+		var pc ProcessConfig
+		if err := v.Unmarshal(&pc); err != nil {
+			return nil, nil, fmt.Errorf("unmarshal %s: %w", full, err)
+		}
+
+		sp, jb, err := decodeProcessEntry(pc, full)
+		if err != nil {
+			return nil, nil, err
+		}
+		specs = append(specs, sp)
+		if jb != nil {
+			jobs = append(jobs, jb)
 		}
 	}
-	return m, nil
+	return specs, jobs, nil
 }
 
-// LoadSpecsFromTOML parses a TOML config file into a slice of process.Spec.
-func buildDetectors(pc ProcConfig) ([]detector.Detector, error) {
-	dets := make([]detector.Detector, 0, len(pc.Detectors))
-	for _, d := range pc.Detectors {
-		switch d.Type {
-		case "pidfile":
-			if d.Path == "" {
-				return nil, fmt.Errorf("detector pidfile requires path for process %s", pc.Name)
-			}
-			dets = append(dets, detector.PIDFileDetector{PIDFile: d.Path})
-		case "pid":
-			if d.PID <= 0 {
-				return nil, fmt.Errorf("detector pid requires positive pid for process %s", pc.Name)
-			}
-			dets = append(dets, detector.PIDDetector{PID: d.PID})
-		case "command":
-			if d.Command == "" {
-				return nil, fmt.Errorf("detector command requires command for process %s", pc.Name)
-			}
-			dets = append(dets, detector.CommandDetector{Command: d.Command})
-		default:
-			return nil, fmt.Errorf("unknown detector type %q for process %s", d.Type, pc.Name)
-		}
-	}
-	return dets, nil
-}
+func computeGlobalEnv(useOSEnv bool, envFiles []string, env []string) ([]string, error) {
+	envMap := make(map[string]string)
 
-func mergeLogCfg(fc *FileConfig, pc ProcConfig) logger.Config {
-	var logCfg logger.Config
-	if fc != nil && fc.Log != nil {
-		logCfg = logger.Config{
-			Dir:        fc.Log.Dir,
-			StdoutPath: fc.Log.Stdout,
-			StderrPath: fc.Log.Stderr,
-			MaxSizeMB:  fc.Log.MaxSizeMB,
-			MaxBackups: fc.Log.MaxBackups,
-			MaxAgeDays: fc.Log.MaxAgeDays,
-			Compress:   fc.Log.Compress,
+	if useOSEnv {
+		for _, kv := range os.Environ() {
+			if i := strings.IndexByte(kv, '='); i >= 0 {
+				envMap[kv[:i]] = kv[i+1:]
+			}
 		}
 	}
-	if pc.Log != nil {
-		if pc.Log.Dir != "" {
-			logCfg.Dir = pc.Log.Dir
-		}
-		if pc.Log.Stdout != "" {
-			logCfg.StdoutPath = pc.Log.Stdout
-		}
-		if pc.Log.Stderr != "" {
-			logCfg.StderrPath = pc.Log.Stderr
-		}
-		if pc.Log.MaxSizeMB != 0 {
-			logCfg.MaxSizeMB = pc.Log.MaxSizeMB
-		}
-		if pc.Log.MaxBackups != 0 {
-			logCfg.MaxBackups = pc.Log.MaxBackups
-		}
-		if pc.Log.MaxAgeDays != 0 {
-			logCfg.MaxAgeDays = pc.Log.MaxAgeDays
-		}
-		if pc.Log.Compress {
-			logCfg.Compress = true
-		}
-	}
-	return logCfg
-}
 
-func LoadSpecsFromTOML(path string) ([]process.Spec, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	result := make([]process.Spec, 0, len(fc.Processes))
-	for _, pc := range fc.Processes {
-		// detectors
-		dets, err := buildDetectors(pc)
+	for _, envFile := range envFiles {
+		fileEnv, err := loadEnvFile(envFile)
 		if err != nil {
 			return nil, err
 		}
-		// logging config: start with top-level defaults then override with per-process
-		logCfg := mergeLogCfg(&fc, pc)
-
-		s := process.Spec{
-			Name:            pc.Name,
-			Command:         pc.Command,
-			WorkDir:         pc.WorkDir,
-			Env:             pc.Env,
-			PIDFile:         pc.PIDFile,
-			RetryCount:      pc.RetryCount,
-			RetryInterval:   pc.RetryInterval,
-			StartDuration:   pc.StartDuration,
-			AutoRestart:     pc.AutoRestart,
-			RestartInterval: pc.RestartInterval,
-			Instances:       pc.Instances,
-			Detectors:       dets,
-			Log:             logCfg,
+		for key, value := range fileEnv {
+			envMap[key] = value
 		}
-		result = append(result, s)
 	}
+
+	for _, kv := range env {
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			envMap[kv[:i]] = kv[i+1:]
+		}
+	}
+
+	result := make([]string, 0, len(envMap))
+	for key, value := range envMap {
+		result = append(result, key+"="+value)
+	}
+	sort.Strings(result)
+
 	return result, nil
 }
 
-// LoadGroupsFromTOML parses group definitions and returns process_group.GroupSpec list.
-func LoadGroupsFromTOML(path string) ([]process_group.GroupSpec, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
+func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_group.GroupSpec, error) {
+	specMap := make(map[string]process.Spec, len(specs))
+	for _, spec := range specs {
+		specMap[spec.Name] = spec
 	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	// Build map name->Spec for member lookup
-	specs, err := LoadSpecsFromTOML(path)
-	if err != nil {
-		return nil, err
-	}
-	m := make(map[string]process.Spec, len(specs))
-	for _, s := range specs {
-		m[s.Name] = s
-	}
-	groups := make([]process_group.GroupSpec, 0, len(fc.Groups))
-	for _, gc := range fc.Groups {
+
+	groups := make([]process_group.GroupSpec, 0, len(groupConfigs))
+	for _, gc := range groupConfigs {
 		if gc.Name == "" {
 			return nil, fmt.Errorf("group requires name")
 		}
 		if len(gc.Members) == 0 {
-			return nil, fmt.Errorf("group %s must list members", gc.Name)
+			return nil, fmt.Errorf("group %s requires members", gc.Name)
 		}
-		members := make([]process.Spec, 0, len(gc.Members))
-		for _, mn := range gc.Members {
-			s, ok := m[mn]
-			if !ok {
-				return nil, fmt.Errorf("group %s references unknown process %s", gc.Name, mn)
+
+		memberSpecs := make([]process.Spec, 0, len(gc.Members))
+		for _, memberName := range gc.Members {
+			spec, exists := specMap[memberName]
+			if !exists {
+				return nil, fmt.Errorf("group %s references unknown member %s", gc.Name, memberName)
 			}
-			members = append(members, s)
+			memberSpecs = append(memberSpecs, spec)
 		}
-		groups = append(groups, process_group.GroupSpec{Name: gc.Name, Members: members})
+
+		groups = append(groups, process_group.GroupSpec{
+			Name:    gc.Name,
+			Members: memberSpecs,
+		})
 	}
+
 	return groups, nil
 }
 
-// LoadCronJobsFromTOML reads the same TOML but returns only entries that define a schedule.
-// It validates cron-specific constraints (autorestart must be false; instances must be 1).
-func LoadCronJobsFromTOML(path string) ([]CronJob, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
+func loadEnvFile(filePath string) (map[string]string, error) {
+	// #nosec 304
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read env file: %w", err)
 	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	jobs := make([]CronJob, 0)
-	for _, pc := range fc.Processes {
-		if pc.Schedule == "" {
+
+	env := make(map[string]string)
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if pc.AutoRestart {
-			return nil, fmt.Errorf("cron job %s cannot set autorestart=true", pc.Name)
-		}
-		if pc.Instances > 1 {
-			return nil, fmt.Errorf("cron job %s cannot set instances > 1", pc.Name)
-		}
-		// detectors
-		dets := make([]detector.Detector, 0, len(pc.Detectors))
-		for _, d := range pc.Detectors {
-			switch d.Type {
-			case "pidfile":
-				if d.Path == "" {
-					return nil, fmt.Errorf("detector pidfile requires path for process %s", pc.Name)
-				}
-				dets = append(dets, detector.PIDFileDetector{PIDFile: d.Path})
-			case "pid":
-				if d.PID <= 0 {
-					return nil, fmt.Errorf("detector pid requires positive pid for process %s", pc.Name)
-				}
-				dets = append(dets, detector.PIDDetector{PID: d.PID})
-			case "command":
-				if d.Command == "" {
-					return nil, fmt.Errorf("detector command requires command for process %s", pc.Name)
-				}
-				dets = append(dets, detector.CommandDetector{Command: d.Command})
-			default:
-				return nil, fmt.Errorf("unknown detector type %q for process %s", d.Type, pc.Name)
+
+		if idx := strings.IndexByte(line, '='); idx >= 0 {
+			key := strings.TrimSpace(line[:idx])
+			value := strings.TrimSpace(line[idx+1:])
+			if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+				value = value[1 : len(value)-1]
 			}
+			env[key] = value
+		} else {
+			return nil, fmt.Errorf("invalid env line at %s:%d: %s", filePath, i+1, line)
 		}
-		s := process.Spec{
-			Name:            pc.Name,
-			Command:         pc.Command,
-			WorkDir:         pc.WorkDir,
-			Env:             pc.Env,
-			PIDFile:         pc.PIDFile,
-			RetryCount:      pc.RetryCount,
-			RetryInterval:   pc.RetryInterval,
-			StartDuration:   pc.StartDuration,
-			AutoRestart:     false, // enforce
-			RestartInterval: 0,
-			Instances:       1,
-			Detectors:       dets,
-			Log:             logger.Config{},
+	}
+
+	return env, nil
+}
+
+// convertDetectorConfigs converts DetectorConfig slice to actual Detector interfaces
+func convertDetectorConfigs(spec *process.Spec) error {
+	if len(spec.DetectorConfigs) == 0 {
+		return nil
+	}
+
+	spec.Detectors = make([]detector.Detector, len(spec.DetectorConfigs))
+	for i, config := range spec.DetectorConfigs {
+		switch config.Type {
+		case "pidfile":
+			if config.Path == "" {
+				return fmt.Errorf("pidfile detector requires 'path' field")
+			}
+			spec.Detectors[i] = &detector.PIDFileDetector{PIDFile: config.Path}
+		case "command":
+			if config.Command == "" {
+				return fmt.Errorf("command detector requires 'command' field")
+			}
+			spec.Detectors[i] = &detector.CommandDetector{Command: config.Command}
+		default:
+			return fmt.Errorf("unknown detector type: %s", config.Type)
 		}
-		singleton := true
-		if pc.Singleton != nil {
-			singleton = *pc.Singleton
-		}
-		jobs = append(jobs, CronJob{Name: pc.Name, Spec: s, Schedule: pc.Schedule, Singleton: singleton})
 	}
-	return jobs, nil
-}
 
-// HTTPAPIConfig describes optional HTTP API server configuration.
-type HTTPAPIConfig struct {
-	Enabled  bool   `toml:"enabled" mapstructure:"enabled"`
-	Listen   string `toml:"listen" mapstructure:"listen"`       // e.g., ":8080"
-	BasePath string `toml:"base_path" mapstructure:"base_path"` // e.g., "/api"
-}
-
-// LoadHTTPAPIFromTOML loads only the http_api section from the TOML file.
-// Returns (nil, nil) if the section is absent.
-func LoadHTTPAPIFromTOML(path string) (*HTTPAPIConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	return fc.HTTP, nil
-}
-
-// LoadStoreFromTOML loads optional store configuration. Returns (nil, nil) if absent.
-func LoadStoreFromTOML(path string) (*StoreConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	return fc.Store, nil
-}
-
-// LoadHistoryFromTOML loads optional history configuration. Returns (nil, nil) if absent.
-func LoadHistoryFromTOML(path string) (*HistoryConfig, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	if err := v.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	var fc FileConfig
-	if err := v.Unmarshal(&fc); err != nil {
-		return nil, err
-	}
-	return fc.History, nil
+	return nil
 }

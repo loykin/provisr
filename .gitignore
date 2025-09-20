@@ -1,0 +1,13 @@
+# IDEs
+.idea/
+.vscode/
+
+# Build artifacts
+provisr
+provisr-*
+
+# Logs
+*.log
+
+# OS files
+.DS_Store

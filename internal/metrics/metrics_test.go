@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -82,7 +83,7 @@ func TestHandlerServesMetrics(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	s := string(b)
 	if !strings.Contains(s, "provisr_process_starts_total") {
-		t.Fatalf("metrics output missing starts_total: %s", s[:minCalc(200, len(s))])
+		t.Fatalf("metrics output missing starts_total: %s", s[:min(200, len(s))])
 	}
 }
 
@@ -108,9 +109,97 @@ func TestConcurrentIncrements(t *testing.T) {
 	}
 }
 
-func minCalc(a, b int) int {
-	if a < b {
-		return a
+func TestStateTransitionMetrics(t *testing.T) {
+	// Test state transition recording before registration (should be no-ops)
+	originalState := regOK.Load()
+	regOK.Store(false)
+
+	// These should not panic
+	RecordStateTransition("test-proc", "starting", "running")
+	RecordStateTransition("test-proc", "running", "stopping")
+	RecordStateTransition("test-proc", "stopping", "stopped")
+
+	// Restore original state
+	regOK.Store(originalState)
+
+	// Test after registration
+	if regOK.Load() {
+		// These should work if already registered
+		RecordStateTransition("registered-proc", "start", "run")
 	}
-	return b
 }
+
+func TestCurrentStateMetrics(t *testing.T) {
+	// Test current state setting before registration (should be no-ops)
+	originalState := regOK.Load()
+	regOK.Store(false)
+
+	// These should not panic
+	SetCurrentState("test-proc", "running", true)
+	SetCurrentState("test-proc", "stopped", false)
+	SetCurrentState("another-proc", "starting", true)
+
+	// Restore original state
+	regOK.Store(originalState)
+
+	// Test after registration
+	if regOK.Load() {
+		// These should work if already registered
+		SetCurrentState("registered-proc", "active", true)
+	}
+}
+
+func TestMetricsBeforeRegister(t *testing.T) {
+	// Reset registration status to test behavior before registration
+	originalState := regOK.Load()
+	regOK.Store(false)
+	defer regOK.Store(originalState)
+
+	// These should be no-ops and not panic when called before Register
+	IncStart("test")
+	IncRestart("test")
+	IncStop("test")
+	ObserveStartDuration("test", 1.0)
+	SetRunningInstances("test", 5)
+	RecordStateTransition("test", "start", "run")
+	SetCurrentState("test", "running", true)
+
+	// No crash means success
+}
+
+func TestRegisterError(t *testing.T) {
+	// Test that Register handles errors appropriately
+	// Create a custom registerer that returns a non-AlreadyRegisteredError
+	errorRegisterer := &errorRegisterer{
+		shouldError: true,
+	}
+
+	// Reset regOK to allow testing registration failure
+	originalState := regOK.Load()
+	regOK.Store(false)
+	defer regOK.Store(originalState)
+
+	// Now Register should return the error
+	err := Register(errorRegisterer)
+	if err == nil {
+		t.Fatal("Register should return error from failing registerer")
+	}
+	if err.Error() != "test registration error" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// Custom registerer for testing error handling
+type errorRegisterer struct {
+	shouldError bool
+}
+
+func (e *errorRegisterer) Register(prometheus.Collector) error {
+	if e.shouldError {
+		return errors.New("test registration error")
+	}
+	return nil
+}
+
+func (e *errorRegisterer) MustRegister(...prometheus.Collector) {}
+func (e *errorRegisterer) Unregister(prometheus.Collector) bool { return false }

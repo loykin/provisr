@@ -88,6 +88,52 @@ jobs:
         env:
           CI: true
 
+      - name: Run embedded_client with daemon
+        run: |
+          set -e
+          echo "Building provisr binary for daemon"
+          go build -o provisr-ci ./cmd/provisr
+          
+          echo "Starting provisr daemon in background"
+          ./provisr-ci serve examples/embedded_client/daemon-config.toml &
+          DAEMON_PID=$!
+          
+          echo "Waiting for daemon to start..."
+          sleep 3
+          
+          # Check if daemon is responding (using direct HTTP call)
+          echo "Checking daemon readiness..."
+          for i in {1..10}; do
+            if timeout 5s curl -s http://localhost:8080/api/status 2>/dev/null | grep -q "ok"; then
+              echo "Daemon is ready"
+              break
+            fi
+            if [ $i -eq 10 ]; then
+              echo "Daemon failed to start after 10 attempts"
+              echo "Checking if daemon process is still running..."
+              if kill -0 $DAEMON_PID 2>/dev/null; then
+                echo "Daemon process is running but not responding to API calls"
+              else
+                echo "Daemon process has died"
+              fi
+              kill $DAEMON_PID 2>/dev/null || true
+              exit 1
+            fi
+            echo "Waiting for daemon... ($i/10)"
+            sleep 2
+          done
+          
+          echo "Running examples/embedded_client"
+          go run ./examples/embedded_client
+          
+          echo "Stopping daemon"
+          kill $DAEMON_PID || true
+          wait $DAEMON_PID 2>/dev/null || true
+          
+          echo "✅ embedded_client example completed successfully"
+        env:
+          CI: true
+
       - name: Run tests with coverage
         env:
           CGO_ENABLED: 1
