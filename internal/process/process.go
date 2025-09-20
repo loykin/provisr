@@ -542,6 +542,7 @@ func (r *Process) Kill() error {
 // This helps avoid false positives on macOS where kill(pid, 0) can succeed
 // even when the process is dead due to timing issues
 func (r *Process) verifyProcessExists(pid int) bool {
+	// #nosec 204
 	cmd := exec.Command("ps", "-p", strconv.Itoa(pid))
 	return cmd.Run() == nil
 }
