@@ -76,7 +76,8 @@ func main() {
 
 	// Cleanup
 	if unifiedCfg.File.Dir != "" {
-		os.RemoveAll(unifiedCfg.File.Dir)
+		// #nosec 104 example
+		_ = os.RemoveAll(unifiedCfg.File.Dir)
 		slog.Info("Cleaned up demo directory", slog.String("path", unifiedCfg.File.Dir))
 	}
 }

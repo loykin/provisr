@@ -304,6 +304,7 @@ func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_gr
 }
 
 func loadEnvFile(filePath string) (map[string]string, error) {
+	// #nosec 304
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read env file: %w", err)
