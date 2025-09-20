@@ -155,6 +155,8 @@ func TestStartCommand_WithPriorityConfig(t *testing.T) {
 	mainConfig := filepath.Join(dir, "config.toml")
 	mainData := `
 [[processes]]
+type = "process"
+[processes.spec]
 name = "main-service"
 command = "sleep 2"
 priority = 10
