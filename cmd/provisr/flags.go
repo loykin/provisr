@@ -11,7 +11,7 @@ type StartFlags struct {
 	Name            string
 	Cmd             string
 	PIDFile         string
-	Retries         int
+	Retries         uint32
 	RetryInterval   time.Duration
 	AutoRestart     bool
 	RestartInterval time.Duration

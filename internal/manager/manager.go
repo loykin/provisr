@@ -31,11 +31,6 @@ type Manager struct {
 	envManager *env.Env
 	store      store.Store
 	histSinks  []history.Sink
-
-	// Reconciler control
-	reconTicker *time.Ticker
-	reconStop   chan struct{}
-	reconWG     sync.WaitGroup
 }
 
 // NewManager creates a new manager
@@ -198,107 +193,8 @@ func (m *Manager) Count(base string) (int, error) {
 	return count, nil
 }
 
-// StartReconciler starts background reconciliation
-func (m *Manager) StartReconciler(interval time.Duration) {
-	if interval <= 0 {
-		interval = 500 * time.Millisecond
-	}
-
-	m.mu.Lock()
-	if m.reconTicker != nil {
-		m.mu.Unlock()
-		return // Already running
-	}
-
-	m.reconTicker = time.NewTicker(interval)
-	m.reconStop = make(chan struct{})
-	m.mu.Unlock()
-
-	m.reconWG.Add(1)
-	go m.runReconciler()
-}
-
-// StopReconciler stops background reconciliation
-func (m *Manager) StopReconciler() {
-	m.mu.Lock()
-	if m.reconTicker == nil {
-		m.mu.Unlock()
-		return
-	}
-
-	m.reconTicker.Stop()
-	close(m.reconStop)
-	m.reconTicker = nil
-	m.reconStop = nil
-	m.mu.Unlock()
-
-	m.reconWG.Wait()
-}
-
-// ReconcileOnce performs a single reconciliation cycle
-func (m *Manager) ReconcileOnce() {
-	m.mu.RLock()
-	processes := make([]*ManagedProcess, 0, len(m.processes))
-	for _, up := range m.processes {
-		processes = append(processes, up)
-	}
-	m.mu.RUnlock()
-
-	// Check each process for health and cleanup
-	for _, up := range processes {
-		m.reconcileProcess(up)
-	}
-}
-
-// reconcileProcess performs reconciliation for a single process
-func (m *Manager) reconcileProcess(up *ManagedProcess) {
-	status := up.Status()
-
-	// Check if process is in an inconsistent state
-	if status.Running && status.PID == 0 {
-		// Running but no PID - likely stale state
-		_ = up.Stop(5 * time.Second)
-		return
-	}
-
-	// Check if process died unexpectedly and needs cleanup
-	if !status.Running && status.PID != 0 {
-		// Process died but state not updated - force cleanup
-		up.Reconcile()
-		return
-	}
-
-	// For debugging: could log healthy processes
-	// log.Printf("Process %s in state %s is healthy", status.Name, status.State)
-} // runReconciler runs the background reconciliation loop
-func (m *Manager) runReconciler() {
-	defer m.reconWG.Done()
-
-	// Local copies to avoid race conditions
-	m.mu.RLock()
-	ticker := m.reconTicker
-	stopChan := m.reconStop
-	m.mu.RUnlock()
-
-	if ticker == nil || stopChan == nil {
-		return
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			m.ReconcileOnce()
-		case <-stopChan:
-			return
-		}
-	}
-}
-
 // Shutdown gracefully shuts down all processes
 func (m *Manager) Shutdown() error {
-	// Stop reconciler first
-	m.StopReconciler()
-
 	// Shut down all processes
 	m.mu.RLock()
 	processes := make([]*ManagedProcess, 0, len(m.processes))

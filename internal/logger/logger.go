@@ -61,6 +61,16 @@ type Config struct {
 	File FileConfig `json:"file,omitempty" mapstructure:",squash"`
 }
 
+func (c *Config) DeepCopy() *Config {
+	if c == nil {
+		return nil
+	}
+
+	s := *c
+	s.Slog.Output = nil
+	return &s
+}
+
 // DefaultConfig returns default unified configuration
 func DefaultConfig() Config {
 	return Config{

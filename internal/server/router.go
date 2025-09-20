@@ -41,7 +41,6 @@ func (r *Router) Handler() http.Handler {
 	group.POST("/stop", r.handleStop)
 	group.GET("/status", r.handleStatus)
 	group.GET("/debug/processes", r.handleDebugProcesses)
-	group.POST("/debug/reconcile", r.handleDebugReconcile)
 	return g
 }
 
@@ -266,12 +265,6 @@ func (r *Router) handleDebugProcesses(c *gin.Context) {
 	}
 
 	writeJSON(c, http.StatusOK, debugInfos)
-}
-
-func (r *Router) handleDebugReconcile(c *gin.Context) {
-	// Trigger manual reconciliation
-	r.mgr.ReconcileOnce()
-	writeJSON(c, http.StatusOK, okResp{OK: true})
 }
 
 func getHealthStatus(status process.Status) string {

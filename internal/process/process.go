@@ -21,11 +21,15 @@ type Process struct {
 	status     Status
 	mu         sync.Mutex
 	stopping   bool // true when Stop has been requested; suppress autorestart
-	restarts   int
 	outCloser  io.WriteCloser
 	errCloser  io.WriteCloser
 	waitDone   chan struct{} // closed by monitor when cmd.Wait returns
 	monitoring bool          // true when monitor goroutine is running
+
+	// Race-free process tracking
+	pid     int   // Process ID for safe detection
+	exited  bool  // Track if process has exited
+	exitErr error // Exit error if any
 }
 
 func New(spec Spec) *Process { return &Process{spec: spec} }
@@ -97,8 +101,12 @@ func (r *Process) SetStarted(cmd *exec.Cmd) {
 	r.status.Running = true
 	r.status.PID = cmd.Process.Pid
 	r.status.StartedAt = time.Now()
-	r.status.Restarts = r.restarts
 	r.stopping = false
+
+	// Store PID for race-free detection
+	r.pid = cmd.Process.Pid
+	r.exited = false
+	r.exitErr = nil
 	r.mu.Unlock()
 }
 
@@ -136,7 +144,17 @@ func (r *Process) MarkExited(err error) {
 	r.status.Running = false
 	r.status.StoppedAt = time.Now()
 	r.status.ExitErr = err
+
+	// Mark as exited for race-free detection
+	r.exited = true
+	r.exitErr = err
 	r.mu.Unlock()
+}
+
+func (r *Process) GetName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.spec.Name
 }
 
 func (r *Process) SetStopRequested(v bool) {
@@ -148,14 +166,6 @@ func (r *Process) SetStopRequested(v bool) {
 func (r *Process) StopRequested() bool {
 	r.mu.Lock()
 	v := r.stopping
-	r.mu.Unlock()
-	return v
-}
-
-func (r *Process) IncRestarts() int {
-	r.mu.Lock()
-	r.restarts++
-	v := r.restarts
 	r.mu.Unlock()
 	return v
 }
@@ -253,39 +263,75 @@ func (r *Process) Snapshot() Status {
 	return s
 }
 
-// DetectAlive probes liveness avoiding races with os/exec internals.
+func (r *Process) GetSpec() *Spec {
+	r.mu.Lock()
+	s := r.spec.DeepCopy()
+	r.mu.Unlock()
+	return s
+}
+
+func (r *Process) GetAutoStart() bool {
+	r.mu.Lock()
+	v := r.spec.AutoRestart
+	r.mu.Unlock()
+	return v
+}
+
+// DetectAlive probes liveness without accessing cmd to avoid races.
 func (r *Process) DetectAlive() (bool, string) {
 	r.mu.Lock()
-	cmd := r.cmd
+	pid := r.pid
+	exited := r.exited
 	r.mu.Unlock()
 
-	// First, try exec:pid detection if we have a command process
-	if cmd != nil && cmd.Process != nil {
-		pid := cmd.Process.Pid
-		// On Linux, a quickly-exiting child can be a zombie; treat that as not alive.
-		if runtime.GOOS == "linux" {
-			if isZombieLinux(pid) {
-				return false, ""
+	// If we don't have a PID yet, process never started
+	if pid == 0 {
+		return false, "no-pid"
+	}
+
+	// If we already detected exit, process is dead
+	if exited {
+		return false, "exit-detected"
+	}
+
+	// Prefer individual PID signal check first (works reliably across platforms)
+	if syscall.Kill(pid, 0) == nil {
+		// On macOS, exclude zombies which can briefly report as signalable
+		if isZombieDarwin(pid) {
+			return false, "zombie"
+		}
+		return true, "exec:pid"
+	}
+
+	// Platform-specific fallbacks
+	if runtime.GOOS == "linux" {
+		if isZombieLinux(pid) {
+			return false, "zombie"
+		}
+	} else {
+		// Non-Linux: try process group signal as a fallback (if Setpgid was used)
+		if syscall.Kill(-pid, 0) == nil {
+			// On macOS, optionally verify via ps to avoid rare false positives
+			if runtime.GOOS == "darwin" {
+				// #nosec 204
+				if r.verifyProcessExists(pid) {
+					return true, "exec:pid"
+				}
+				// if ps check fails, treat as not alive
+				return false, "not-found"
 			}
-			if syscall.Kill(pid, 0) == nil {
-				return true, "exec:pid"
-			}
-		} else {
-			// Non-Linux: use process group signal check as before to handle quick-exit detection.
-			if syscall.Kill(-pid, 0) == nil {
-				return true, "exec:pid"
-			}
+			return true, "exec:pid"
 		}
 	}
 
-	// If exec:pid detection fails or no process, try configured detectors
+	// If PID-based detection fails, try configured detectors
 	for _, d := range r.detectors() {
 		ok, _ := d.Alive()
 		if ok {
 			return true, d.Describe()
 		}
 	}
-	return false, ""
+	return false, "not-found"
 }
 
 func (r *Process) detectors() []detector.Detector {
@@ -311,6 +357,17 @@ func isZombieLinux(pid int) bool {
 	return bytes.Contains(b, []byte("State:\tZ"))
 }
 
+// isZombieDarwin checks if the process is a zombie on macOS using ps.
+func isZombieDarwin(pid int) bool {
+	// #nosec 204
+	cmd := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(out, []byte("Z"))
+}
+
 // EnforceStartDuration waits until d ensuring process stays up; returns error if it exits early.
 func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if d <= 0 {
@@ -323,8 +380,11 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	if cmd == nil || cmd.Process == nil {
 		return errBeforeStart(d)
 	}
+
+	// Poll-based approach to avoid race conditions with cmd.Wait()
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
+		// Check if the process is still alive
 		alive, _ := r.DetectAlive()
 		if !alive {
 			return errBeforeStart(d)
@@ -476,4 +536,13 @@ func (r *Process) Kill() error {
 	}
 	rs := r.Snapshot()
 	return rs.ExitErr
+}
+
+// verifyProcessExists uses ps command to double-check if a process exists
+// This helps avoid false positives on macOS where kill(pid, 0) can succeed
+// even when the process is dead due to timing issues
+func (r *Process) verifyProcessExists(pid int) bool {
+	// #nosec 204
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid))
+	return cmd.Run() == nil
 }

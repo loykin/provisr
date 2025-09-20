@@ -171,12 +171,6 @@ func TestStopRequestedToggleAndIncRestarts(t *testing.T) {
 	if r.StopRequested() {
 		t.Fatalf("StopRequested should be false after SetStopRequested(false)")
 	}
-	if v := r.IncRestarts(); v != 1 {
-		t.Fatalf("IncRestarts first got %d want 1", v)
-	}
-	if v := r.IncRestarts(); v != 2 {
-		t.Fatalf("IncRestarts second got %d want 2", v)
-	}
 }
 
 func TestMonitoringStartIfNeededAndStop(t *testing.T) {

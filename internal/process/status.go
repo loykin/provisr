@@ -11,6 +11,6 @@ type Status struct {
 	StoppedAt  time.Time `json:"stopped_at"`
 	ExitErr    error     `json:"exit_error,omitempty"`
 	DetectedBy string    `json:"detected_by"`
-	Restarts   int       `json:"restarts"`
+	Restarts   uint32    `json:"restarts"`
 	State      string    `json:"state"` // State machine state: stopped, starting, running, stopping
 }

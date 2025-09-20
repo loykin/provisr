@@ -29,9 +29,6 @@ func main() {
 	if err := mgr.SetStoreFromDSN(dsn); err != nil {
 		panic(fmt.Errorf("failed to set store from DSN: %w", err))
 	}
-	// Start periodic reconciler to keep store in sync and enforce HA policies
-	mgr.StartReconciler(2 * time.Second)
-	defer mgr.StopReconciler()
 
 	// Start a short-lived demo process
 	spec := provisr.Spec{
@@ -53,7 +50,6 @@ func main() {
 
 	// Wait for the process to finish naturally, then reconcile and show final state
 	time.Sleep(500 * time.Millisecond)
-	mgr.ReconcileOnce()
 	st2, _ := mgr.Status("store-demo")
 	b2, _ := json.MarshalIndent(st2, "", "  ")
 	fmt.Println("Status after exit + reconcile:")
