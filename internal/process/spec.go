@@ -9,6 +9,13 @@ import (
 	"github.com/loykin/provisr/internal/logger"
 )
 
+// DetectorConfig represents a detector configuration that can be parsed from config files
+type DetectorConfig struct {
+	Type    string `json:"type" mapstructure:"type"`
+	Path    string `json:"path" mapstructure:"path"`
+	Command string `json:"command" mapstructure:"command"`
+}
+
 // Spec describes a process to be managed.
 // All logging is now handled through slog-based structured logging.
 type Spec struct {
@@ -24,8 +31,9 @@ type Spec struct {
 	AutoRestart     bool                `json:"auto_restart"`     // restart automatically if the process dies unexpectedly
 	RestartInterval time.Duration       `json:"restart_interval"` // wait before attempting an auto-restart
 	Instances       int                 `json:"instances"`        // number of instances to run concurrently (default 1)
-	Detectors       []detector.Detector `json:"-"`
-	Log             logger.Config       `json:"log"` // unified slog-based logging configuration
+	Detectors       []detector.Detector `json:"-" mapstructure:"-"`
+	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"` // for config parsing
+	Log             logger.Config       `json:"log"`                                // unified slog-based logging configuration
 }
 
 // BuildCommand constructs an *exec.Cmd for the given spec.Command.

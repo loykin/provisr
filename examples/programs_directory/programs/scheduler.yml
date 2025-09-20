@@ -12,7 +12,7 @@ env:
   - TIMEZONE=UTC
 log:
   dir: /tmp/provisr-programs-demo/scheduler
-  stdout: scheduler.out.log
-  stderr: scheduler.err.log
+  stdout: /tmp/provisr-programs-demo/scheduler/scheduler.out.log
+  stderr: /tmp/provisr-programs-demo/scheduler/scheduler.err.log
   max_size_mb: 8
   max_backups: 3

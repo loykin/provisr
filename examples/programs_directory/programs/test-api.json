@@ -10,7 +10,7 @@
   "env": ["SERVICE=api", "PORT=8000"],
   "log": {
     "dir": "/tmp/provisr-programs-demo/api",
-    "stdout": "api.out.log",
-    "stderr": "api.err.log"
+    "stdout": "/tmp/provisr-programs-demo/test-api/api.out.log",
+    "stderr": "/tmp/provisr-programs-demo/test-api/api.err.log"
   }
 }

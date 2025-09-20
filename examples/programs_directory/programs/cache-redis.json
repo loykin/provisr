@@ -15,8 +15,8 @@
   ],
   "log": {
     "dir": "/tmp/provisr-programs-demo/redis",
-    "stdout": "redis.out.log",
-    "stderr": "redis.err.log",
+    "stdout": "/tmp/provisr-programs-demo/redis/redis.out.log",
+    "stderr": "/tmp/provisr-programs-demo/redis/redis.err.log",
     "max_size_mb": 25,
     "max_backups": 5
   }

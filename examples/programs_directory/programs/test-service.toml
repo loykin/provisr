@@ -11,5 +11,5 @@ env = ["SERVICE_NAME=test"]
 
 [log]
 dir = "/tmp/provisr-programs-demo/test-service"
-stdout = "service.out.log"
-stderr = "service.err.log"
+stdout = "/tmp/provisr-programs-demo/test-service/service.out.log"
+stderr = "/tmp/provisr-programs-demo/test-service/service.err.log"

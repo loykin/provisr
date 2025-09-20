@@ -13,7 +13,7 @@ env:
   - "MAX_CONNECTIONS=100"
 log:
   dir: "/tmp/provisr-programs-demo/database"
-  stdout: "database.out.log"
-  stderr: "database.err.log"
+  stdout: "/tmp/provisr-programs-demo/database/database.out.log"
+  stderr: "/tmp/provisr-programs-demo/database/database.err.log"
   max_size_mb: 50
   max_backups: 10
