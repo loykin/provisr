@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/loykin/provisr/internal/logger"
 	mng "github.com/loykin/provisr/internal/manager"
+	"github.com/loykin/provisr/internal/process"
 )
 
 func setupRouter(t *testing.T, base string) http.Handler {
@@ -39,7 +41,8 @@ func doReq(t *testing.T, h http.Handler, method, path string, body any) *httptes
 
 func TestStartMissingName(t *testing.T) {
 	h := setupRouter(t, "/abc")
-	rec := doReq(t, h, http.MethodPost, "/abc/start", map[string]any{"command": "/bin/true"})
+	spec := process.Spec{Command: "/bin/true"} // missing name - should fail
+	rec := doReq(t, h, http.MethodPost, "/abc/start", spec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -80,12 +83,12 @@ func TestStatusUnknown(t *testing.T) {
 func TestWildcardStatusAndStop(t *testing.T) {
 	h := setupRouter(t, "")
 	// start 2 instances via API
-	startBody := map[string]any{
-		"name":      "demo",
-		"command":   "go version",
-		"instances": 2,
+	startSpec := process.Spec{
+		Name:      "demo",
+		Command:   "go version",
+		Instances: 2,
 	}
-	rec := doReq(t, h, http.MethodPost, "/start", startBody)
+	rec := doReq(t, h, http.MethodPost, "/start", startSpec)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("start expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -114,30 +117,56 @@ func TestWildcardStatusAndStop(t *testing.T) {
 func TestStartInvalidNameAndPaths(t *testing.T) {
 	h := setupRouter(t, "")
 	// invalid name
-	rec := doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "../bad", "command": "go version"})
+	badNameSpec := process.Spec{Name: "../bad", Command: "go version"} // invalid name - should fail
+	rec := doReq(t, h, http.MethodPost, "/start", badNameSpec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid name expected 400, got %d", rec.Code)
 	}
+
 	// invalid workdir (relative)
-	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "work_dir": "rel/path"})
+	badWorkDirSpec := process.Spec{Name: "ok", Command: "go version", WorkDir: "rel/path"} // relative path - should fail
+	rec = doReq(t, h, http.MethodPost, "/start", badWorkDirSpec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid workdir expected 400, got %d", rec.Code)
 	}
 	// invalid pid file (relative)
-	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "pid_file": "pid.pid"})
+	spec1 := process.Spec{
+		Name:    "ok",
+		Command: "go version",
+		PIDFile: "pid.pid", // relative path - should fail
+	}
+	rec = doReq(t, h, http.MethodPost, "/start", spec1)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid pidfile expected 400, got %d", rec.Code)
 	}
+
 	// invalid log paths (relative)
-	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "log": map[string]any{"dir": "logs"}})
+	spec2 := process.Spec{
+		Name:    "ok",
+		Command: "go version",
+		Log:     logger.Config{File: logger.FileConfig{Dir: "logs"}}, // relative path - should fail
+	}
+	rec = doReq(t, h, http.MethodPost, "/start", spec2)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.dir expected 400, got %d", rec.Code)
 	}
-	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "log": map[string]any{"stdoutPath": "out.log"}})
+
+	spec3 := process.Spec{
+		Name:    "ok",
+		Command: "go version",
+		Log:     logger.Config{File: logger.FileConfig{StdoutPath: "out.log"}}, // relative path - should fail
+	}
+	rec = doReq(t, h, http.MethodPost, "/start", spec3)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.stdoutPath expected 400, got %d", rec.Code)
 	}
-	rec = doReq(t, h, http.MethodPost, "/start", map[string]any{"name": "ok", "command": "go version", "log": map[string]any{"stderrPath": "err.log"}})
+
+	spec4 := process.Spec{
+		Name:    "ok",
+		Command: "go version",
+		Log:     logger.Config{File: logger.FileConfig{StderrPath: "err.log"}}, // relative path - should fail
+	}
+	rec = doReq(t, h, http.MethodPost, "/start", spec4)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.stderrPath expected 400, got %d", rec.Code)
 	}
@@ -160,11 +189,11 @@ func TestSelectorsMutualExclusion(t *testing.T) {
 func TestStartThenStatusByBaseAndName(t *testing.T) {
 	h := setupRouter(t, "/api/") // ensure base sanitization works
 	// successful start
-	startBody := map[string]any{
-		"name":    "svc",
-		"command": "go version",
+	startSpec := process.Spec{
+		Name:    "svc",
+		Command: "go version",
 	}
-	rec := doReq(t, h, http.MethodPost, "/api/start", startBody)
+	rec := doReq(t, h, http.MethodPost, "/api/start", startSpec)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("start expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}

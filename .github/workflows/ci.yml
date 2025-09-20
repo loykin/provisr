@@ -133,6 +133,15 @@ jobs:
           CGO_ENABLED: 1
         run: go test -p 1 -race -covermode=atomic -coverprofile=coverage.out $(go list ./... | grep -v '/examples')
 
+      - name: Run Programs Directory Integration Test
+        run: |
+          set -e
+          echo "Running programs directory integration test..."
+          ./test_programs_directory.sh
+          echo "✅ Programs directory integration test passed"
+        env:
+          CI: true
+
       - name: Show coverage summary
         run: go tool cover -func=coverage.out | tail -n 1
 

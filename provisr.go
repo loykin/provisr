@@ -2,6 +2,7 @@ package provisr
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,4 +126,14 @@ func NewOpenSearchHistorySink(baseURL, index string) HistorySink {
 func NewClickHouseHistorySink(baseURL, table string) HistorySink {
 	sink, _ := history_factory.NewSinkFromDSN("clickhouse://" + strings.TrimPrefix(baseURL, "http://") + "?table=" + table)
 	return sink
+}
+
+// SortSpecsByPriority sorts specs by priority (lower numbers first) and returns a new slice
+func SortSpecsByPriority(specs []Spec) []Spec {
+	sortedSpecs := make([]Spec, len(specs))
+	copy(sortedSpecs, specs)
+	sort.SliceStable(sortedSpecs, func(i, j int) bool {
+		return sortedSpecs[i].Priority < sortedSpecs[j].Priority
+	})
+	return sortedSpecs
 }

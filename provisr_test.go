@@ -100,17 +100,18 @@ schedule = "@every 50ms"
 	if err := os.WriteFile(p, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	specs, err := LoadSpecs(p)
-	if err != nil || len(specs) < 1 {
-		t.Fatalf("LoadSpecs: %v len=%d", err, len(specs))
+	config, err := LoadConfig(p)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
 	}
-	groups, err := LoadGroups(p)
-	if err != nil || len(groups) != 1 {
-		t.Fatalf("LoadGroups: %v len=%d", err, len(groups))
+	if len(config.Specs) < 1 {
+		t.Fatalf("LoadConfig specs: len=%d", len(config.Specs))
 	}
-	jobs, err := LoadCronJobs(p)
-	if err != nil || len(jobs) != 1 {
-		t.Fatalf("LoadCronJobs: %v len=%d", err, len(jobs))
+	if len(config.GroupSpecs) != 1 {
+		t.Fatalf("LoadConfig groups: len=%d", len(config.GroupSpecs))
+	}
+	if len(config.CronJobs) != 1 {
+		t.Fatalf("LoadConfig cronjobs: len=%d", len(config.CronJobs))
 	}
 }
 
@@ -203,18 +204,18 @@ priority = 1
 	}
 
 	// Load specs using public API
-	specs, err := LoadSpecs(configFile)
+	config, err := LoadConfig(configFile)
 	if err != nil {
-		t.Fatalf("LoadSpecs failed: %v", err)
+		t.Fatalf("LoadConfig failed: %v", err)
 	}
 
-	if len(specs) != 2 {
-		t.Fatalf("expected 2 specs, got %d", len(specs))
+	if len(config.Specs) != 2 {
+		t.Fatalf("expected 2 specs, got %d", len(config.Specs))
 	}
 
 	// Find specs by name and check priorities
 	specMap := make(map[string]int)
-	for _, spec := range specs {
+	for _, spec := range config.Specs {
 		specMap[spec.Name] = spec.Priority
 	}
 
@@ -267,17 +268,17 @@ priority = 1`,
 	}
 
 	// Load specs
-	specs, err := LoadSpecs(mainConfig)
+	config, err := LoadConfig(mainConfig)
 	if err != nil {
-		t.Fatalf("LoadSpecs failed: %v", err)
+		t.Fatalf("LoadConfig failed: %v", err)
 	}
 
-	if len(specs) != 3 {
-		t.Fatalf("expected 3 specs, got %d", len(specs))
+	if len(config.Specs) != 3 {
+		t.Fatalf("expected 3 specs, got %d", len(config.Specs))
 	}
 
 	// Test sorting
-	sortedSpecs := SortSpecsByPriority(specs)
+	sortedSpecs := SortSpecsByPriority(config.Specs)
 	expectedOrder := []string{"database", "backend", "frontend"}
 	expectedPriorities := []int{1, 10, 15}
 

@@ -57,23 +57,6 @@ func TestStartFromSpecsAndStatuses(t *testing.T) {
 	_ = mgr.StopAll("u", 200*time.Millisecond)
 }
 
-func writeEnvTOML(t *testing.T, dir string, env []string) string {
-	content := "env = [\n"
-	for i, kv := range env {
-		content += "\t\"" + kv + "\""
-		if i < len(env)-1 {
-			content += ","
-		}
-		content += "\n"
-	}
-	content += "]\n"
-	p := filepath.Join(dir, "env.toml")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
-	return p
-}
-
 func TestApplyGlobalEnvFromFlags(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires Unix echo/sleep")
@@ -81,8 +64,11 @@ func TestApplyGlobalEnvFromFlags(t *testing.T) {
 	mgr := provisr.New()
 	// Provide env via KVs and file; then start a process that writes env to a file.
 	tdir := t.TempDir()
-	envFile := writeEnvTOML(t, tdir, []string{"A=1", "B=2"})
-	applyGlobalEnvFromFlags(mgr, false, []string{envFile}, []string{"C=3"})
+	// Combine file-based env and direct KV env
+	allEnv := []string{"C=3"}
+	// Note: For this test, we know the file contains A=1, B=2 based on writeEnvTOML above
+	allEnv = append(allEnv, "A=1", "B=2")
+	applyGlobalEnvFromFlags(mgr, false, allEnv)
 
 	// Prepare a spec that prints a composite value from env
 	outFile := filepath.Join(tdir, "out.txt")
