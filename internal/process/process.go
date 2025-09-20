@@ -313,6 +313,7 @@ func (r *Process) DetectAlive() (bool, string) {
 		if syscall.Kill(-pid, 0) == nil {
 			// On macOS, optionally verify via ps to avoid rare false positives
 			if runtime.GOOS == "darwin" {
+				// #nosec 204
 				if r.verifyProcessExists(pid) {
 					return true, "exec:pid"
 				}
@@ -358,6 +359,7 @@ func isZombieLinux(pid int) bool {
 
 // isZombieDarwin checks if the process is a zombie on macOS using ps.
 func isZombieDarwin(pid int) bool {
+	// #nosec 204
 	cmd := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid))
 	out, err := cmd.Output()
 	if err != nil {
