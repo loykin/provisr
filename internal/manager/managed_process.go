@@ -217,7 +217,7 @@ func (up *ManagedProcess) runStateMachine() {
 						// Respect restart interval from spec (default small delay)
 						interval := spec.RestartInterval
 						if interval <= 0 {
-							interval = 300 * time.Millisecond
+							interval = 3 * time.Second
 						}
 						if time.Since(last) >= interval {
 							// Attempt restart with last known spec
@@ -276,6 +276,7 @@ func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 			return fmt.Errorf("process '%s' is already running (PID: %d, state: %s)",
 				name, snapshot.PID, currentState.String())
 		}
+
 		// Process died, transition to stopped and try start
 		up.setState(StateStopped)
 		fallthrough
@@ -331,9 +332,6 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 	if up.startLogger != nil {
 		up.startLogger(up.proc)
 	}
-
-	// Start monitoring process exit
-	go up.monitorProcessExit()
 
 	return nil
 }
@@ -462,39 +460,6 @@ func (up *ManagedProcess) checkProcessHealth() {
 			up.stopLogger(up.proc, fmt.Errorf("process exited unexpectedly"))
 		}
 		// Auto-restart, if any, will be coordinated by Manager.reconcileProcess.
-	}
-}
-
-// monitorProcessExit waits for process to exit and updates state
-func (up *ManagedProcess) monitorProcessExit() {
-	if !up.proc.MonitoringStartIfNeeded() {
-		return // Already being monitored
-	}
-
-	defer up.proc.MonitoringStop()
-
-	// Wait for process to exit
-	cmd := up.proc.CopyCmd()
-	if cmd == nil {
-		return
-	}
-
-	err := cmd.Wait()
-	up.proc.CloseWaitDone()
-	up.proc.MarkExited(err)
-	up.proc.CloseWriters()
-
-	// Transition state if we're still running and handle autorestart
-	up.mu.RLock()
-	currentState := up.state
-	up.mu.RUnlock()
-
-	if currentState == StateRunning {
-		up.setState(StateStopped)
-
-		// Log the exit
-		if up.stopLogger != nil {
-			up.stopLogger(up.proc, err)
-		}
+	} else if up.proc.StopRequested() {
 	}
 }
