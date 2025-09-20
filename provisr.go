@@ -2,11 +2,14 @@ package provisr
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cron"
 	"github.com/loykin/provisr/internal/history"
+	history_factory "github.com/loykin/provisr/internal/history/factory"
 	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
@@ -58,7 +61,6 @@ func (m *Manager) Status(name string) (Status, error)            { return m.inne
 func (m *Manager) StatusAll(base string) ([]Status, error)       { return m.inner.StatusAll(base) }
 func (m *Manager) Count(base string) (int, error)                { return m.inner.Count(base) }
 
-// Reconcile controls
 func (m *Manager) ReconcileOnce()                  { m.inner.ReconcileOnce() }
 func (m *Manager) StartReconciler(d time.Duration) { m.inner.StartReconciler(d) }
 func (m *Manager) StopReconciler()                 { m.inner.StopReconciler() }
@@ -78,8 +80,6 @@ func (g *Group) Status(gs GroupSpec) (map[string][]Status, error) {
 	return m, err
 }
 
-// Cron facade
-
 type CronScheduler struct{ inner *cron.Scheduler }
 
 type CronJob = cron.Job // alias; use pointer when adding to avoid copying atomics
@@ -92,21 +92,9 @@ func (s *CronScheduler) Add(j *CronJob) error { return s.inner.Add(j) }
 func (s *CronScheduler) Start() error         { return s.inner.Start() }
 func (s *CronScheduler) Stop()                { s.inner.Stop() }
 
-// Config helpers (forwarders to internal/config)
-
-func LoadEnv(path string) ([]string, error)           { return cfg.LoadEnvFromTOML(path) }
-func LoadGlobalEnv(path string) ([]string, error)     { return cfg.LoadGlobalEnv(path) }
-func LoadSpecs(path string) ([]Spec, error)           { return cfg.LoadSpecsFromTOML(path) }
-func LoadGroups(path string) ([]pg.GroupSpec, error)  { return cfg.LoadGroupsFromTOML(path) }
-func LoadCronJobs(path string) ([]cfg.CronJob, error) { return cfg.LoadCronJobsFromTOML(path) }
-
-// HTTP API helpers
-
-func LoadHTTPAPI(path string) (*cfg.HTTPAPIConfig, error) { return cfg.LoadHTTPAPIFromTOML(path) }
-func LoadStore(path string) (*cfg.StoreConfig, error)     { return cfg.LoadStoreFromTOML(path) }
-func LoadHistory(path string) (*cfg.HistoryConfig, error) { return cfg.LoadHistoryFromTOML(path) }
-
-// NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
+func LoadConfig(path string) (*cfg.Config, error) {
+	return cfg.LoadConfig(path)
+} // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
 func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
 	return iapi.NewServer(addr, basePath, m.inner)
 }
@@ -131,16 +119,21 @@ func ServeMetrics(addr string) error {
 	return srv.ListenAndServe()
 }
 
-// History sink constructors (public convenience)
 func NewOpenSearchHistorySink(baseURL, index string) HistorySink {
-	return history.NewOpenSearchSink(baseURL, index)
+	sink, _ := history_factory.NewSinkFromDSN("opensearch://" + strings.TrimPrefix(baseURL, "http://") + "/" + index)
+	return sink
 }
 func NewClickHouseHistorySink(baseURL, table string) HistorySink {
-	return history.NewClickHouseSink(baseURL, table)
+	sink, _ := history_factory.NewSinkFromDSN("clickhouse://" + strings.TrimPrefix(baseURL, "http://") + "?table=" + table)
+	return sink
 }
-func NewSQLHistorySinkFromDSN(dsn string) HistorySink {
-	if s, err := history.NewSQLSinkFromDSN(dsn); err == nil {
-		return s
-	}
-	return nil
+
+// SortSpecsByPriority sorts specs by priority (lower numbers first) and returns a new slice
+func SortSpecsByPriority(specs []Spec) []Spec {
+	sortedSpecs := make([]Spec, len(specs))
+	copy(sortedSpecs, specs)
+	sort.SliceStable(sortedSpecs, func(i, j int) bool {
+		return sortedSpecs[i].Priority < sortedSpecs[j].Priority
+	})
+	return sortedSpecs
 }

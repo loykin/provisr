@@ -1,0 +1,19 @@
+type: process
+spec:
+  name: worker
+  command: sh -c 'for i in {1..60}; do echo "[$(date)] Worker processing job $i"; sleep 2; done'
+  priority: 20
+  retry_count: 1
+  retry_interval: 500ms
+  start_duration: 500ms
+  auto_restart: false
+  instances: 3
+  env:
+    - WORKER_ID=background
+    - QUEUE_NAME=main
+  log:
+    dir: /tmp/provisr-programs-demo/worker
+    stdout: /tmp/provisr-programs-demo/worker/worker.out.log
+    stderr: /tmp/provisr-programs-demo/worker/worker.err.log
+    max_size_mb: 5
+    max_backups: 2

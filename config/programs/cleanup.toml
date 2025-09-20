@@ -1,0 +1,7 @@
+# Cleanup process example (can be triggered manually or by group)
+type = "process"
+[spec]
+name = "cleanup"
+command = "sh -c 'echo [$(date)] Cleaning temp files...; touch /tmp/provisr-demo-cleaned; echo [$(date)] Cleanup completed'"
+priority = 0
+autorestart = false

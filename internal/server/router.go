@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -39,6 +40,8 @@ func (r *Router) Handler() http.Handler {
 	group.POST("/start", r.handleStart)
 	group.POST("/stop", r.handleStop)
 	group.GET("/status", r.handleStatus)
+	group.GET("/debug/processes", r.handleDebugProcesses)
+	group.POST("/debug/reconcile", r.handleDebugReconcile)
 	return g
 }
 
@@ -55,7 +58,26 @@ func NewServer(addr, basePath string, mgr *mng.Manager) (*http.Server, error) {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	go func() { _ = server.ListenAndServe() }()
+
+	// Start the server in a goroutine and handle potential errors
+	serverErrCh := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrCh <- err
+		}
+		close(serverErrCh)
+	}()
+
+	// Give the server a moment to start and catch immediate errors
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			return nil, err
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Server started successfully or no immediate error
+	}
+
 	return server, nil
 }
 
@@ -93,15 +115,15 @@ func (r *Router) handleStart(c *gin.Context) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid pid_file: must be absolute path without traversal"})
 		return
 	}
-	if !isSafeAbsPath(spec.Log.Dir) {
+	if !isSafeAbsPath(spec.Log.File.Dir) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.dir: must be absolute path without traversal"})
 		return
 	}
-	if !isSafeAbsPath(spec.Log.StdoutPath) {
+	if !isSafeAbsPath(spec.Log.File.StdoutPath) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stdoutPath: must be absolute path without traversal"})
 		return
 	}
-	if !isSafeAbsPath(spec.Log.StderrPath) {
+	if !isSafeAbsPath(spec.Log.File.StderrPath) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stderrPath: must be absolute path without traversal"})
 		return
 	}
@@ -182,7 +204,8 @@ func (r *Router) handleStatus(c *gin.Context) {
 		selCount++
 	}
 	if selCount == 0 {
-		writeJSON(c, http.StatusBadRequest, errorResp{Error: "one of name, base, wildcard query param required"})
+		// readiness/health probe: no selector provided
+		writeJSON(c, http.StatusOK, okResp{OK: true})
 		return
 	}
 	if selCount > 1 {
@@ -213,4 +236,56 @@ func (r *Router) handleStatus(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, st)
+}
+
+// Debug endpoints for troubleshooting
+
+type debugProcessInfo struct {
+	Status        process.Status `json:"status"`
+	InternalState string         `json:"internal_state"`
+	HealthCheck   string         `json:"health_check"`
+}
+
+func (r *Router) handleDebugProcesses(c *gin.Context) {
+	// Get all processes with detailed debug information
+	pattern := c.DefaultQuery("pattern", "*")
+
+	statuses, err := r.mgr.StatusAll(pattern)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	debugInfos := make([]debugProcessInfo, len(statuses))
+	for i, status := range statuses {
+		debugInfos[i] = debugProcessInfo{
+			Status:        status,
+			InternalState: status.State, // Already includes state machine state
+			HealthCheck:   getHealthStatus(status),
+		}
+	}
+
+	writeJSON(c, http.StatusOK, debugInfos)
+}
+
+func (r *Router) handleDebugReconcile(c *gin.Context) {
+	// Trigger manual reconciliation
+	r.mgr.ReconcileOnce()
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func getHealthStatus(status process.Status) string {
+	if !status.Running {
+		return "not_running"
+	}
+
+	if status.PID == 0 {
+		return "no_pid"
+	}
+
+	if status.State != "running" {
+		return "transitioning"
+	}
+
+	return "healthy"
 }

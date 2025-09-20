@@ -1,0 +1,32 @@
+# Example daemon configuration for embedded client testing
+env = ["DAEMON_MODE=embedded_example"]
+
+[log]
+level = "info"
+format = "text"
+color = true
+timestamps = true
+source = false
+
+[server]
+enabled = true
+listen = "127.0.0.1:8080"
+base_path = "/api"
+
+[metrics]
+enabled = false
+
+[store]
+enabled = false
+
+[history]
+enabled = false
+
+# Optional: Pre-defined processes that start with the daemon
+[[processes]]
+type = "process"
+[processes.spec]
+name = "example-service"
+command = "echo 'Hello from pre-configured process!'"
+instances = 1
+auto_restart = false

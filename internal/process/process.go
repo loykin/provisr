@@ -41,20 +41,26 @@ func (r *Process) UpdateSpec(s Spec) {
 // It sets workdir, environment, stdio/logging, and process group attributes.
 // Logging writers are prepared and stored via EnsureLogClosers.
 func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
-	cmd := r.spec.BuildCommand()
-	if r.spec.WorkDir != "" {
-		cmd.Dir = r.spec.WorkDir
+	r.mu.Lock()
+	spec := r.spec // Create a copy to avoid holding lock during I/O operations
+	r.mu.Unlock()
+
+	cmd := spec.BuildCommand()
+	if spec.WorkDir != "" {
+		cmd.Dir = spec.WorkDir
 	}
 	if len(mergedEnv) > 0 {
 		cmd.Env = mergedEnv
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Setup logging if configured
-	if r.spec.Log.Dir != "" || r.spec.Log.StdoutPath != "" || r.spec.Log.StderrPath != "" {
-		if r.spec.Log.Dir != "" {
-			_ = os.MkdirAll(r.spec.Log.Dir, 0o750)
+
+	// Setup slog-based logging if configured
+	if spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" {
+		if spec.Log.File.Dir != "" {
+			_ = os.MkdirAll(spec.Log.File.Dir, 0o750)
 		}
-		outW, errW, _ := r.spec.Log.Writers(r.spec.Name)
+		// Use unified config for both structured logging and file writers
+		outW, errW, _ := spec.Log.ProcessWriters(spec.Name)
 		r.EnsureLogClosers(outW, errW)
 		ow, ew := r.OutErrClosers()
 		if ow != nil {
@@ -212,28 +218,31 @@ func (r *Process) CloseWriters() {
 }
 
 func (r *Process) WritePIDFile() {
-	if r.spec.PIDFile == "" {
-		return
-	}
 	r.mu.Lock()
+	pidFile := r.spec.PIDFile
 	pid := 0
 	if r.cmd != nil && r.cmd.Process != nil {
 		pid = r.cmd.Process.Pid
 	}
 	r.mu.Unlock()
-	if pid == 0 {
+
+	if pidFile == "" || pid == 0 {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(r.spec.PIDFile), 0o750)
-	_ = os.WriteFile(r.spec.PIDFile, []byte(strconv.Itoa(pid)), 0o600)
+	_ = os.MkdirAll(filepath.Dir(pidFile), 0o750)
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o600)
 }
 
 // RemovePIDFile best-effort
 func (r *Process) RemovePIDFile() {
-	if r.spec.PIDFile == "" {
+	r.mu.Lock()
+	pidFile := r.spec.PIDFile
+	r.mu.Unlock()
+
+	if pidFile == "" {
 		return
 	}
-	_ = os.Remove(r.spec.PIDFile)
+	_ = os.Remove(pidFile)
 }
 
 // Snapshot returns a copy of the current status.
@@ -247,12 +256,10 @@ func (r *Process) Snapshot() Status {
 // DetectAlive probes liveness avoiding races with os/exec internals.
 func (r *Process) DetectAlive() (bool, string) {
 	r.mu.Lock()
-	running := r.status.Running
 	cmd := r.cmd
 	r.mu.Unlock()
-	if !running {
-		return false, ""
-	}
+
+	// First, try exec:pid detection if we have a command process
 	if cmd != nil && cmd.Process != nil {
 		pid := cmd.Process.Pid
 		// On Linux, a quickly-exiting child can be a zombie; treat that as not alive.
@@ -263,14 +270,15 @@ func (r *Process) DetectAlive() (bool, string) {
 			if syscall.Kill(pid, 0) == nil {
 				return true, "exec:pid"
 			}
-			return false, ""
+		} else {
+			// Non-Linux: use process group signal check as before to handle quick-exit detection.
+			if syscall.Kill(-pid, 0) == nil {
+				return true, "exec:pid"
+			}
 		}
-		// Non-Linux: use process group signal check as before to handle quick-exit detection.
-		if syscall.Kill(-pid, 0) == nil {
-			return true, "exec:pid"
-		}
-		return false, ""
 	}
+
+	// If exec:pid detection fails or no process, try configured detectors
 	for _, d := range r.detectors() {
 		ok, _ := d.Alive()
 		if ok {
@@ -281,6 +289,9 @@ func (r *Process) DetectAlive() (bool, string) {
 }
 
 func (r *Process) detectors() []detector.Detector {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	dets := make([]detector.Detector, 0, len(r.spec.Detectors)+1)
 	if r.spec.PIDFile != "" {
 		dets = append(dets, detector.PIDFileDetector{PIDFile: r.spec.PIDFile})
@@ -292,6 +303,7 @@ func (r *Process) detectors() []detector.Detector {
 // isZombieLinux returns true if /proc/<pid>/status reports a zombie state (Z) on Linux.
 func isZombieLinux(pid int) bool {
 	path := "/proc/" + strconv.Itoa(pid) + "/status"
+	// #nosec 304 procfs path built from pid, safe to read
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return false
