@@ -69,120 +69,94 @@ func (c *command) statusViaAPI(f StatusFlags, apiClient *APIClient) error {
 	return nil
 }
 
-// Start Method-style handlers bound to a command with an embedded manager
-func (c *command) Start(f StartFlags) error {
-	// If API URL is specified, try daemon API
-	if f.APIUrl != "" {
-		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
-		if apiClient.IsReachable() {
-			return c.startViaAPI(f, apiClient)
-		}
-		return fmt.Errorf("daemon not reachable at %s", f.APIUrl)
-	}
-
-	// No API URL specified - use direct manager
-	return c.startViaManager(f)
-}
-
-// startViaManager uses direct manager (fallback mode)
-func (c *command) startViaManager(f StartFlags) error {
-	mgr := c.mgr
+// stopViaAPI stops processes using the daemon API
+func (c *command) stopViaAPI(f StopFlags, apiClient *APIClient) error {
 	if f.ConfigPath != "" {
+		// For config-based stops, we need to load config and stop each spec
 		config, err := provisr.LoadConfig(f.ConfigPath)
 		if err != nil {
 			return err
 		}
 
-		if len(config.GlobalEnv) > 0 {
-			mgr.SetGlobalEnv(config.GlobalEnv)
+		for _, spec := range config.Specs {
+			if err := apiClient.StopProcess(spec.Name, f.Wait); err != nil {
+				return fmt.Errorf("failed to stop %s: %w", spec.Name, err)
+			}
 		}
 
-		if err := startFromSpecs(mgr, config.Specs); err != nil {
+		// Get status and print
+		result, err := apiClient.GetStatus("")
+		if err != nil {
 			return err
 		}
-		printJSON(statusesByBase(mgr, config.Specs))
+		printJSON(result)
 		return nil
 	}
-	// Apply global env from flags when not using config
-	applyGlobalEnvFromFlags(mgr, f.UseOSEnv, f.EnvKVs)
-	sp := provisr.Spec{
-		Name:            f.Name,
-		Command:         f.Cmd,
-		PIDFile:         f.PIDFile,
-		RetryCount:      f.Retries,
-		RetryInterval:   f.RetryInterval,
-		StartDuration:   f.StartDuration,
-		AutoRestart:     f.AutoRestart,
-		RestartInterval: f.RestartInterval,
-		Instances:       f.Instances,
+
+	// Single process stop
+	if err := apiClient.StopProcess(f.Name, f.Wait); err != nil {
+		return err
 	}
-	if f.Instances > 1 {
-		return mgr.StartN(sp)
+
+	// Get status and print
+	result, err := apiClient.GetStatus(f.Name)
+	if err != nil {
+		return err
 	}
-	return mgr.Start(sp)
+	printJSON(result)
+	return nil
+}
+
+// Start Method-style handlers bound to a command with an embedded manager
+func (c *command) Start(f StartFlags) error {
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
+	}
+
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
+	}
+
+	return c.startViaAPI(f, apiClient)
 }
 
 // Status prints status information, optionally loading specs from config for base queries
 func (c *command) Status(f StatusFlags) error {
-	// If API URL is specified, try daemon API
-	if f.APIUrl != "" {
-		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
-		if apiClient.IsReachable() {
-			return c.statusViaAPI(f, apiClient)
-		}
-		return fmt.Errorf("daemon not reachable at %s", f.APIUrl)
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
 	}
 
-	// No API URL specified - use direct manager
-	return c.statusViaManager(f)
-}
-
-// statusViaManager uses direct manager (fallback mode)
-func (c *command) statusViaManager(f StatusFlags) error {
-	mgr := c.mgr
-	if f.ConfigPath != "" {
-		config, err := provisr.LoadConfig(f.ConfigPath)
-		if err != nil {
-			return err
-		}
-		if f.Detailed {
-			printDetailedStatusByBase(mgr, config.Specs)
-		} else {
-			printJSON(statusesByBase(mgr, config.Specs))
-		}
-		return nil
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
 	}
 
-	sts, _ := mgr.StatusAll(f.Name)
-	if f.Detailed {
-		printDetailedStatus(sts)
-	} else {
-		printJSON(sts)
-	}
-	return nil
+	return c.statusViaAPI(f, apiClient)
 }
 
 // Stop stops processes by name/base from flags or config
 func (c *command) Stop(f StopFlags) error {
-	mgr := c.mgr
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
+	}
+
 	if f.Wait <= 0 {
 		f.Wait = 3 * time.Second
 	}
-	if f.ConfigPath != "" {
-		config, err := provisr.LoadConfig(f.ConfigPath)
-		if err != nil {
-			return err
-		}
-		for _, sp := range config.Specs {
-			_ = mgr.StopAll(sp.Name, f.Wait)
-		}
-		printJSON(statusesByBase(mgr, config.Specs))
-		return nil
+
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
 	}
-	_ = mgr.StopAll(f.Name, f.Wait)
-	sts, _ := mgr.StatusAll(f.Name)
-	printJSON(sts)
-	return nil
+
+	return c.stopViaAPI(f, apiClient)
 }
 
 // Cron runs cron scheduler based on config

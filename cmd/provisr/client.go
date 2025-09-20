@@ -100,15 +100,13 @@ func (c *APIClient) GetStatus(name string) (interface{}, error) {
 }
 
 // StopProcess stops a process via API
-func (c *APIClient) StopProcess(name string) error {
-	data, err := json.Marshal(map[string]interface{}{
-		"name": name,
-	})
-	if err != nil {
-		return err
+func (c *APIClient) StopProcess(name string, wait ...time.Duration) error {
+	url := c.baseURL + "/stop?name=" + name
+	if len(wait) > 0 {
+		url += "&wait=" + wait[0].String()
 	}
 
-	resp, err := c.client.Post(c.baseURL+"/stop", "application/json", bytes.NewReader(data))
+	resp, err := c.client.Post(url, "application/json", nil)
 	if err != nil {
 		return err
 	}

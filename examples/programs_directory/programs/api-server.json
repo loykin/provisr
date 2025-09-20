@@ -1,0 +1,19 @@
+{
+  "name": "api-server",
+  "command": "sh -c 'echo \"API Server starting on port 8000...\"; i=1; while true; do echo \"[$(date)] API Server: Processing request #$i\"; i=$((i+1)); sleep 2; done'",
+  "priority": 5,
+  "retry_count": 2,
+  "retry_interval": "2s",
+  "start_duration": "1s",
+  "auto_restart": true,
+  "restart_interval": "3s",
+  "instances": 2,
+  "env": ["API_PORT=8000", "DEBUG=true"],
+  "log": {
+    "dir": "/tmp/provisr-programs-demo/api",
+    "stdout": "api.out.log", 
+    "stderr": "api.err.log",
+    "max_size_mb": 20,
+    "max_backups": 3
+  }
+}

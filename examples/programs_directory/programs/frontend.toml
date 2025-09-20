@@ -1,0 +1,18 @@
+name = "frontend"
+command = "sh -c 'echo \"Frontend starting...\"; i=1; while true; do echo \"[$(date)] Frontend: Serving request #$i\"; i=$((i+1)); sleep 2; done'"
+work_dir = "/tmp"
+priority = 10
+retry_count = 3
+retry_interval = "1s"
+start_duration = "2s" 
+auto_restart = true
+restart_interval = "5s"
+instances = 1
+env = ["NODE_ENV=production", "PORT=3000"]
+
+[log]
+dir = "/tmp/provisr-programs-demo/frontend"
+stdout = "frontend.out.log"
+stderr = "frontend.err.log"
+max_size_mb = 10
+max_backups = 5
