@@ -1,23 +1,26 @@
 {
-  "name": "cache-redis",
-  "command": "sh -c 'echo \"Redis cache starting...\"; i=1; while true; do echo \"[$(date)] CACHE: Processed $i operations\"; i=$((i+1)); sleep 3; done'",
-  "priority": 2,
-  "retry_count": 2,
-  "retry_interval": "1s",
-  "start_duration": "500ms",
-  "auto_restart": true,
-  "restart_interval": "5s",
-  "instances": 1,
-  "env": [
-    "REDIS_PORT=6379",
-    "REDIS_MEMORY=1GB",
-    "REDIS_MODE=standalone"
-  ],
-  "log": {
-    "dir": "/tmp/provisr-programs-demo/redis",
-    "stdout": "/tmp/provisr-programs-demo/redis/redis.out.log",
-    "stderr": "/tmp/provisr-programs-demo/redis/redis.err.log",
-    "max_size_mb": 25,
-    "max_backups": 5
+  "type": "process",
+  "spec": {
+    "name": "cache-redis",
+    "command": "sh -c 'echo \"Redis cache starting...\"; i=1; while true; do echo \"[$(date)] CACHE: Processed $i operations\"; i=$((i+1)); sleep 3; done'",
+    "priority": 2,
+    "retry_count": 2,
+    "retry_interval": "1s",
+    "start_duration": "500ms",
+    "auto_restart": true,
+    "restart_interval": "5s",
+    "instances": 1,
+    "env": [
+      "REDIS_PORT=6379",
+      "REDIS_MEMORY=1GB",
+      "REDIS_MODE=standalone"
+    ],
+    "log": {
+      "dir": "/tmp/provisr-programs-demo/redis",
+      "stdout": "/tmp/provisr-programs-demo/redis/redis.out.log",
+      "stderr": "/tmp/provisr-programs-demo/redis/redis.err.log",
+      "max_size_mb": 25,
+      "max_backups": 5
+    }
   }
 }

@@ -1,3 +1,5 @@
+type = "process"
+[spec]
 name = "test-service"
 command = "bash -c 'while true; do echo \"Test service running...\"; sleep 5; done'"
 priority = 1
@@ -9,7 +11,7 @@ restart_interval = "1s"
 instances = 1
 env = ["SERVICE_NAME=test"]
 
-[log]
+[spec.log]
 dir = "/tmp/provisr-programs-demo/test-service"
 stdout = "/tmp/provisr-programs-demo/test-service/service.out.log"
 stderr = "/tmp/provisr-programs-demo/test-service/service.err.log"

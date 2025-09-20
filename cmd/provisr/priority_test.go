@@ -169,13 +169,17 @@ priority = 10
 	programsDir := filepath.Join(dir, "programs")
 	programFiles := map[string]string{
 		"early.toml": `
-name = "early"
-command = "sleep 2"
-priority = 1`,
+ type = "process"
+ [spec]
+ name = "early"
+ command = "sleep 2"
+ priority = 1`,
 		"late.toml": `
-name = "late"
-command = "sleep 2"
-priority = 20`,
+ type = "process"
+ [spec]
+ name = "late"
+ command = "sleep 2"
+ priority = 20`,
 	}
 	createProgramFiles(t, programsDir, programFiles)
 

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	mapstructure "github.com/go-viper/mapstructure/v2"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
 	cronpkg "github.com/loykin/provisr/internal/cron"
@@ -101,6 +101,47 @@ func decodeTo[T any](m map[string]any) (T, error) {
 	return out, nil
 }
 
+// decodeProcessEntry decodes and validates a ProcessConfig entry (process or cronjob).
+// ctx is used to improve error messages with the source (e.g., filename or "inline processes").
+func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.Job, error) {
+	var zero process.Spec
+	typ := strings.ToLower(strings.TrimSpace(pc.Type))
+	switch typ {
+	case "", "process":
+		sp, err := decodeTo[process.Spec](pc.Spec)
+		if err != nil {
+			return zero, nil, fmt.Errorf("decode process spec in %s: %w", ctx, err)
+		}
+		if strings.TrimSpace(sp.Name) == "" {
+			return zero, nil, fmt.Errorf("%s: process requires name", ctx)
+		}
+		if strings.TrimSpace(sp.Command) == "" {
+			return zero, nil, fmt.Errorf("%s: process %q requires command", ctx, sp.Name)
+		}
+		return sp, nil, nil
+	case "cron", "cronjob":
+		jb, err := decodeTo[cronpkg.Job](pc.Spec)
+		if err != nil {
+			return zero, nil, fmt.Errorf("decode cronjob spec in %s: %w", ctx, err)
+		}
+		if strings.TrimSpace(jb.Name) == "" {
+			jb.Name = strings.TrimSpace(jb.Spec.Name)
+		}
+		if strings.TrimSpace(jb.Name) == "" {
+			return zero, nil, fmt.Errorf("%s: cronjob requires name", ctx)
+		}
+		if strings.TrimSpace(jb.Spec.Command) == "" {
+			return zero, nil, fmt.Errorf("%s: cronjob %q requires command", ctx, jb.Name)
+		}
+		if strings.TrimSpace(jb.Schedule) == "" {
+			return zero, nil, fmt.Errorf("%s: cronjob %q requires schedule", ctx, jb.Name)
+		}
+		return jb.Spec, &jb, nil
+	default:
+		return zero, nil, fmt.Errorf("%s: unknown process type %q (allowed: process, cronjob)", ctx, pc.Type)
+	}
+}
+
 func LoadConfig(configPath string) (*Config, error) {
 	config := &Config{configPath: configPath}
 
@@ -112,50 +153,22 @@ func LoadConfig(configPath string) (*Config, error) {
 	config.Specs = make([]process.Spec, 0)
 	config.CronJobs = []*cronpkg.Job{}
 
-	// 1) Inline processes: discriminated union decoding
+	// 1) Inline processes: discriminated union decoding (refactored)
 	for _, pc := range config.Processes {
-		switch strings.ToLower(strings.TrimSpace(pc.Type)) {
-		case "", "process":
-			// default to process if type is empty
-			spec, err := decodeTo[process.Spec](pc.Spec)
-			if err != nil {
-				return nil, fmt.Errorf("decode process spec: %w", err)
-			}
-			if strings.TrimSpace(spec.Name) == "" {
-				return nil, fmt.Errorf("process requires name")
-			}
-			if strings.TrimSpace(spec.Command) == "" {
-				return nil, fmt.Errorf("process %q requires command", spec.Name)
-			}
-			if err := convertDetectorConfigs(&spec); err != nil {
-				return nil, fmt.Errorf("failed to convert detectors for process %s: %w", spec.Name, err)
-			}
-			config.Specs = append(config.Specs, spec)
-		case "cron", "cronjob":
-			job, err := decodeTo[cronpkg.Job](pc.Spec)
-			if err != nil {
-				return nil, fmt.Errorf("decode cronjob spec: %w", err)
-			}
-			// Allow job.Name to be omitted if Spec.Name is present
-			if strings.TrimSpace(job.Name) == "" {
-				job.Name = strings.TrimSpace(job.Spec.Name)
-			}
-			if strings.TrimSpace(job.Name) == "" {
-				return nil, fmt.Errorf("cronjob requires name")
-			}
-			if strings.TrimSpace(job.Spec.Command) == "" {
-				return nil, fmt.Errorf("cronjob %q requires command", job.Name)
-			}
-			if strings.TrimSpace(job.Schedule) == "" {
-				return nil, fmt.Errorf("cronjob %q requires schedule", job.Name)
-			}
+		spec, job, err := decodeProcessEntry(pc, "inline processes")
+		if err != nil {
+			return nil, err
+		}
+		// convert detectors after decode
+		if err := convertDetectorConfigs(&spec); err != nil {
+			return nil, fmt.Errorf("failed to convert detectors for process %s: %w", spec.Name, err)
+		}
+		config.Specs = append(config.Specs, spec)
+		if job != nil {
 			if err := convertDetectorConfigs(&job.Spec); err != nil {
 				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", job.Name, err)
 			}
-			config.Specs = append(config.Specs, job.Spec)
-			config.CronJobs = append(config.CronJobs, &job)
-		default:
-			return nil, fmt.Errorf("unknown process type %q (allowed: process, cronjob)", pc.Type)
+			config.CronJobs = append(config.CronJobs, job)
 		}
 	}
 
@@ -172,16 +185,22 @@ func LoadConfig(configPath string) (*Config, error) {
 		programsDir = filepath.Join(filepath.Dir(configPath), "programs")
 	}
 
-	if specs, err := loadProgramSpecs(programsDir); err != nil {
+	if specs, jobs, err := loadProgramEntries(programsDir); err != nil {
 		return nil, fmt.Errorf("failed to load programs from %s: %w", programsDir, err)
-	} else if len(specs) > 0 {
+	} else {
 		// convert detectors per program spec for consistency
 		for i := range specs {
 			if err := convertDetectorConfigs(&specs[i]); err != nil {
 				return nil, fmt.Errorf("failed to convert detectors for program %s: %w", specs[i].Name, err)
 			}
 		}
+		for _, j := range jobs {
+			if err := convertDetectorConfigs(&j.Spec); err != nil {
+				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", j.Name, err)
+			}
+		}
 		config.Specs = append(config.Specs, specs...)
+		config.CronJobs = append(config.CronJobs, jobs...)
 	}
 
 	// Compute Global Env after merging
@@ -216,15 +235,16 @@ func parseConfigFile(configPath string, out interface{}) error {
 	return nil
 }
 
-// loadProgramSpecs loads process.Spec files from a directory named "programs" next to the
-// main configuration file. It supports toml, yaml/yml, and json formats via viper.
-func loadProgramSpecs(programsDir string) ([]process.Spec, error) {
+// loadProgramEntries loads program entries from the programs directory using the same
+// discriminated-union format as inline [[processes]] blocks: {type, spec}.
+// Supported file extensions: toml, yaml/yml, json. No legacy plain process.Spec files supported.
+func loadProgramEntries(programsDir string) ([]process.Spec, []*cronpkg.Job, error) {
 	infos, err := os.ReadDir(programsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Supported file extensions
@@ -235,6 +255,7 @@ func loadProgramSpecs(programsDir string) ([]process.Spec, error) {
 	}
 
 	var specs []process.Spec
+	var jobs []*cronpkg.Job
 	for _, de := range infos {
 		if de.IsDir() {
 			continue
@@ -252,21 +273,24 @@ func loadProgramSpecs(programsDir string) ([]process.Spec, error) {
 		v := viper.New()
 		v.SetConfigFile(full)
 		if err := v.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("read %s: %w", full, err)
+			return nil, nil, fmt.Errorf("read %s: %w", full, err)
 		}
-		var s process.Spec
-		if err := v.Unmarshal(&s); err != nil {
-			return nil, fmt.Errorf("unmarshal %s: %w", full, err)
+
+		var pc ProcessConfig
+		if err := v.Unmarshal(&pc); err != nil {
+			return nil, nil, fmt.Errorf("unmarshal %s: %w", full, err)
 		}
-		if strings.TrimSpace(s.Name) == "" {
-			return nil, fmt.Errorf("program file %s missing required 'name'", full)
+
+		sp, jb, err := decodeProcessEntry(pc, full)
+		if err != nil {
+			return nil, nil, err
 		}
-		if strings.TrimSpace(s.Command) == "" {
-			return nil, fmt.Errorf("program file %s missing required 'command'", full)
+		specs = append(specs, sp)
+		if jb != nil {
+			jobs = append(jobs, jb)
 		}
-		specs = append(specs, s)
 	}
-	return specs, nil
+	return specs, jobs, nil
 }
 
 func computeGlobalEnv(useOSEnv bool, envFiles []string, env []string) ([]string, error) {

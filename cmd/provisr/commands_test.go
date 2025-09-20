@@ -162,16 +162,20 @@ func TestCmdStartAndGroupStatusStop_WithConfig(t *testing.T) {
 		t.Fatalf("create programs dir: %v", err)
 	}
 
-	// Write individual program files
+	// Write individual program files in unified format (type/spec)
 	writeTOML(t, programsDir, "g1-a.toml", `
-name = "g1-a"
-command = "sleep 1"
-startsecs = "50ms"
+ type = "process"
+ [spec]
+ name = "g1-a"
+ command = "sleep 1"
+ startsecs = "50ms"
 `)
 	writeTOML(t, programsDir, "g1-b.toml", `
-name = "g1-b"
-command = "sleep 1"
-startsecs = "50ms"
+ type = "process"
+ [spec]
+ name = "g1-b"
+ command = "sleep 1"
+ startsecs = "50ms"
 `)
 
 	// Main config with programs_directory and groups
