@@ -373,7 +373,7 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 	}
 
 	// Wait for process to die
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// Test DetectAlive multiple times to ensure consistency
 	mp.mu.RLock()
@@ -441,7 +441,7 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	t.Logf("Killed process PID %d", initialPID)
 
 	// Wait and verify NO restart occurs
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	finalStatus := mp.Status()
 	t.Logf("Final state: PID=%d, Running=%v, Restarts=%d",
