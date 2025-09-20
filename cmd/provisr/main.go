@@ -33,7 +33,7 @@ type ProcessFlags struct {
 	Name            string
 	CmdStr          string
 	PIDFile         string
-	Retries         int
+	Retries         uint32
 	RetryInterval   time.Duration
 	AutoRestart     bool
 	RestartInterval time.Duration
@@ -133,7 +133,7 @@ Examples:
 	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name")
 	cmd.Flags().StringVar(&processFlags.CmdStr, "cmd", "sleep 60", "command to execute")
 	cmd.Flags().StringVar(&processFlags.PIDFile, "pidfile", "", "pidfile path (optional)")
-	cmd.Flags().IntVar(&processFlags.Retries, "retries", 0, "retry attempts on failure")
+	cmd.Flags().Uint32Var(&processFlags.Retries, "retries", 0, "retry attempts on failure")
 	cmd.Flags().DurationVar(&processFlags.RetryInterval, "retry-interval", 500*time.Millisecond, "retry delay")
 	cmd.Flags().BoolVar(&processFlags.AutoRestart, "autorestart", false, "auto-restart on exit")
 	cmd.Flags().DurationVar(&processFlags.RestartInterval, "restart-interval", time.Second, "restart delay")

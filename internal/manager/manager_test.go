@@ -9,6 +9,8 @@ import (
 	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/process"
 	"github.com/loykin/provisr/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MockStore implements store.Store interface for testing
@@ -307,32 +309,6 @@ func TestManagerPatternMatching(t *testing.T) {
 	}
 }
 
-func TestManagerReconciler(t *testing.T) {
-	mgr := NewManager()
-	defer func() { _ = mgr.Shutdown() }()
-
-	// Test starting reconciler
-	mgr.StartReconciler(50 * time.Millisecond)
-
-	// Let it run for a bit
-	time.Sleep(150 * time.Millisecond)
-
-	// Test stopping reconciler
-	mgr.StopReconciler()
-
-	// Test double start (should be safe)
-	mgr.StartReconciler(100 * time.Millisecond)
-	mgr.StartReconciler(100 * time.Millisecond) // Second call should be no-op
-
-	// Test manual reconciliation
-	mgr.ReconcileOnce()
-
-	mgr.StopReconciler()
-
-	// Test double stop (should be safe)
-	mgr.StopReconciler()
-}
-
 func TestManagerShutdown(t *testing.T) {
 	mgr := NewManager()
 
@@ -344,9 +320,6 @@ func TestManagerShutdown(t *testing.T) {
 		}
 		_ = mgr.Start(spec)
 	}
-
-	// Start reconciler
-	mgr.StartReconciler(100 * time.Millisecond)
 
 	// Test shutdown
 	err := mgr.Shutdown()
@@ -436,5 +409,112 @@ func TestManagerWithMockStore(t *testing.T) {
 	// Verify store interactions (this is limited since recordStart/recordStop are stubs)
 	if len(mockStore.calls) == 0 {
 		t.Log("Note: Store calls may be empty due to stub implementations")
+	}
+}
+
+// TestManagerMultiProcessAutoRestart tests Manager handling multiple processes with auto-restart
+func TestManagerMultiProcessAutoRestart(t *testing.T) {
+	manager := NewManager()
+	defer func() { _ = manager.Shutdown() }()
+
+	// Test multiple processes with auto-restart enabled
+	processes := []struct {
+		name        string
+		autoRestart bool
+	}{
+		{"test-manager-proc1", true},
+		{"test-manager-proc2", true},
+		{"test-manager-proc3", false}, // This one should NOT restart
+	}
+
+	t.Log("Phase 1: Starting multiple processes")
+
+	// Start all processes
+	for _, p := range processes {
+		spec := process.Spec{
+			Name:        p.name,
+			Command:     "sleep 300",
+			AutoRestart: p.autoRestart,
+		}
+
+		err := manager.Start(spec)
+		require.NoError(t, err, "Failed to start process %s", p.name)
+
+		// Wait for process to be ready
+		time.Sleep(100 * time.Millisecond)
+
+		status, err := manager.Status(p.name)
+		require.NoError(t, err)
+		require.True(t, status.Running, "Process %s should be running", p.name)
+		require.Greater(t, status.PID, 0, "Process %s should have valid PID", p.name)
+
+		t.Logf("✓ Started process %s (PID: %d, AutoRestart: %t)", p.name, status.PID, p.autoRestart)
+	}
+
+	// Collect initial PIDs and restart counts
+	initialStates := make(map[string]struct {
+		pid      int
+		restarts uint32
+	})
+
+	for _, p := range processes {
+		status, err := manager.Status(p.name)
+		require.NoError(t, err)
+		initialStates[p.name] = struct {
+			pid      int
+			restarts uint32
+		}{
+			pid:      status.PID,
+			restarts: status.Restarts,
+		}
+	}
+
+	t.Log("Phase 2: Killing processes to trigger auto-restart")
+
+	// Kill all processes
+	for _, p := range processes {
+		initialState := initialStates[p.name]
+		err := killProcessByPID(initialState.pid)
+		require.NoError(t, err, "Failed to kill process %s (PID: %d)", p.name, initialState.pid)
+		t.Logf("✓ Killed process %s (PID: %d)", p.name, initialState.pid)
+	}
+
+	t.Log("Phase 3: Waiting for Manager reconciliation and auto-restart")
+
+	// Wait for reconciliation to detect deaths and restart
+	time.Sleep(2 * time.Second)
+
+	t.Log("Phase 4: Verifying auto-restart results")
+
+	// Check results for each process
+	for _, p := range processes {
+		initialState := initialStates[p.name]
+		status, err := manager.Status(p.name)
+		require.NoError(t, err)
+
+		if p.autoRestart {
+			// Should be restarted
+			assert.True(t, status.Running, "Process %s with auto-restart should be running", p.name)
+			assert.NotEqual(t, initialState.pid, status.PID, "Process %s should have new PID after restart", p.name)
+			assert.Greater(t, status.Restarts, initialState.restarts, "Process %s should have incremented restart count", p.name)
+			t.Logf("✓ Auto-restart successful: %s PID %d → %d, Restarts %d → %d",
+				p.name, initialState.pid, status.PID, initialState.restarts, status.Restarts)
+		} else {
+			// Should stay dead
+			assert.False(t, status.Running, "Process %s without auto-restart should stay dead", p.name)
+			assert.Equal(t, initialState.pid, status.PID, "Process %s should keep same PID when dead", p.name)
+			assert.Equal(t, initialState.restarts, status.Restarts, "Process %s should not increment restart count", p.name)
+			t.Logf("✓ Correctly stayed dead: %s (AutoRestart: false)", p.name)
+		}
+	}
+
+	// Verify all processes with auto-restart are healthy
+	for _, p := range processes {
+		if p.autoRestart {
+			status, err := manager.Status(p.name)
+			require.NoError(t, err)
+			require.True(t, status.Running, "Restarted process %s should be healthy", p.name)
+			t.Logf("✓ Restarted process %s is healthy", p.name)
+		}
 	}
 }

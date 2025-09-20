@@ -216,31 +216,6 @@ func TestProcessRecoveryAndMonitoring(t *testing.T) {
 	})
 }
 
-// TestReconcilerFunctionality tests the reconciler for process monitoring
-func TestReconcilerFunctionality(t *testing.T) {
-	mgr := NewManager()
-	defer func() { _ = mgr.Shutdown() }()
-
-	t.Run("ReconcilerStartStop", func(t *testing.T) {
-		// Start reconciler
-		mgr.StartReconciler(100 * time.Millisecond)
-
-		// Let it run for a bit
-		time.Sleep(300 * time.Millisecond)
-
-		// Stop reconciler
-		mgr.StopReconciler()
-
-		t.Log("Reconciler start/stop cycle completed successfully")
-	})
-
-	t.Run("ReconcileOnce", func(t *testing.T) {
-		// Test manual reconciliation
-		mgr.ReconcileOnce()
-		t.Log("Manual reconciliation completed")
-	})
-}
-
 // BenchmarkConcurrentOperations benchmarks concurrent process operations
 func BenchmarkConcurrentOperations(b *testing.B) {
 	mgr := NewManager()

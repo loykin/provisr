@@ -3,7 +3,6 @@ package manager
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/loykin/provisr/internal/metrics"
@@ -20,21 +19,23 @@ import (
 // State Machine:
 // Stopped -> Starting -> Running -> Stopping -> Stopped
 type ManagedProcess struct {
-	// Immutable after creation
-	name string
+	//// Immutable after creation
+	//name string
 
 	// State lock (minimal scope, clearly defined)
 	mu    sync.RWMutex
 	state processState
-	spec  process.Spec
-	proc  *process.Process
+	//spec        process.Spec
+	proc *process.Process
+	//autoRestart bool
+	restarts uint32
 
 	// Control channels (lock-free communication)
 	cmdChan  chan command
 	doneChan chan struct{}
 
-	// Atomic counters (lock-free metrics)
-	restarts int64
+	// Throttle restarts respecting spec.RestartInterval
+	lastRestartAt time.Time
 
 	// Callbacks (injected dependencies)
 	envMerger   func(process.Spec) []string
@@ -90,9 +91,9 @@ func NewManagedProcess(
 	stopLogger func(*process.Process, error),
 ) *ManagedProcess {
 	up := &ManagedProcess{
-		name:        spec.Name,
-		state:       StateStopped,
-		spec:        spec,
+		state: StateStopped,
+		//spec:        spec,
+		//autoRestart: spec.AutoRestart,
 		proc:        process.New(spec),
 		cmdChan:     make(chan command, 16), // Buffered to prevent blocking
 		doneChan:    make(chan struct{}),
@@ -132,15 +133,18 @@ func (up *ManagedProcess) Stop(wait time.Duration) error {
 // Status returns current status (lock-minimal)
 func (up *ManagedProcess) Status() process.Status {
 	up.mu.RLock()
+	//name := up.name
+	restarts := up.restarts
 	state := up.state
 	proc := up.proc
+	spec := proc.GetSpec()
 	up.mu.RUnlock()
 
 	if proc == nil {
 		return process.Status{
-			Name:     up.name,
-			Running:  false,
-			Restarts: int(atomic.LoadInt64(&up.restarts)),
+			//Name:    up.name,
+			//Running: false,
+			//Restarts: 0up.spec.RetryCount,
 		}
 	}
 
@@ -149,10 +153,10 @@ func (up *ManagedProcess) Status() process.Status {
 	alive, detectedBy := proc.DetectAlive()
 
 	// Ensure name and state are properly set
-	status.Name = up.name
+	status.Name = spec.Name
 	status.Running = alive && state == StateRunning
 	status.DetectedBy = detectedBy
-	status.Restarts = int(atomic.LoadInt64(&up.restarts))
+	status.Restarts = restarts
 	status.State = state.String() // Add state machine state
 
 	return status
@@ -182,11 +186,6 @@ func (up *ManagedProcess) Shutdown() error {
 	}
 }
 
-// Reconcile performs health check and cleanup for this process
-func (up *ManagedProcess) Reconcile() {
-	up.checkProcessHealth()
-}
-
 // runStateMachine is the core state machine (single goroutine, no races)
 func (up *ManagedProcess) runStateMachine() {
 	defer close(up.doneChan)
@@ -201,6 +200,37 @@ func (up *ManagedProcess) runStateMachine() {
 
 		case <-ticker.C:
 			up.checkProcessHealth()
+
+			// Auto-restart when process is stopped and autoRestart is enabled
+			if up.proc != nil && up.proc.GetAutoStart() {
+				up.mu.RLock()
+				currentState := up.state
+				proc := up.proc
+				//spec := up.spec
+				spec := proc.GetSpec()
+				last := up.lastRestartAt
+				up.mu.RUnlock()
+
+				if currentState == StateStopped && proc != nil && !proc.StopRequested() {
+					alive, _ := proc.DetectAlive()
+					if !alive {
+						// Respect restart interval from spec (default small delay)
+						interval := spec.RestartInterval
+						if interval <= 0 {
+							interval = 300 * time.Millisecond
+						}
+						if time.Since(last) >= interval {
+							// Attempt restart with last known spec
+							if err := up.doStart(*spec); err == nil {
+								up.mu.Lock()
+								up.lastRestartAt = time.Now()
+								up.restarts++
+								up.mu.Unlock()
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -233,7 +263,9 @@ func (up *ManagedProcess) handleCommand(cmd command) {
 func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 	up.mu.Lock()
 	currentState := up.state
-	name := up.name // capture name while under lock
+	proc := up.proc
+	spec := proc.GetSpec()
+	name := spec.Name
 	up.mu.Unlock()
 
 	switch currentState {
@@ -268,7 +300,7 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 
 	// Update spec and process
 	up.mu.Lock()
-	up.spec = newSpec
+	//up.spec = newSpec
 	up.proc.UpdateSpec(newSpec)
 	up.mu.Unlock()
 
@@ -295,7 +327,7 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 	up.setState(StateRunning)
 
 	// Record metrics and history (lock-free)
-	metrics.IncStart(up.name)
+	metrics.IncStart(newSpec.Name)
 	if up.startLogger != nil {
 		up.startLogger(up.proc)
 	}
@@ -341,7 +373,7 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 	up.setState(StateStopped)
 
 	// Record metrics
-	metrics.IncStop(up.name)
+	metrics.IncStop(up.proc.GetName())
 	if up.stopLogger != nil {
 		up.stopLogger(up.proc, nil)
 	}
@@ -352,7 +384,6 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 // handleUpdateSpec updates the process specification
 func (up *ManagedProcess) handleUpdateSpec(newSpec process.Spec) error {
 	up.mu.Lock()
-	up.spec = newSpec
 	up.proc.UpdateSpec(newSpec)
 	up.mu.Unlock()
 
@@ -377,7 +408,6 @@ func (up *ManagedProcess) handleShutdown() error {
 	return nil
 }
 
-// isExpectedShutdownError checks if the error is expected during shutdown
 func isExpectedShutdownError(err error) bool {
 	if err == nil {
 		return false
@@ -404,7 +434,7 @@ func (up *ManagedProcess) setState(newState processState) {
 	oldStateStr := oldState.String() // capture string representation while under lock
 	up.state = newState
 	newStateStr := newState.String() // capture string representation while under lock
-	name := up.name                  // capture name while under lock
+	name := up.proc.GetName()        // capture name while under lock
 	up.mu.Unlock()
 
 	// Record state transition metrics (outside lock to avoid holding lock too long)
@@ -416,13 +446,10 @@ func (up *ManagedProcess) setState(newState processState) {
 }
 
 // checkProcessHealth monitors process health and transitions state.
-// IMPORTANT: Restart responsibility belongs solely to Manager's reconciler.
-// This method must not perform restarts to avoid duplicate/competing logic.
 func (up *ManagedProcess) checkProcessHealth() {
 	up.mu.RLock()
 	currentState := up.state
 	up.mu.RUnlock()
-
 	if currentState != StateRunning {
 		return
 	}
@@ -469,18 +496,5 @@ func (up *ManagedProcess) monitorProcessExit() {
 		if up.stopLogger != nil {
 			up.stopLogger(up.proc, err)
 		}
-
-		// Note: Do NOT auto-restart here - let checkProcessHealth() handle it
-		// This prevents duplicate restarts between monitorProcessExit and checkProcessHealth
 	}
-}
-
-// RestartCount returns the current restart count
-func (mp *ManagedProcess) RestartCount() int64 {
-	return atomic.LoadInt64(&mp.restarts)
-}
-
-// IncrementRestarts increments the restart counter
-func (mp *ManagedProcess) IncrementRestarts() {
-	atomic.AddInt64(&mp.restarts, 1)
 }

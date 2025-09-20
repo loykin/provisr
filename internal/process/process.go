@@ -21,7 +21,6 @@ type Process struct {
 	status     Status
 	mu         sync.Mutex
 	stopping   bool // true when Stop has been requested; suppress autorestart
-	restarts   int
 	outCloser  io.WriteCloser
 	errCloser  io.WriteCloser
 	waitDone   chan struct{} // closed by monitor when cmd.Wait returns
@@ -102,7 +101,6 @@ func (r *Process) SetStarted(cmd *exec.Cmd) {
 	r.status.Running = true
 	r.status.PID = cmd.Process.Pid
 	r.status.StartedAt = time.Now()
-	r.status.Restarts = r.restarts
 	r.stopping = false
 
 	// Store PID for race-free detection
@@ -153,6 +151,12 @@ func (r *Process) MarkExited(err error) {
 	r.mu.Unlock()
 }
 
+func (r *Process) GetName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.spec.Name
+}
+
 func (r *Process) SetStopRequested(v bool) {
 	r.mu.Lock()
 	r.stopping = v
@@ -162,14 +166,6 @@ func (r *Process) SetStopRequested(v bool) {
 func (r *Process) StopRequested() bool {
 	r.mu.Lock()
 	v := r.stopping
-	r.mu.Unlock()
-	return v
-}
-
-func (r *Process) IncRestarts() int {
-	r.mu.Lock()
-	r.restarts++
-	v := r.restarts
 	r.mu.Unlock()
 	return v
 }
@@ -265,6 +261,20 @@ func (r *Process) Snapshot() Status {
 	s := r.status
 	r.mu.Unlock()
 	return s
+}
+
+func (r *Process) GetSpec() *Spec {
+	r.mu.Lock()
+	s := r.spec.DeepCopy()
+	r.mu.Unlock()
+	return s
+}
+
+func (r *Process) GetAutoStart() bool {
+	r.mu.Lock()
+	v := r.spec.AutoRestart
+	r.mu.Unlock()
+	return v
 }
 
 // DetectAlive probes liveness without accessing cmd to avoid races.

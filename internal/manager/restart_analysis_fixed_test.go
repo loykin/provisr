@@ -16,8 +16,7 @@ func TestManagerRestartOnly(t *testing.T) {
 
 	// Create manager
 	manager := NewManager()
-	defer manager.Shutdown()
-	manager.StartReconciler(100 * time.Millisecond)
+	defer func() { _ = manager.Shutdown() }()
 	t.Log("✓ Manager reconciler started")
 
 	// Test process spec with a command that exists on macOS
