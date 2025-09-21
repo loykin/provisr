@@ -23,7 +23,7 @@ base_path = "/api"
 # Enable persistent store so provisr can recover/reattach across restarts
 enabled = true
 # Use a local SQLite database file (created automatically)
-dsn = "sqlite:////tmp/provisr-detach-demo.db"
+dsn = "sqlite://./provisr-detach-demo.db"
 
 [metrics]
 enabled = false
