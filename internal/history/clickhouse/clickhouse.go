@@ -55,11 +55,6 @@ func (s *Sink) Send(ctx context.Context, e history.Event) error {
 		e.OccurredAt,
 		e.Record.Name,
 		e.Record.PID,
-		e.Record.StartedAt,
-		e.Record.StoppedAt,
-		e.Record.Running,
-		e.Record.ExitErr,
-		e.Record.Uniq,
 	)
 
 	if err != nil {
