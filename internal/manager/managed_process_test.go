@@ -206,7 +206,7 @@ func TestManagedProcessConcurrentOperations(t *testing.T) {
 func TestManagedProcessShutdown(t *testing.T) {
 	spec := process.Spec{
 		Name:    "shutdown-test",
-		Command: "sleep 0.2",
+		Command: "sleep 10",
 	}
 
 	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)

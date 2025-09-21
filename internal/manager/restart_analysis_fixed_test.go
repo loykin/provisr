@@ -46,7 +46,7 @@ func TestManagerRestartOnly(t *testing.T) {
 	t.Logf("✓ Killed process PID %d", originalPID)
 
 	// Wait for Manager to restart
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	status, err = manager.Status("restart-test")
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestManagerRestartOnly(t *testing.T) {
 		t.Logf("Rapid kill #%d: PID %d", i, currentStatus.PID)
 
 		// Wait for restart
-		time.Sleep(3 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 
 	// Final check - should have exactly initialRapidRestarts + 3

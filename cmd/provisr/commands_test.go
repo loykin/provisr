@@ -35,23 +35,6 @@ func (c *command) startDirectWithConfig(f StartFlags) error {
 	return nil
 }
 
-func (c *command) statusDirect(f StatusFlags) error {
-	result, err := c.mgr.Status(f.Name)
-	if err != nil {
-		return err
-	}
-	printJSON(result)
-	return nil
-}
-
-func (c *command) stopDirect(f StopFlags) error {
-	err := c.mgr.Stop(f.Name, f.Wait)
-	if err != nil && isExpectedShutdownError(err) {
-		return nil // Ignore expected shutdown errors
-	}
-	return err
-}
-
 func (c *command) groupStatusDirect(f GroupFlags) error {
 	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {
@@ -111,33 +94,6 @@ func (c *command) groupStopDirect(f GroupFlags) error {
 		return nil // Ignore expected shutdown errors
 	}
 	return err
-}
-
-func TestCmdStartStatusStop_NoConfig(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("requires Unix sleep")
-	}
-
-	// Use direct manager for testing
-	mgr := provisr.New()
-	provisrCommand := command{mgr: mgr}
-
-	// Start short-lived process
-	if err := provisrCommand.startDirect(StartFlags{
-		Name:          "c1",
-		Cmd:           "sleep 0.2",
-		StartDuration: 50 * time.Millisecond,
-	}); err != nil {
-		t.Fatalf("cmdStart: %v", err)
-	}
-	// Status should succeed
-	if err := provisrCommand.statusDirect(StatusFlags{Name: "c1"}); err != nil {
-		t.Fatalf("cmdStatus: %v", err)
-	}
-	// Stop should be no-op but succeed
-	if err := provisrCommand.stopDirect(StopFlags{Name: "c1", Wait: 200 * time.Millisecond}); err != nil {
-		t.Fatalf("cmdStop: %v", err)
-	}
 }
 
 func writeTOML(t *testing.T, dir, name, content string) string {

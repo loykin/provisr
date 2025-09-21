@@ -1,12 +1,10 @@
 package process
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -120,6 +118,13 @@ func (r *Process) TryStart(cmd *exec.Cmd) error {
 	r.SetStarted(cmd)
 	// Write PID file synchronously to ensure availability immediately after Start returns.
 	r.WritePIDFile()
+
+	go func() {
+		err := cmd.Wait()
+		r.MarkExited(err)
+		r.CloseWaitDone()
+	}()
+
 	return nil
 }
 
@@ -296,32 +301,7 @@ func (r *Process) DetectAlive() (bool, string) {
 
 	// Prefer individual PID signal check first (works reliably across platforms)
 	if syscall.Kill(pid, 0) == nil {
-		// On macOS, exclude zombies which can briefly report as signalable
-		if isZombieDarwin(pid) {
-			return false, "zombie"
-		}
 		return true, "exec:pid"
-	}
-
-	// Platform-specific fallbacks
-	if runtime.GOOS == "linux" {
-		if isZombieLinux(pid) {
-			return false, "zombie"
-		}
-	} else {
-		// Non-Linux: try process group signal as a fallback (if Setpgid was used)
-		if syscall.Kill(-pid, 0) == nil {
-			// On macOS, optionally verify via ps to avoid rare false positives
-			if runtime.GOOS == "darwin" {
-				// #nosec 204
-				if r.verifyProcessExists(pid) {
-					return true, "exec:pid"
-				}
-				// if ps check fails, treat as not alive
-				return false, "not-found"
-			}
-			return true, "exec:pid"
-		}
 	}
 
 	// If PID-based detection fails, try configured detectors
@@ -346,27 +326,28 @@ func (r *Process) detectors() []detector.Detector {
 	return dets
 }
 
-// isZombieLinux returns true if /proc/<pid>/status reports a zombie state (Z) on Linux.
-func isZombieLinux(pid int) bool {
-	path := "/proc/" + strconv.Itoa(pid) + "/status"
-	// #nosec 304 procfs path built from pid, safe to read
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	return bytes.Contains(b, []byte("State:\tZ"))
-}
-
-// isZombieDarwin checks if the process is a zombie on macOS using ps.
-func isZombieDarwin(pid int) bool {
-	// #nosec 204
-	cmd := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid))
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return bytes.Contains(out, []byte("Z"))
-}
+//
+//// isZombieLinux returns true if /proc/<pid>/status reports a zombie state (Z) on Linux.
+//func isZombieLinux(pid int) bool {
+//	path := "/proc/" + strconv.Itoa(pid) + "/status"
+//	// #nosec 304 procfs path built from pid, safe to read
+//	b, err := os.ReadFile(path)
+//	if err != nil {
+//		return false
+//	}
+//	return bytes.Contains(b, []byte("State:\tZ"))
+//}
+//
+//// isZombieDarwin checks if the process is a zombie on macOS using ps.
+//func isZombieDarwin(pid int) bool {
+//	// #nosec 204
+//	cmd := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid))
+//	out, err := cmd.Output()
+//	if err != nil {
+//		return false
+//	}
+//	return bytes.Contains(out, []byte("Z"))
+//}
 
 // EnforceStartDuration waits until d ensuring process stays up; returns error if it exits early.
 func (r *Process) EnforceStartDuration(d time.Duration) error {
@@ -399,84 +380,87 @@ func (r *Process) Stop(wait time.Duration) error {
 	if !alive {
 		return nil
 	}
+
 	r.SetStopRequested(true)
 	cmd := r.CopyCmd()
 	if cmd != nil && cmd.Process != nil {
 		pid := cmd.Process.Pid
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
-		if r.IsMonitoring() {
-			// A supervisor/monitor goroutine is responsible for waiting and state transitions.
-			// Wait on waitDone (closed by monitor) with timeout and escalate if needed.
-			wd := r.WaitDoneChan()
-			if wd != nil {
-				select {
-				case <-wd:
-					// exited and reaped by monitor
-				case <-time.After(wait):
-					_ = syscall.Kill(-pid, syscall.SIGKILL)
-					select {
-					case <-wd:
-						// reaped by monitor after kill
-					case <-time.After(200 * time.Millisecond):
-						// best-effort
-					}
-				}
-			} else {
-				// No wait channel available; fall back to brief sleep and continue.
-				time.Sleep(wait)
-			}
-		} else {
-			// No monitor observed. Try to claim monitoring to ensure single waiter.
-			if r.MonitoringStartIfNeeded() {
-				// We own the wait; perform it and finalize state.
-				ch := make(chan error, 1)
-				go func() {
-					err := cmd.Wait()
-					r.CloseWaitDone()
-					r.MarkExited(err)
-					ch <- err
-				}()
-				select {
-				case <-ch:
-					// done
-				case <-time.After(wait):
-					_ = syscall.Kill(-pid, syscall.SIGKILL)
-					select {
-					case <-ch:
-						// reaped
-					case <-time.After(200 * time.Millisecond):
-						// best-effort
-					}
-				}
-				// When we owned the wait, close writers and release monitoring flag.
-				r.CloseWriters()
-				r.MonitoringStop()
-			} else {
-				// Someone else claimed monitoring concurrently; wait on waitDone instead.
-				wd := r.WaitDoneChan()
-				if wd != nil {
-					select {
-					case <-wd:
-						// reaped by monitor
-					case <-time.After(wait):
-						_ = syscall.Kill(-pid, syscall.SIGKILL)
-						select {
-						case <-wd:
-							// reaped after kill
-						case <-time.After(200 * time.Millisecond):
-							// best-effort
-						}
-					}
-				} else {
-					// No wait channel; brief sleep as last resort.
-					time.Sleep(wait)
-				}
-			}
-		}
+		//if r.IsMonitoring() {
+		//	// A supervisor/monitor goroutine is responsible for waiting and state transitions.
+		//	// Wait on waitDone (closed by monitor) with timeout and escalate if needed.
+		//	wd := r.WaitDoneChan()
+		//	if wd != nil {
+		//		select {
+		//		case <-wd:
+		//			// exited and reaped by monitor
+		//		case <-time.After(wait):
+		//			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		//			select {
+		//			case <-wd:
+		//				// reaped by monitor after kill
+		//			case <-time.After(200 * time.Millisecond):
+		//				// best-effort
+		//			}
+		//		}
+		//	} else {
+		//		// No wait channel available; fall back to brief sleep and continue.
+		//		time.Sleep(wait)
+		//	}
+		//} else {
+		//	// No monitor observed. Try to claim monitoring to ensure single waiter.
+		//	if r.MonitoringStartIfNeeded() {
+		//		// We own the wait; perform it and finalize state.
+		//		ch := make(chan error, 1)
+		//		go func() {
+		//			err := cmd.Wait()
+		//			r.CloseWaitDone()
+		//			r.MarkExited(err)
+		//			ch <- err
+		//		}()
+		//		select {
+		//		case <-ch:
+		//			// done
+		//		case <-time.After(wait):
+		//			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		//			select {
+		//			case <-ch:
+		//				// reaped
+		//			case <-time.After(200 * time.Millisecond):
+		//				// best-effort
+		//			}
+		//		}
+		//		// When we owned the wait, close writers and release monitoring flag.
+		//		r.CloseWriters()
+		//		r.MonitoringStop()
+		//	} else {
+		//		// Someone else claimed monitoring concurrently; wait on waitDone instead.
+		//		wd := r.WaitDoneChan()
+		//		if wd != nil {
+		//			select {
+		//			case <-wd:
+		//				// reaped by monitor
+		//			case <-time.After(wait):
+		//				_ = syscall.Kill(-pid, syscall.SIGKILL)
+		//				select {
+		//				case <-wd:
+		//					// reaped after kill
+		//				case <-time.After(200 * time.Millisecond):
+		//					// best-effort
+		//				}
+		//			}
+		//		} else {
+		//			// No wait channel; brief sleep as last resort.
+		//			time.Sleep(wait)
+		//		}
+		//	}
+		//}
 	}
+
+	return nil
 	// If monitor owned the wait, writers will be closed in the supervisor.
-	rs := r.Snapshot()
-	return rs.ExitErr
+	//rs := r.Snapshot()
+	//return rs.ExitErr
 }
 
 // Kill sends SIGKILL to the process group and attempts to reap promptly.

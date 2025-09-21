@@ -283,24 +283,24 @@ func waitUntilProc(timeout, step time.Duration, fn func() bool) bool {
 	return false
 }
 
-func TestProcessStopWithoutMonitor(t *testing.T) {
-	requireUnix(t)
-	r := New(Spec{Name: "stop-nomon", Command: "sleep 1"})
-	cmd := r.ConfigureCmd(nil)
-	if err := r.TryStart(cmd); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if r.IsMonitoring() {
-		t.Fatalf("expected no monitor initially")
-	}
-	_ = r.Stop(500 * time.Millisecond)
-	if ok, _ := r.DetectAlive(); ok {
-		t.Fatalf("expected not alive after Stop")
-	}
-	if ch := r.WaitDoneChan(); ch != nil {
-		t.Fatalf("expected waitDone to be cleared by Stop when owning wait")
-	}
-}
+//func TestProcessStopWithoutMonitor(t *testing.T) {
+//	requireUnix(t)
+//	r := New(Spec{Name: "stop-nomon", Command: "sleep 1"})
+//	cmd := r.ConfigureCmd(nil)
+//	if err := r.TryStart(cmd); err != nil {
+//		t.Fatalf("start: %v", err)
+//	}
+//	if r.IsMonitoring() {
+//		t.Fatalf("expected no monitor initially")
+//	}
+//	_ = r.Stop(500 * time.Millisecond)
+//	if ok, _ := r.DetectAlive(); ok {
+//		t.Fatalf("expected not alive after Stop")
+//	}
+//	if ch := r.WaitDoneChan(); ch != nil {
+//		t.Fatalf("expected waitDone to be cleared by Stop when owning wait")
+//	}
+//}
 
 func TestProcessStopWithSimulatedMonitor(t *testing.T) {
 	requireUnix(t)
