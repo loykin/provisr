@@ -46,7 +46,8 @@ func (s *DB) EnsureSchema(ctx context.Context) error {
 		name TEXT NOT NULL UNIQUE,
 		pid INTEGER NOT NULL,
 		last_status TEXT NOT NULL,
-		updated_at TIMESTAMP NOT NULL
+		updated_at TIMESTAMP NOT NULL,
+		spec_json TEXT
 	);`
 	_, err := s.db.ExecContext(ctx, stmt)
 	return err
@@ -63,21 +64,22 @@ func (s *DB) Record(ctx context.Context, rec store.Record) error {
 		rec.UpdatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO process_state(name, pid, last_status, updated_at)
-		VALUES(?, ?, ?, ?)
+		INSERT INTO process_state(name, pid, last_status, updated_at, spec_json)
+		VALUES(?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			pid=excluded.pid,
 			last_status=excluded.last_status,
-			updated_at=excluded.updated_at;`,
-		rec.Name, rec.PID, rec.LastStatus, rec.UpdatedAt)
+			updated_at=excluded.updated_at,
+			spec_json=excluded.spec_json;`,
+		rec.Name, rec.PID, rec.LastStatus, rec.UpdatedAt, rec.SpecJSON)
 	return err
 }
 
 // GetByName returns the last known record for the given name. If not found, returns zero-value record and sql.ErrNoRows.
 func (s *DB) GetByName(ctx context.Context, name string) (store.Record, error) {
 	var r store.Record
-	row := s.db.QueryRowContext(ctx, `SELECT name, pid, last_status, updated_at FROM process_state WHERE name=?;`, name)
-	err := row.Scan(&r.Name, &r.PID, &r.LastStatus, &r.UpdatedAt)
+	row := s.db.QueryRowContext(ctx, `SELECT name, pid, last_status, updated_at, spec_json FROM process_state WHERE name=?;`, name)
+	err := row.Scan(&r.Name, &r.PID, &r.LastStatus, &r.UpdatedAt, &r.SpecJSON)
 	if err != nil {
 		return store.Record{}, err
 	}
@@ -91,4 +93,22 @@ func (s *DB) Delete(ctx context.Context, name string) error {
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM process_state WHERE name=?;`, name)
 	return err
+}
+
+// List returns all records in the store.
+func (s *DB) List(ctx context.Context) ([]store.Record, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, pid, last_status, updated_at, spec_json FROM process_state ORDER BY updated_at ASC;`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var res []store.Record
+	for rows.Next() {
+		var r store.Record
+		if err := rows.Scan(&r.Name, &r.PID, &r.LastStatus, &r.UpdatedAt, &r.SpecJSON); err != nil {
+			return nil, err
+		}
+		res = append(res, r)
+	}
+	return res, rows.Err()
 }

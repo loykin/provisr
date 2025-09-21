@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -382,16 +383,14 @@ func (up *ManagedProcess) handleUpdateSpec(newSpec process.Spec) error {
 
 // handleShutdown performs graceful shutdown
 func (up *ManagedProcess) handleShutdown() error {
-	// Stop process if running
-	err := up.handleStop(3 * time.Second)
-	if err != nil && !isExpectedShutdownError(err) {
-		return err
-	}
+	// Do NOT stop the underlying process here.
+	// Requirement: parent (manager) may die but the child process should keep running.
+	// We only stop on explicit Stop() requests.
 
-	// Clean up resources
+	// Clean up resources locally
 	up.mu.Lock()
 	if up.proc != nil {
-		up.proc.RemovePIDFile()
+		// Do not remove PID file either, it's needed for re-attachment after restart
 	}
 	up.mu.Unlock()
 
@@ -464,11 +463,13 @@ func (up *ManagedProcess) makeRecordLocked() store.Record {
 	// Assumes up.mu is at least RLocked (or Locked)
 	st := up.proc.Snapshot()
 	spec := up.proc.GetSpec()
+	b, _ := json.Marshal(spec)
 	return store.Record{
 		Name:       spec.Name,
 		PID:        st.PID,
 		LastStatus: up.state.String(),
 		UpdatedAt:  time.Now().UTC(),
+		SpecJSON:   string(b),
 	}
 }
 
@@ -483,11 +484,18 @@ func (up *ManagedProcess) persistStart() {
 
 	if storeInst != nil {
 		rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateRunning.String(), UpdatedAt: now}
+		// include spec JSON
+		if b, err := json.Marshal(spec); err == nil {
+			rec.SpecJSON = string(b)
+		}
 		_ = storeInst.Record(context.Background(), rec)
 	}
 
 	if len(sinks) > 0 {
 		rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateRunning.String(), UpdatedAt: now}
+		if b, err := json.Marshal(spec); err == nil {
+			rec.SpecJSON = string(b)
+		}
 		evt := history.Event{Type: history.EventStart, OccurredAt: now, Record: rec}
 		for _, h := range sinks {
 			_ = h.Send(context.Background(), evt)
@@ -506,6 +514,9 @@ func (up *ManagedProcess) persistStop() {
 
 	// Minimal record for event consumers and store
 	rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateStopped.String(), UpdatedAt: now}
+	if b, err := json.Marshal(spec); err == nil {
+		rec.SpecJSON = string(b)
+	}
 	ctx := context.Background()
 	if s != nil {
 		_ = s.Record(ctx, rec)

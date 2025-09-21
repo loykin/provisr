@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -85,6 +86,17 @@ func (r *Process) CopyCmd() *exec.Cmd {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.cmd
+}
+
+// SeedPID seeds the internal PID (e.g., after manager restart) without changing running state.
+// It also updates the Snapshot() PID for observability.
+func (r *Process) SeedPID(pid int) {
+	r.mu.Lock()
+	if pid > 0 {
+		r.pid = pid
+		r.status.PID = pid
+	}
+	r.mu.Unlock()
 }
 
 func (r *Process) SetStarted(cmd *exec.Cmd) {
@@ -238,29 +250,39 @@ func (r *Process) DetectAlive() (bool, string) {
 	r.mu.Lock()
 	pid := r.pid
 	exited := r.exited
+	spec := r.spec
 	r.mu.Unlock()
-
-	// If we don't have a PID yet, process never started
-	if pid == 0 {
-		return false, "no-pid"
-	}
 
 	// If we already detected exit, process is dead
 	if exited {
 		return false, "exit-detected"
 	}
 
-	// Prefer individual PID signal check first (works reliably across platforms)
-	if syscall.Kill(pid, 0) == nil {
-		return true, "exec:pid"
+	// If we have a PID, prefer checking it directly first
+	if pid > 0 {
+		if syscall.Kill(pid, 0) == nil {
+			return true, "exec:pid"
+		}
 	}
 
-	// If PID-based detection fails, try configured detectors
+	// If PID-based detection fails or PID is unknown, try configured detectors (e.g., PID file)
 	for _, d := range r.detectors() {
 		ok, _ := d.Alive()
 		if ok {
+			// Best-effort: if a PID file is configured, read it and seed internal PID for later signaling
+			if spec.PIDFile != "" {
+				if b, err := os.ReadFile(spec.PIDFile); err == nil {
+					if n, err2 := strconv.Atoi(strings.TrimSpace(string(b))); err2 == nil && n > 0 {
+						r.SeedPID(n)
+					}
+				}
+			}
 			return true, d.Describe()
 		}
+	}
+
+	if pid == 0 {
+		return false, "no-pid"
 	}
 	return false, "not-found"
 }
@@ -316,6 +338,17 @@ func (r *Process) StopWithSignal(sig syscall.Signal) error {
 		if err := syscall.Kill(-pid, sig); err != nil {
 			// Fall back to SIGKILL best-effort; upper layers manage further retries
 			return r.Kill()
+		}
+		return nil
+	}
+	// Fallback: if cmd is unavailable (e.g., after manager restart), use stored PID
+	r.mu.Lock()
+	pid := r.pid
+	r.mu.Unlock()
+	if pid > 0 {
+		if err := syscall.Kill(-pid, sig); err != nil {
+			// Fall back to SIGKILL on the same PID
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	}
 	return nil
