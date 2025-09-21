@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -39,6 +40,52 @@ func NewManager() *Manager {
 		processes:  make(map[string]*ManagedProcess),
 		envManager: env.New(),
 	}
+}
+
+// NewManagerWithStore creates a new manager wired with the provided store.
+// It ensures the store schema and preloads previously managed processes
+// from the store, restoring their specs and last known states.
+func NewManagerWithStore(s store.Store) (*Manager, error) {
+	m := &Manager{
+		processes:  make(map[string]*ManagedProcess),
+		envManager: env.New(),
+		store:      s,
+	}
+	if s != nil {
+		if err := s.EnsureSchema(context.Background()); err != nil {
+			return nil, err
+		}
+		// Preload existing processes from store
+		recs, err := s.List(context.Background())
+		if err == nil {
+			for _, r := range recs {
+				var spec process.Spec
+				if strings.TrimSpace(r.SpecJSON) != "" {
+					_ = json.Unmarshal([]byte(r.SpecJSON), &spec)
+				}
+				if strings.TrimSpace(spec.Name) == "" {
+					spec.Name = r.Name
+				}
+				up := NewManagedProcess(spec, m.mergeEnv)
+				up.SetStore(s)
+				if len(m.histSinks) > 0 {
+					up.SetHistory(m.histSinks...)
+				}
+				// Seed PID from store so we can reattach and send signals even without cmd
+				if r.PID > 0 {
+					up.proc.SeedPID(r.PID)
+				}
+				// Determine current state by detection to ensure live processes remain monitored
+				if alive, _ := up.proc.DetectAlive(); alive {
+					up.setState(StateRunning)
+				} else if st, ok := parseProcessState(r.LastStatus); ok {
+					up.setState(st)
+				}
+				m.processes[spec.Name] = up
+			}
+		}
+	}
+	return m, nil
 }
 
 // SetGlobalEnv configures global environment variables
@@ -230,6 +277,13 @@ func (m *Manager) ensureProcess(name string) *ManagedProcess {
 			spec,
 			m.mergeEnv,
 		)
+		// Inject shared resources so that persistence/history work immediately
+		if m.store != nil {
+			up.SetStore(m.store)
+		}
+		if len(m.histSinks) > 0 {
+			up.SetHistory(m.histSinks...)
+		}
 		m.processes[name] = up
 	}
 	m.mu.Unlock()
@@ -285,14 +339,18 @@ func (m *Manager) mergeEnv(spec process.Spec) []string {
 	return envManager.Merge(spec.Env)
 }
 
-// recordStart records process start events
-func (m *Manager) recordStart(_ *process.Process) {
-	// This is a stub - simplified for now
-	// In a full implementation, this would record to store and history sinks
-}
-
-// recordStop records process stop events
-func (m *Manager) recordStop(_ *process.Process, _ error) {
-	// This is a stub - simplified for now
-	// In a full implementation, this would record to store and history sinks
+// parseProcessState maps a string status to processState
+func parseProcessState(s string) (processState, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "stopped":
+		return StateStopped, true
+	case "starting":
+		return StateStarting, true
+	case "running":
+		return StateRunning, true
+	case "stopping":
+		return StateStopping, true
+	default:
+		return StateStopped, false
+	}
 }

@@ -59,6 +59,15 @@ func (ms *MockStore) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+func (ms *MockStore) List(_ context.Context) ([]store.Record, error) {
+	ms.calls = append(ms.calls, "List")
+	res := make([]store.Record, 0, len(ms.records))
+	for _, r := range ms.records {
+		res = append(res, r)
+	}
+	return res, nil
+}
+
 // MockHistorySink implements history.Sink for testing
 type MockHistorySink struct {
 	events []history.Event
@@ -1153,4 +1162,64 @@ type mockError struct {
 
 func (e *mockError) Error() string {
 	return e.msg
+}
+
+// New test: ensure manager reload via store continues monitoring existing process
+func TestManager_ReloadsFromStore_ContinuesMonitoring(t *testing.T) {
+	ms := NewMockStore()
+	mgrA, err := NewManagerWithStore(ms)
+	if err != nil {
+		t.Fatalf("NewManagerWithStore A: %v", err)
+	}
+
+	spec := process.Spec{
+		Name:        "reload-monitor",
+		Command:     "sleep 3",
+		PIDFile:     "/tmp/provisr_test_reload.pid",
+		AutoRestart: false,
+	}
+	if err := mgrA.Start(spec); err != nil {
+		t.Fatalf("mgrA.Start: %v", err)
+	}
+	if !waitUntil2(2*time.Second, 50*time.Millisecond, func() bool {
+		st, err := mgrA.Status(spec.Name)
+		return err == nil && st.Running
+	}) {
+		st, _ := mgrA.Status(spec.Name)
+		t.Fatalf("process not running under mgrA; status=%+v", st)
+	}
+	_ = mgrA.Shutdown()
+
+	mgrB, err := NewManagerWithStore(ms)
+	if err != nil {
+		t.Fatalf("NewManagerWithStore B: %v", err)
+	}
+	if !waitUntil2(2*time.Second, 50*time.Millisecond, func() bool {
+		st, err := mgrB.Status(spec.Name)
+		return err == nil && st.Running
+	}) {
+		st, err := mgrB.Status(spec.Name)
+		t.Fatalf("mgrB failed to reattach; err=%v status=%+v", err, st)
+	}
+	if err := mgrB.Stop(spec.Name, 1*time.Second); err != nil {
+		t.Fatalf("mgrB.Stop: %v", err)
+	}
+	if !waitUntil2(2*time.Second, 50*time.Millisecond, func() bool {
+		st, err := mgrB.Status(spec.Name)
+		return err == nil && !st.Running
+	}) {
+		st, _ := mgrB.Status(spec.Name)
+		t.Fatalf("process did not stop under mgrB; status=%+v", st)
+	}
+}
+
+func waitUntil2(d time.Duration, step time.Duration, fn func() bool) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(step)
+	}
+	return false
 }

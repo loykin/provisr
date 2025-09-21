@@ -17,6 +17,7 @@ type Record struct {
 	PID        int
 	LastStatus string
 	UpdatedAt  time.Time
+	SpecJSON   string
 }
 
 // Store is a minimal persistence interface to keep last known PID and status
@@ -26,6 +27,7 @@ type Store interface {
 	EnsureSchema(ctx context.Context) error
 	Record(ctx context.Context, rec Record) error
 	GetByName(ctx context.Context, name string) (Record, error)
+	List(ctx context.Context) ([]Record, error)
 	Delete(ctx context.Context, name string) error
 	Close() error
 }
