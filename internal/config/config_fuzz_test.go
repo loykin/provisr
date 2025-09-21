@@ -44,7 +44,7 @@ func FuzzProcConfigTOML(f *testing.F) {
 		}
 		b.WriteString(fmt.Sprintf("instances = %d\n", instancesVal))
 		if autorestart {
-			b.WriteString("autorestart = true\n")
+			b.WriteString("auto_restart = true\n")
 		}
 		tmp := t.TempDir() + "/fuzz.toml"
 		if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {

@@ -7,7 +7,7 @@
     "retry_count": 2,
     "retry_interval": "1s",
     "start_duration": "500ms",
-    "autorestart": true,
+    "auto_restart": true,
     "restart_interval": "5s",
     "instances": 1,
     "env": [

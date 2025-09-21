@@ -14,7 +14,7 @@ pid_file = "./provisr-detached-worker.pid"
 detached = true
 
 # Do not auto-restart for the purpose of this demo
-autorestart = false
+auto_restart = false
 
 # Optional logging (writes to the directory defined in the example's config.toml)
 [spec.log]

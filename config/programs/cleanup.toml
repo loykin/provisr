@@ -4,4 +4,4 @@ type = "process"
 name = "cleanup"
 command = "sh -c 'echo [$(date)] Cleaning temp files...; touch /tmp/provisr-demo-cleaned; echo [$(date)] Cleanup completed'"
 priority = 0
-autorestart = false
+auto_restart = false
