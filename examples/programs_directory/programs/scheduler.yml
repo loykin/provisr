@@ -6,7 +6,7 @@ spec:
   retry_count: 5
   retry_interval: 1s
   start_duration: 1s
-  autorestart: true
+  auto_restart: true
   restart_interval: 5s
   instances: 1
   env:

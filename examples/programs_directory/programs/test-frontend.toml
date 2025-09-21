@@ -6,7 +6,7 @@ priority = 10
 retry_count = 1
 retry_interval = "500ms"
 start_duration = "200ms"
-autorestart = false
+auto_restart = false
 instances = 1
 env = ["SERVICE=frontend", "PORT=3000"]
 

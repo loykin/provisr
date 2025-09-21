@@ -6,7 +6,7 @@ spec:
   retry_count: 1
   retry_interval: 500ms
   start_duration: 500ms
-  autorestart: false
+  auto_restart: false
   instances: 3
   env:
     - WORKER_ID=background
