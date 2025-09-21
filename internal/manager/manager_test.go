@@ -34,40 +34,28 @@ func (ms *MockStore) EnsureSchema(_ context.Context) error {
 	return nil
 }
 
-func (ms *MockStore) RecordStart(_ context.Context, rec store.Record) error {
-	ms.calls = append(ms.calls, fmt.Sprintf("RecordStart:%s", rec.Name))
+func (ms *MockStore) Record(_ context.Context, rec store.Record) error {
+	ms.calls = append(ms.calls, fmt.Sprintf("Record:%s:%s", rec.Name, rec.LastStatus))
 	ms.records[rec.Name] = rec
 	return nil
 }
 
-func (ms *MockStore) RecordStop(_ context.Context, uniq string, _ time.Time, _ error) error {
-	ms.calls = append(ms.calls, fmt.Sprintf("RecordStop:%s", uniq))
-	return nil
-}
-
-func (ms *MockStore) UpsertStatus(_ context.Context, rec store.Record) error {
-	ms.calls = append(ms.calls, fmt.Sprintf("UpsertStatus:%s", rec.Name))
-	ms.records[rec.Name] = rec
-	return nil
-}
-
-func (ms *MockStore) GetByName(_ context.Context, name string, _ int) ([]store.Record, error) {
+func (ms *MockStore) GetByName(_ context.Context, name string) (store.Record, error) {
 	ms.calls = append(ms.calls, fmt.Sprintf("GetByName:%s", name))
-	return []store.Record{}, nil
-}
-
-func (ms *MockStore) GetRunning(_ context.Context, namePrefix string) ([]store.Record, error) {
-	ms.calls = append(ms.calls, fmt.Sprintf("GetRunning:%s", namePrefix))
-	return []store.Record{}, nil
-}
-
-func (ms *MockStore) PurgeOlderThan(_ context.Context, _ time.Time) (int64, error) {
-	ms.calls = append(ms.calls, "PurgeOlderThan")
-	return 0, nil
+	if r, ok := ms.records[name]; ok {
+		return r, nil
+	}
+	return store.Record{}, fmt.Errorf("not found")
 }
 
 func (ms *MockStore) Close() error {
 	ms.calls = append(ms.calls, "Close")
+	return nil
+}
+
+func (ms *MockStore) Delete(_ context.Context, name string) error {
+	ms.calls = append(ms.calls, fmt.Sprintf("Delete:%s", name))
+	delete(ms.records, name)
 	return nil
 }
 

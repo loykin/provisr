@@ -1,12 +1,15 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/store"
 )
 
 // ManagedProcess combines Manager-Handler-Supervisor responsibilities into a single,
@@ -26,6 +29,8 @@ type ManagedProcess struct {
 	cmdChan       chan command
 	doneChan      chan struct{}
 	lastRestartAt time.Time
+	store         store.Store
+	history       []history.Sink
 	envMerger     func(process.Spec) []string
 }
 
@@ -84,6 +89,20 @@ func NewManagedProcess(
 
 	go up.runStateMachine()
 	return up
+}
+
+// SetStore configures the persistence store (thread-safe)
+func (up *ManagedProcess) SetStore(s store.Store) {
+	up.mu.Lock()
+	up.store = s
+	up.mu.Unlock()
+}
+
+// SetHistory configures history sinks (thread-safe)
+func (up *ManagedProcess) SetHistory(sinks ...history.Sink) {
+	up.mu.Lock()
+	up.history = append([]history.Sink(nil), sinks...)
+	up.mu.Unlock()
 }
 
 // Start initiates process start (non-blocking)
@@ -303,8 +322,9 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 	// Successfully started
 	up.setState(StateRunning)
 
-	// Record metrics and history (lock-free)
+	// Record metrics and persist
 	metrics.IncStart(newSpec.Name)
+	up.persistStart()
 
 	return nil
 }
@@ -338,10 +358,12 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 
 	if err := up.proc.Stop(wait); err != nil {
 		up.setState(StateStopped) // Force state transition even on error
+		up.persistStop()
 		return fmt.Errorf("failed to stop process: %w", err)
 	}
 
 	up.setState(StateStopped)
+	up.persistStop()
 
 	// Record metrics
 	metrics.IncStop(up.proc.GetName())
@@ -411,6 +433,9 @@ func (up *ManagedProcess) setState(newState processState) {
 	// Update current state metrics - set old state to 0, new state to 1
 	metrics.SetCurrentState(name, oldStateStr, false)
 	metrics.SetCurrentState(name, newStateStr, true)
+
+	// Persist current status on any state change
+	up.persistStatus()
 }
 
 // checkProcessHealth monitors process health and transitions state.
@@ -424,10 +449,82 @@ func (up *ManagedProcess) checkProcessHealth() {
 
 	alive, _ := up.proc.DetectAlive()
 	if !alive {
-		// Process died; transition to stopped and log. Do NOT restart here.
+		// Process died; transition to stopped and persist stop event.
 		up.setState(StateStopped)
+		up.persistStop()
 
-		// Auto-restart, if any, will be coordinated by Manager.reconcileProcess.
+		// Auto-restart (if enabled) is handled by the runStateMachine ticker below.
 	} else if up.proc.StopRequested() {
+		// No-op: stopping is driven explicitly via doStop.
 	}
+}
+
+// // --- Persistence & History helpers ---
+func (up *ManagedProcess) makeRecordLocked() store.Record {
+	// Assumes up.mu is at least RLocked (or Locked)
+	st := up.proc.Snapshot()
+	spec := up.proc.GetSpec()
+	return store.Record{
+		Name:       spec.Name,
+		PID:        st.PID,
+		LastStatus: up.state.String(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+}
+
+func (up *ManagedProcess) persistStart() {
+	up.mu.Lock()
+	now := time.Now().UTC()
+	st := up.proc.Snapshot()
+	spec := up.proc.GetSpec()
+	storeInst := up.store
+	sinks := append([]history.Sink(nil), up.history...)
+	up.mu.Unlock()
+
+	if storeInst != nil {
+		rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateRunning.String(), UpdatedAt: now}
+		_ = storeInst.Record(context.Background(), rec)
+	}
+
+	if len(sinks) > 0 {
+		rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateRunning.String(), UpdatedAt: now}
+		evt := history.Event{Type: history.EventStart, OccurredAt: now, Record: rec}
+		for _, h := range sinks {
+			_ = h.Send(context.Background(), evt)
+		}
+	}
+}
+
+func (up *ManagedProcess) persistStop() {
+	up.mu.RLock()
+	now := time.Now().UTC()
+	s := up.store
+	sinks := append([]history.Sink(nil), up.history...)
+	st := up.proc.Snapshot()
+	spec := up.proc.GetSpec()
+	up.mu.RUnlock()
+
+	// Minimal record for event consumers and store
+	rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateStopped.String(), UpdatedAt: now}
+	ctx := context.Background()
+	if s != nil {
+		_ = s.Record(ctx, rec)
+	}
+	if len(sinks) > 0 {
+		evt := history.Event{Type: history.EventStop, OccurredAt: now, Record: rec}
+		for _, h := range sinks {
+			_ = h.Send(ctx, evt)
+		}
+	}
+}
+
+func (up *ManagedProcess) persistStatus() {
+	up.mu.RLock()
+	rec := up.makeRecordLocked()
+	s := up.store
+	up.mu.RUnlock()
+	if s == nil {
+		return
+	}
+	_ = s.Record(context.Background(), rec)
 }
