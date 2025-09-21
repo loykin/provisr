@@ -10,7 +10,7 @@ env = ["GLOBAL_NAME=provisr", "SHARED_PORT=9000", "CHAIN=${GLOBAL_NAME}-x"]
 
 # Optional global log defaults
 [log]
-dir = "/tmp/provisr-logs"
+dir = "./provisr-logs"
 max_size_mb = 10
 max_backups = 3
 max_age_days = 7
@@ -23,7 +23,7 @@ compress = false
 # Groups section: define logical groups referencing processes by name
 [[groups]]
 name = "backend"
-members = ["web", "worker"]
+members = ["api-server", "long-sleeper"]
 
 # Persistent store configuration (optional)
 # Enable to persist process lifecycle and support high availability across restarts.
