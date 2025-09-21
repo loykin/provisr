@@ -10,67 +10,130 @@ permissions:
   contents: read
 
 jobs:
-  vet:
+  test:
+    name: Go Test
     runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: 0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go mod download
-      - run: go vet ./...
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
-  staticcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
         with:
           go-version-file: go.mod
-      - run: go mod download
-      - run: go install honnef.co/go/tools/cmd/staticcheck@latest
-      - run: $(go env GOPATH)/bin/staticcheck ./...
+          cache: true
 
-  gosec:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go mod download
-      - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-      - run: |
+      - name: Show Go version
+        run: go version
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Staticcheck
+        run: $(go env GOPATH)/bin/staticcheck ./...
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec (static analysis)
+        run: |
+          set -e
           $(go env GOPATH)/bin/gosec -no-fail -fmt=json -out=gosec-report.json ./...
-      - uses: actions/upload-artifact@v3
+
+      - name: Upload gosec report artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gosec-report
           path: gosec-report.json
 
-  trivy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
+      - name: Trivy Scan (Go dependencies)
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           format: json
           output: trivy-report.json
-      - uses: actions/upload-artifact@v3
+
+      - name: Upload Trivy report artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: trivy-report
           path: trivy-report.json
 
-  tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go mod download
+      - name: Build (all packages)
+        run: go build ./...
 
-      # Run tests with coverage
+      - name: Run safe examples (self-contained, no external services)
+        run: |
+          set -e
+          echo "Running examples/embedded"
+          go run ./examples/embedded
+          echo "Running examples/embedded_process_group"
+          go run ./examples/embedded_process_group
+          echo "Running examples/embedded_logger"
+          go run ./examples/embedded_logger
+          echo "Running examples/embedded_metrics"
+          go run ./examples/embedded_metrics
+          echo "Running examples/embedded_config_structure"
+          go run ./examples/embedded_config_structure
+          echo "Running examples/embedded_config_file"
+          go run ./examples/embedded_config_file
+        env:
+          CI: true
+
+      - name: Run embedded_client with daemon
+        run: |
+          set -e
+          echo "Building provisr binary for daemon"
+          go build -o provisr-ci ./cmd/provisr
+          
+          echo "Starting provisr daemon in background"
+          ./provisr-ci serve examples/embedded_client/daemon-config.toml &
+          DAEMON_PID=$!
+          
+          echo "Waiting for daemon to start..."
+          sleep 3
+          
+          # Check if daemon is responding (using direct HTTP call)
+          echo "Checking daemon readiness..."
+          for i in {1..10}; do
+            if timeout 5s curl -s http://localhost:8080/api/status 2>/dev/null | grep -q "ok"; then
+              echo "Daemon is ready"
+              break
+            fi
+            if [ $i -eq 10 ]; then
+              echo "Daemon failed to start after 10 attempts"
+              echo "Checking if daemon process is still running..."
+              if kill -0 $DAEMON_PID 2>/dev/null; then
+                echo "Daemon process is running but not responding to API calls"
+              else
+                echo "Daemon process has died"
+              fi
+              kill $DAEMON_PID 2>/dev/null || true
+              exit 1
+            fi
+            echo "Waiting for daemon... ($i/10)"
+            sleep 2
+          done
+          
+          echo "Running examples/embedded_client"
+          go run ./examples/embedded_client
+          
+          echo "Stopping daemon"
+          kill $DAEMON_PID || true
+          wait $DAEMON_PID 2>/dev/null || true
+          
+          echo "✅ embedded_client example completed successfully"
+        env:
+          CI: true
+
       - name: Run tests with coverage
         env:
           CGO_ENABLED: 1
@@ -79,56 +142,25 @@ jobs:
       - name: Show coverage summary
         run: go tool cover -func=coverage.out | tail -n 1
 
-      - uses: actions/upload-artifact@v3
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: coverage
           path: coverage.out
 
-      # Run all examples (safe + embedded_client with daemon)
-      - name: Run examples
-        run: |
-          set -e
-          # Safe examples
-          go run ./examples/embedded
-          go run ./examples/embedded_process_group
-          go run ./examples/embedded_logger
-          go run ./examples/embedded_metrics
-          go run ./examples/embedded_config_structure
-          go run ./examples/embedded_config_file
-
-          # Embedded_client with daemon
-          go build -o provisr-ci ./cmd/provisr
-          ./provisr-ci serve examples/embedded_client/daemon-config.toml &
-          DAEMON_PID=$!
-          sleep 3
-
-          for i in {1..10}; do
-            if timeout 5s curl -s http://localhost:8080/api/status 2>/dev/null | grep -q "ok"; then
-              break
-            fi
-            if [ $i -eq 10 ]; then
-              echo "Daemon failed to start after 10 attempts"
-              kill $DAEMON_PID 2>/dev/null || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-          go run ./examples/embedded_client
-          kill $DAEMON_PID || true
-          wait $DAEMON_PID 2>/dev/null || true
-        env:
-          CI: true
-
   publish-coverage:
+    name: Publish Coverage (Shields)
     runs-on: ubuntu-latest
-    needs: tests
+    needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v3
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: coverage
           path: .
@@ -150,6 +182,7 @@ jobs:
       - name: Prepare Shields endpoint JSON
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p shields
           cat > shields/coverage.json <<EOF
           {
@@ -161,7 +194,7 @@ jobs:
           EOF
 
       - name: Publish coverage endpoint to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
@@ -171,7 +204,7 @@ jobs:
           commit_message: "chore(ci): publish coverage endpoint (Shields)"
 
       - name: Download Trivy report artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: trivy-report
           path: .
@@ -198,7 +231,7 @@ jobs:
           echo "{\"schemaVersion\":1,\"label\":\"Trivy\",\"message\":\"$TOTAL\",\"color\":\"$COLOR\"}" > shields/trivy.json
 
       - name: Publish Trivy badge to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
