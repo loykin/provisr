@@ -17,6 +17,7 @@ func main() {
 	root, bind := buildRoot(mgr)
 	// set up metrics hook
 	bind()
+
 	if err := root.Execute(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -33,7 +34,7 @@ type ProcessFlags struct {
 	Name            string
 	CmdStr          string
 	PIDFile         string
-	Retries         int
+	Retries         uint32
 	RetryInterval   time.Duration
 	AutoRestart     bool
 	RestartInterval time.Duration
@@ -56,6 +57,7 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 	globalFlags := &GlobalFlags{}
 	processFlags := &ProcessFlags{}
 	groupFlags := &GroupCommandFlags{}
+	cronFlags := &CronFlags{}
 
 	provisrCommand := command{mgr: mgr}
 
@@ -66,7 +68,7 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 		createStartCommand(provisrCommand, globalFlags, processFlags),
 		createStatusCommand(provisrCommand, globalFlags, processFlags),
 		createStopCommand(provisrCommand, globalFlags, processFlags),
-		createCronCommand(provisrCommand, globalFlags),
+		createCronCommand(provisrCommand, globalFlags, cronFlags),
 		createGroupStartCommand(provisrCommand, globalFlags, groupFlags),
 		createGroupStopCommand(provisrCommand, globalFlags, groupFlags),
 		createGroupStatusCommand(provisrCommand, globalFlags, groupFlags),
@@ -132,7 +134,7 @@ Examples:
 	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name")
 	cmd.Flags().StringVar(&processFlags.CmdStr, "cmd", "sleep 60", "command to execute")
 	cmd.Flags().StringVar(&processFlags.PIDFile, "pidfile", "", "pidfile path (optional)")
-	cmd.Flags().IntVar(&processFlags.Retries, "retries", 0, "retry attempts on failure")
+	cmd.Flags().Uint32Var(&processFlags.Retries, "retries", 0, "retry attempts on failure")
 	cmd.Flags().DurationVar(&processFlags.RetryInterval, "retry-interval", 500*time.Millisecond, "retry delay")
 	cmd.Flags().BoolVar(&processFlags.AutoRestart, "autorestart", false, "auto-restart on exit")
 	cmd.Flags().DurationVar(&processFlags.RestartInterval, "restart-interval", time.Second, "restart delay")
@@ -170,7 +172,7 @@ Examples:
 			})
 		},
 	}
-	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name (optional)")
+	cmd.Flags().StringVar(&processFlags.Name, "name", "", "process name (optional)")
 	cmd.Flags().StringVar(&processFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&processFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
 	cmd.Flags().Bool("detailed", false, "show detailed info")
@@ -199,25 +201,35 @@ Examples:
 			})
 		},
 	}
-	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name (optional)")
+	cmd.Flags().StringVar(&processFlags.Name, "name", "", "process name (optional)")
 	cmd.Flags().StringVar(&processFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&processFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
 	return cmd
 }
 
 // createCronCommand creates the cron subcommand
-func createCronCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
-	return &cobra.Command{
+func createCronCommand(provisrCommand command, globalFlags *GlobalFlags, cronFlags *CronFlags) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "cron",
-		Short: "Run scheduled jobs from config",
-		Long: `Execute cron jobs defined in the configuration file.
+		Short: "Control scheduled jobs via daemon (REST)",
+		Long: `Cron jobs are executed by the provisr daemon started with 'serve'.
+This command communicates with the running daemon via REST to verify readiness.
 
-Example:
-  provisr cron --config=config.toml`,
+Examples:
+  provisr cron --config=config.toml                 # Verify daemon is running and has loaded cron jobs
+  provisr cron --config=config.toml --api-url=http://remote:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return provisrCommand.Cron(CronFlags{ConfigPath: globalFlags.ConfigPath})
+			return provisrCommand.Cron(CronFlags{
+				ConfigPath:  globalFlags.ConfigPath,
+				APIUrl:      cronFlags.APIUrl,
+				APITimeout:  cronFlags.APITimeout,
+				NonBlocking: true, // CLI should not block; daemon runs scheduler
+			})
 		},
 	}
+	cmd.Flags().StringVar(&cronFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&cronFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
+	return cmd
 }
 
 // createGroupStartCommand creates the group-start subcommand
@@ -406,6 +418,22 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		}
 	}
 
+	// Start cron scheduler (if any cron jobs are defined)
+	var cronScheduler *provisr.CronScheduler
+	if len(cfg.CronJobs) > 0 {
+		cronScheduler = provisr.NewCronScheduler(mgr)
+		for _, j := range cfg.CronJobs {
+			jb := provisr.CronJob{Name: j.Name, Spec: j.Spec, Schedule: j.Schedule, Singleton: j.Singleton}
+			if err := cronScheduler.Add(&jb); err != nil {
+				return fmt.Errorf("failed to add cron job %s: %w", j.Name, err)
+			}
+		}
+		if err := cronScheduler.Start(); err != nil {
+			return fmt.Errorf("failed to start cron scheduler: %w", err)
+		}
+		fmt.Printf("Started cron scheduler with %d job(s)\n", len(cfg.CronJobs))
+	}
+
 	// Create and start HTTP server
 	fmt.Printf("Starting provisr server on %s%s\n", cfg.Server.Listen, cfg.Server.BasePath)
 	server, err := provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
@@ -419,5 +447,8 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	<-sigCh
 
 	fmt.Println("Shutting down...")
+	if cronScheduler != nil {
+		cronScheduler.Stop()
+	}
 	return server.Close()
 }

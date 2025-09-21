@@ -168,39 +168,27 @@ func (c *command) Stop(f StopFlags) error {
 	return c.stopViaAPI(f, apiClient)
 }
 
-// Cron runs cron scheduler based on config
+// Cron verifies cron scheduler via daemon (REST). The actual scheduler runs inside the daemon started by 'serve'.
 func (c *command) Cron(f CronFlags) error {
-	mgr := c.mgr
 	if f.ConfigPath == "" {
-		return fmt.Errorf("cron requires --config file with processes having schedule")
+		return fmt.Errorf("cron requires --config (daemon reads cron jobs from this file)")
 	}
-
-	config, err := provisr.LoadConfig(f.ConfigPath)
-	if err != nil {
+	// Always use API - default to local daemon if not specified
+	apiUrl := f.APIUrl
+	if apiUrl == "" {
+		apiUrl = "http://127.0.0.1:8080/api" // Default local daemon
+	}
+	apiClient := NewAPIClient(apiUrl, f.APITimeout)
+	if !apiClient.IsReachable() {
+		return fmt.Errorf("daemon not reachable at %s - please start daemon first with 'provisr serve'", apiUrl)
+	}
+	// Optionally check that daemon is healthy and responding with a status list
+	if _, err := apiClient.GetStatus(""); err != nil {
 		return err
 	}
-
-	if len(config.GlobalEnv) > 0 {
-		mgr.SetGlobalEnv(config.GlobalEnv)
-	}
-
-	sch := provisr.NewCronScheduler(mgr)
-	for _, j := range config.CronJobs {
-		jb := provisr.CronJob{Name: j.Name, Spec: j.Spec, Schedule: j.Schedule, Singleton: j.Singleton}
-		if err := sch.Add(&jb); err != nil {
-			return err
-		}
-	}
-	if err := sch.Start(); err != nil {
-		return err
-	}
-	if f.NonBlocking {
-		// For tests: stop immediately
-		sch.Stop()
-		return nil
-	}
-	// Block forever in production
-	select {}
+	// Success: daemon manages cron; CLI does not run scheduler locally
+	fmt.Println("Cron scheduler is managed by the daemon. Jobs defined in the config are executed by 'provisr serve'.")
+	return nil
 }
 
 // GroupStart starts a group from config

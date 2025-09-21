@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"syscall"
 	"testing"
 	"time"
 
@@ -205,7 +206,7 @@ func TestManagedProcessConcurrentOperations(t *testing.T) {
 func TestManagedProcessShutdown(t *testing.T) {
 	spec := process.Spec{
 		Name:    "shutdown-test",
-		Command: "sleep 0.2",
+		Command: "sleep 10",
 	}
 
 	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
@@ -326,4 +327,134 @@ func TestManagedProcessStateConstants(t *testing.T) {
 			t.Errorf("State %v: expected string '%s', got '%s'", state, expected, state.String())
 		}
 	}
+}
+
+// TestDetectAliveFalsePositiveInManager tests for false positives in the manager context
+func TestDetectAliveFalsePositiveInManager(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	spec := process.Spec{
+		Name:        "test-false-positive",
+		Command:     "sh -c 'echo starting; sleep 10'",
+		AutoRestart: false, // Don't auto-restart for this test
+	}
+
+	envMerger := func(spec process.Spec) []string { return spec.Env }
+	startLogger := func(proc *process.Process) {}
+	stopLogger := func(proc *process.Process, err error) {}
+
+	mp := NewManagedProcess(spec, envMerger, startLogger, stopLogger)
+	defer func() { _ = mp.Stop(5 * time.Second) }()
+
+	// Start the process
+	startCmd := command{action: ActionStart, spec: spec, reply: make(chan error, 1)}
+	mp.cmdChan <- startCmd
+	err := <-startCmd.reply
+	if err != nil {
+		t.Fatalf("Failed to start process: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify alive
+	status := mp.Status()
+	if !status.Running {
+		t.Fatalf("Process should be running, got status: %+v", status)
+	}
+
+	pid := status.PID
+	t.Logf("Started process with PID: %d", pid)
+
+	err = syscall.Kill(pid, syscall.SIGKILL)
+	if err != nil {
+		t.Fatalf("Failed to kill process: %v", err)
+	}
+
+	// Wait for process to die
+	time.Sleep(5 * time.Second)
+
+	// Test DetectAlive multiple times to ensure consistency
+	mp.mu.RLock()
+	proc := mp.proc
+	mp.mu.RUnlock()
+
+	if proc != nil {
+		for i := 0; i < 5; i++ {
+			alive, source := proc.DetectAlive()
+			t.Logf("DetectAlive attempt %d: alive=%v, source=%s", i+1, alive, source)
+
+			if alive {
+				t.Errorf("FALSE POSITIVE DETECTED on attempt %d: PID %d is dead but DetectAlive returned alive=true, source=%s", i+1, pid, source)
+			}
+
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// TestManagedProcessNoAutoRestart tests that processes without auto-restart don't restart
+func TestManagedProcessNoAutoRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping no auto-restart test")
+	}
+
+	spec := process.Spec{
+		Name:        "test-no-restart",
+		Command:     "sh -c 'echo no-restart-test; sleep 5'",
+		AutoRestart: false, // Explicitly disable auto-restart
+	}
+
+	envMerger := func(spec process.Spec) []string { return spec.Env }
+	startLogger := func(proc *process.Process) {}
+	stopLogger := func(proc *process.Process, err error) {}
+
+	mp := NewManagedProcess(spec, envMerger, startLogger, stopLogger)
+	defer func() { _ = mp.Stop(2 * time.Second) }()
+
+	// Start the process
+	startCmd := command{action: ActionStart, spec: spec, reply: make(chan error, 1)}
+	mp.cmdChan <- startCmd
+	err := <-startCmd.reply
+	if err != nil {
+		t.Fatalf("Failed to start process: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Get initial state
+	status := mp.Status()
+	if !status.Running {
+		t.Fatalf("Process should be running initially")
+	}
+
+	initialPID := status.PID
+	initialRestarts := status.Restarts
+	t.Logf("Initial state: PID=%d, Restarts=%d", initialPID, initialRestarts)
+
+	// Kill the process
+	err = syscall.Kill(initialPID, syscall.SIGKILL)
+	if err != nil {
+		t.Fatalf("Failed to kill process: %v", err)
+	}
+	t.Logf("Killed process PID %d", initialPID)
+
+	// Wait and verify NO restart occurs
+	time.Sleep(5 * time.Second)
+
+	finalStatus := mp.Status()
+	t.Logf("Final state: PID=%d, Running=%v, Restarts=%d",
+		finalStatus.PID, finalStatus.Running, finalStatus.Restarts)
+
+	// Process should be dead and not restarted
+	if finalStatus.Running {
+		t.Errorf("Process should NOT restart when AutoRestart=false, but it's still running with PID %d", finalStatus.PID)
+	}
+
+	if finalStatus.Restarts != initialRestarts {
+		t.Errorf("Restart count should remain %d, got %d", initialRestarts, finalStatus.Restarts)
+	}
+
+	t.Logf("✓ Correctly did NOT auto-restart when AutoRestart=false")
 }

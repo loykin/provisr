@@ -1,0 +1,16 @@
+# Program spec in unified format (type/spec)
+type = "process"
+[spec]
+name = "api-server"
+command = "sh -c 'while true; do echo api-server running; sleep 2; done'"
+work_dir = "/tmp"
+retry_count = 1
+retry_interval = "300ms"
+start_duration = "200ms"
+autorestart = true
+restart_interval = "1s"
+instances = 1
+
+[spec.log]
+stdout = "./api-server.stdout.log"
+stderr = "./api-server.stderr.log"
