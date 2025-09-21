@@ -1188,7 +1188,8 @@ func TestManager_ReloadsFromStore_ContinuesMonitoring(t *testing.T) {
 		st, _ := mgrA.Status(spec.Name)
 		t.Fatalf("process not running under mgrA; status=%+v", st)
 	}
-	_ = mgrA.Shutdown()
+
+	mgrA = nil
 
 	mgrB, err := NewManagerWithStore(ms)
 	if err != nil {
