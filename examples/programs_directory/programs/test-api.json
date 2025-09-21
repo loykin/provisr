@@ -7,7 +7,7 @@
     "retry_count": 1,
     "retry_interval": "500ms",
     "start_duration": "200ms",
-    "auto_restart": false,
+    "autorestart": false,
     "instances": 2,
     "env": ["SERVICE=api", "PORT=8000"],
     "log": {

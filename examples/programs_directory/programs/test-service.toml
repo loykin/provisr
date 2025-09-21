@@ -6,7 +6,7 @@ priority = 1
 retry_count = 2
 retry_interval = "1s"
 start_duration = "1s"
-auto_restart = true
+autorestart = true
 restart_interval = "1s"
 instances = 1
 env = ["SERVICE_NAME=test"]

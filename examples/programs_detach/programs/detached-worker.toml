@@ -1,0 +1,22 @@
+# A long-running worker launched in detached mode with a PID file.
+# This lets the child continue running even if the provisr daemon is killed.
+
+type = "process"
+[spec]
+name = "detached-worker"
+command = "sh -c 'echo detached-worker starting; while true; do echo detached-worker alive; sleep 2; done'"
+pid_file = "./provisr-detached-worker.pid"
+
+# Start the process in OS-level detached mode
+# On Unix this uses setsid; on Windows it uses DETACHED_PROCESS flags
+# See internal/process/sysattrs_unix.go and sysattrs_windows.go
+# for details.
+detached = true
+
+# Do not auto-restart for the purpose of this demo
+autorestart = false
+
+# Optional logging (writes to the directory defined in the example's config.toml)
+[spec.log]
+stdout = "./provisr-programs-detach-demo/detached-worker.out"
+stderr = "./provisr-programs-detach-demo/detached-worker.err"

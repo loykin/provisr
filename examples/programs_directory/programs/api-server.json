@@ -7,7 +7,7 @@
     "retry_count": 2,
     "retry_interval": "2s",
     "start_duration": "1s",
-    "auto_restart": true,
+    "autorestart": true,
     "restart_interval": "3s",
     "instances": 2,
     "env": ["API_PORT=8000", "DEBUG=true"],

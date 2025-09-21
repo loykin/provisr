@@ -7,7 +7,7 @@ priority = 10
 retry_count = 3
 retry_interval = "1s"
 start_duration = "2s"
-auto_restart = true
+autorestart = true
 restart_interval = "5s"
 instances = 1
 env = ["NODE_ENV=production", "PORT=3000"]
