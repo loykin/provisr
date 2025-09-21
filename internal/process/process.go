@@ -2,6 +2,7 @@ package process
 
 import (
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,7 +56,11 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 	configureSysProcAttr(cmd, spec)
 
 	// Setup slog-based logging if configured
-	if spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" {
+	if spec.Detached && spec.Log.File.Dir != "" {
+		slog.Warn("Detached processes do not support logging")
+	}
+
+	if !spec.Detached && (spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "") {
 		if spec.Log.File.Dir != "" {
 			_ = os.MkdirAll(spec.Log.File.Dir, 0o750)
 		}
@@ -73,10 +78,6 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 		} else {
 			cmd.Stderr, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
 		}
-	} else {
-		null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-		cmd.Stdout = null
-		cmd.Stderr = null
 	}
 	return cmd
 }
