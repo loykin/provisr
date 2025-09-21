@@ -2,19 +2,17 @@ package provisr
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cron"
 	"github.com/loykin/provisr/internal/history"
-	history_factory "github.com/loykin/provisr/internal/history/factory"
 	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
 	pg "github.com/loykin/provisr/internal/process_group"
 	iapi "github.com/loykin/provisr/internal/server"
-	storfactory "github.com/loykin/provisr/internal/store/factory"
+	"github.com/loykin/provisr/internal/store"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -36,22 +34,19 @@ type HistorySink = history.Sink
 
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
-func (m *Manager) SetGlobalEnv(kvs []string) { m.inner.SetGlobalEnv(kvs) }
-
-// SetStoreFromDSN Store controls
-func (m *Manager) SetStoreFromDSN(dsn string) error {
-	s, err := storfactory.NewFromDSN(dsn)
+// NewWithStore constructs a manager wired with the provided store and preloads
+// previously persisted processes from it.
+func NewWithStore(s store.Store) (*Manager, error) {
+	inner, err := manager.NewManagerWithStore(s)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return m.inner.SetStore(s)
+	return &Manager{inner: inner}, nil
 }
-func (m *Manager) DisableStore() { _ = m.inner.SetStore(nil) }
 
-func (m *Manager) SetHistorySinks(sinks ...HistorySink) { m.inner.SetHistorySinks(sinks...) }
-
-func (m *Manager) Start(s Spec) error  { return m.inner.Start(s) }
-func (m *Manager) StartN(s Spec) error { return m.inner.StartN(s) }
+func (m *Manager) SetGlobalEnv(kvs []string) { m.inner.SetGlobalEnv(kvs) }
+func (m *Manager) Start(s Spec) error        { return m.inner.Start(s) }
+func (m *Manager) StartN(s Spec) error       { return m.inner.StartN(s) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
 }
@@ -61,7 +56,6 @@ func (m *Manager) StatusAll(base string) ([]Status, error)       { return m.inne
 func (m *Manager) Count(base string) (int, error)                { return m.inner.Count(base) }
 
 // Group facade
-
 type Group struct{ inner *pg.Group }
 
 type GroupSpec = pg.GroupSpec
@@ -112,13 +106,4 @@ func ServeMetrics(addr string) error {
 		IdleTimeout:       60 * time.Second,
 	}
 	return srv.ListenAndServe()
-}
-
-func NewOpenSearchHistorySink(baseURL, index string) HistorySink {
-	sink, _ := history_factory.NewSinkFromDSN("opensearch://" + strings.TrimPrefix(baseURL, "http://") + "/" + index)
-	return sink
-}
-func NewClickHouseHistorySink(baseURL, table string) HistorySink {
-	sink, _ := history_factory.NewSinkFromDSN("clickhouse://" + strings.TrimPrefix(baseURL, "http://") + "?table=" + table)
-	return sink
 }

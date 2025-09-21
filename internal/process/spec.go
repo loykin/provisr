@@ -1,6 +1,7 @@
 package process
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -19,21 +20,41 @@ type DetectorConfig struct {
 // Spec describes a process to be managed.
 // All logging is now handled through slog-based structured logging.
 type Spec struct {
-	Name            string              `json:"name"`
-	Command         string              `json:"command"`          // command to start the process (shell)
-	WorkDir         string              `json:"work_dir"`         // optional working dir
-	Env             []string            `json:"env"`              // optional extra env
-	PIDFile         string              `json:"pid_file"`         // optional pidfile path; if set a PIDFileDetector will be used
-	Priority        int                 `json:"priority"`         // startup priority (lower numbers start first, default 0)
-	RetryCount      uint32              `json:"retry_count"`      // number of retries on start failure
-	RetryInterval   time.Duration       `json:"retry_interval"`   // interval between retries
-	StartDuration   time.Duration       `json:"start_duration"`   // minimum time the process must stay up to be considered started
-	AutoRestart     bool                `json:"auto_restart"`     // restart automatically if the process dies unexpectedly
-	RestartInterval time.Duration       `json:"restart_interval"` // wait before attempting an auto-restart
-	Instances       int                 `json:"instances"`        // number of instances to run concurrently (default 1)
-	Detectors       []detector.Detector `json:"-" mapstructure:"-"`
-	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"` // for config parsing
-	Log             logger.Config       `json:"log"`                                // unified slog-based logging configuration
+	Name            string              `json:"name" mapstructure:"name"`
+	Command         string              `json:"command" mapstructure:"command"`                   // command to start the process (shell)
+	WorkDir         string              `json:"work_dir" mapstructure:"work_dir"`                 // optional working dir
+	Env             []string            `json:"env" mapstructure:"env"`                           // optional extra env
+	PIDFile         string              `json:"pid_file" mapstructure:"pid_file"`                 // optional pidfile path; if set a PIDFileDetector will be used
+	Priority        int                 `json:"priority" mapstructure:"priority"`                 // startup priority (lower numbers start first, default 0)
+	RetryCount      uint32              `json:"retry_count" mapstructure:"retry_count"`           // number of retries on start failure
+	RetryInterval   time.Duration       `json:"retry_interval" mapstructure:"retry_interval"`     // interval between retries
+	StartDuration   time.Duration       `json:"start_duration" mapstructure:"start_duration"`     // minimum time the process must stay up to be considered started
+	AutoRestart     bool                `json:"auto_restart" mapstructure:"auto_restart"`         // restart automatically if the process dies unexpectedly
+	RestartInterval time.Duration       `json:"restart_interval" mapstructure:"restart_interval"` // wait before attempting an auto-restart
+	Instances       int                 `json:"instances" mapstructure:"instances"`               // number of instances to run concurrently (default 1)
+	Detached        bool                `json:"detached" mapstructure:"detached"`                 // run in detached mode
+	Detectors       []detector.Detector `json:"-" mapstructure:"-"`                               // excluded from mapstructure
+	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"`               // for config parsing
+	Log             logger.Config       `json:"log" mapstructure:"log"`                           // unified slog-based logging configuration
+}
+
+// Validate enforces Spec invariants.
+func (s *Spec) Validate() error {
+	// Basic required fields
+	if strings.TrimSpace(s.Name) == "" {
+		return fmt.Errorf("process requires name")
+	}
+	if strings.TrimSpace(s.Command) == "" {
+		return fmt.Errorf("process %q requires command", s.Name)
+	}
+	// Detached mode must not configure file logging, because manager-supplied
+	// writers may hold the child process via open fds. Enforce mutual exclusion.
+	if s.Detached {
+		if s.Log.File.Dir != "" || s.Log.File.StdoutPath != "" || s.Log.File.StderrPath != "" {
+			return fmt.Errorf("process %q: detached=true cannot be combined with log outputs; remove log config for detached processes", s.Name)
+		}
+	}
+	return nil
 }
 
 func (s *Spec) DeepCopy() *Spec {
