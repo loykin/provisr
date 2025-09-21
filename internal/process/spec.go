@@ -31,6 +31,7 @@ type Spec struct {
 	AutoRestart     bool                `json:"auto_restart"`     // restart automatically if the process dies unexpectedly
 	RestartInterval time.Duration       `json:"restart_interval"` // wait before attempting an auto-restart
 	Instances       int                 `json:"instances"`        // number of instances to run concurrently (default 1)
+	Detached        bool                `json:"detached"`         // run in detached mode
 	Detectors       []detector.Detector `json:"-" mapstructure:"-"`
 	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"` // for config parsing
 	Log             logger.Config       `json:"log"`                                // unified slog-based logging configuration

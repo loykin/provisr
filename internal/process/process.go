@@ -51,7 +51,8 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 	if len(mergedEnv) > 0 {
 		cmd.Env = mergedEnv
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Configure platform-specific process attributes (detached, process group, etc.)
+	configureSysProcAttr(cmd, spec)
 
 	// Setup slog-based logging if configured
 	if spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" {
@@ -118,6 +119,7 @@ func (r *Process) SetStarted(cmd *exec.Cmd) {
 // TryStart atomically starts the command and updates internal state and PID file.
 // It encapsulates cmd.Start + SetStarted + WritePIDFile to reduce races.
 func (r *Process) TryStart(cmd *exec.Cmd) error {
+	// SysProcAttr must already be configured by ConfigureCmd; do not override here.
 	if err := cmd.Start(); err != nil {
 		return err
 	}

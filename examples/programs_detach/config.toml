@@ -1,0 +1,29 @@
+# Detached programs directory demo configuration
+
+# Use OS env and set a couple of demo variables
+use_os_env = true
+env = ["DEMO_ENV=production", "SERVICE_VERSION=1.0.0"]
+
+# Load processes from this directory (relative to this file)
+programs_directory = "programs"
+
+[log]
+dir = "./provisr-programs-detach-demo"
+max_size_mb = 5
+max_backups = 2
+max_age_days = 3
+compress = true
+
+[server]
+# Use a non-default port to avoid conflicts with other examples
+listen = "127.0.0.1:18080"
+base_path = "/api"
+
+[store]
+# Enable persistent store so provisr can recover/reattach across restarts
+enabled = true
+# Use a local SQLite database file (created automatically)
+dsn = "sqlite:////tmp/provisr-detach-demo.db"
+
+[metrics]
+enabled = false
