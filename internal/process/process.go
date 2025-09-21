@@ -21,11 +21,9 @@ type Process struct {
 	stopping  bool // true when Stop has been requested; suppress autorestart
 	outCloser io.WriteCloser
 	errCloser io.WriteCloser
-
-	// Race-free process tracking
-	pid     int   // Process ID for safe detection
-	exited  bool  // Track if process has exited
-	exitErr error // Exit error if any
+	pid       int   // Process ID for safe detection
+	exited    bool  // Track if process has exited
+	exitErr   error // Exit error if any
 }
 
 func New(spec Spec) *Process { return &Process{spec: spec} }

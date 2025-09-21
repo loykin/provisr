@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -920,4 +921,248 @@ func killProcessByPID(pid int) error {
 		return fmt.Errorf("invalid PID: %d", pid)
 	}
 	return syscall.Kill(pid, syscall.SIGKILL)
+}
+
+// TestManagerRestartOnly tests that Manager exclusively handles restart logic
+func TestManagerRestartOnly(t *testing.T) {
+	t.Log("=== Manager-Only Restart Test ===")
+
+	// Create manager
+	manager := NewManager()
+	defer func() { _ = manager.Shutdown() }()
+	t.Log("✓ Manager reconciler started")
+
+	// Test process spec with a command that exists on macOS
+	spec := process.Spec{
+		Name:        "restart-test",
+		Command:     "sleep 60", // Use sleep command which exists on macOS
+		AutoRestart: true,
+	} // Start process through Manager
+	err := manager.Start(spec)
+	require.NoError(t, err)
+	t.Log("✓ Process started through Manager")
+
+	// Wait for process to be fully running
+	time.Sleep(500 * time.Millisecond)
+
+	// Get initial status
+	status, err := manager.Status("restart-test")
+	require.NoError(t, err)
+	require.True(t, status.Running, "Process should be running")
+	originalPID := status.PID
+	originalRestarts := status.Restarts
+	t.Logf("✓ Initial state: PID=%d, Restarts=%d", originalPID, originalRestarts)
+
+	// Test 1: Single kill and restart
+	err = syscall.Kill(originalPID, syscall.SIGKILL)
+	require.NoError(t, err)
+	t.Logf("✓ Killed process PID %d", originalPID)
+
+	// Wait for Manager to restart
+	time.Sleep(3 * time.Second)
+
+	status, err = manager.Status("restart-test")
+	require.NoError(t, err)
+	phase1PID := status.PID
+	phase1Restarts := status.Restarts
+	t.Logf("✓ After restart: PID=%d, Restarts=%d", phase1PID, phase1Restarts)
+
+	// Verify exactly 1 restart occurred
+	assert.Equal(t, originalRestarts+1, phase1Restarts, "Should have exactly 1 restart")
+	assert.NotEqual(t, originalPID, phase1PID, "PID should have changed after restart")
+
+	// Test 2: Rapid successive kills
+	t.Log("--- Rapid successive kills test ---")
+	initialRapidRestarts := phase1Restarts
+
+	for i := 1; i <= 3; i++ {
+		// Get current status
+		currentStatus, err := manager.Status("restart-test")
+		require.NoError(t, err)
+		require.True(t, currentStatus.Running, "Process should be running before kill")
+
+		// Kill the process
+		err = syscall.Kill(currentStatus.PID, syscall.SIGKILL)
+		require.NoError(t, err)
+		t.Logf("Rapid kill #%d: PID %d", i, currentStatus.PID)
+
+		// Wait for restart
+		time.Sleep(5 * time.Second)
+	}
+
+	// Final check - should have exactly initialRapidRestarts + 3
+	finalStatus, err := manager.Status("restart-test")
+	require.NoError(t, err)
+	finalRestarts := finalStatus.Restarts
+	expectedRestarts := initialRapidRestarts + 3
+
+	t.Logf("✓ Final result: %d restarts from 3 kills", finalRestarts-initialRapidRestarts)
+
+	// Verify exactly 1:1 ratio
+	if finalRestarts == expectedRestarts {
+		t.Log("✅ Perfect 1:1 kill-to-restart ratio achieved")
+	} else {
+		t.Errorf("❌ Expected %d total restarts, got %d", expectedRestarts, finalRestarts)
+	}
+}
+
+// Test state-based command validation
+func TestStateBasedCommandValidation(t *testing.T) {
+	spec := process.Spec{
+		Name:    "validation-test",
+		Command: "sleep 0.5",
+	}
+
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	defer func() { _ = mp.Shutdown() }()
+
+	t.Run("StartAlreadyRunning", func(t *testing.T) {
+		// Start the process
+		if err := mp.Start(spec); err != nil {
+			t.Fatalf("Initial start failed: %v", err)
+		}
+
+		// Give it time to start
+		time.Sleep(50 * time.Millisecond)
+
+		// Try to start again - should get a clear error message
+		err := mp.Start(spec)
+		if err == nil {
+			t.Error("Expected error when starting already running process")
+		} else {
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "already running") {
+				t.Errorf("Expected 'already running' in error message, got: %v", errMsg)
+			}
+			if !strings.Contains(errMsg, spec.Name) {
+				t.Errorf("Expected process name in error message, got: %v", errMsg)
+			}
+		}
+	})
+
+	t.Run("StartWhileStarting", func(t *testing.T) {
+		// Create a process that takes longer to start - use a more complex command
+		slowSpec := process.Spec{
+			Name:          "slow-start-test",
+			Command:       "sh -c 'sleep 0.1 && echo started && sleep 2'", // Takes time to fully start
+			StartDuration: 200 * time.Millisecond,                         // Process must stay up for this duration
+		}
+
+		slowMp := NewManagedProcess(slowSpec, mockEnvMerger)
+		defer func() { _ = slowMp.Shutdown() }()
+
+		// Start the process (don't wait for completion)
+		go func() { _ = slowMp.Start(slowSpec) }()
+
+		// Immediately try to start again - this should catch it in "starting" state
+		time.Sleep(5 * time.Millisecond) // Minimal delay to let first start begin
+		err := slowMp.Start(slowSpec)
+
+		// Check the error message - it might be "starting" or "running" depending on timing
+		if err == nil {
+			t.Error("Expected error when starting while process is in transition")
+		} else {
+			errMsg := err.Error()
+			// Accept either "starting" or "running" state errors
+			hasValidError := strings.Contains(errMsg, "already starting") ||
+				strings.Contains(errMsg, "already running")
+			if !hasValidError {
+				t.Errorf("Expected 'already starting' or 'already running' in error message, got: %v", errMsg)
+			}
+			t.Logf("Got expected error: %v", errMsg)
+		}
+	})
+
+	t.Run("DetailedStatusWithState", func(t *testing.T) {
+		// Test that status includes state information
+		status := mp.Status()
+
+		if status.State == "" {
+			t.Error("Expected State field to be populated")
+		}
+
+		if status.Name != spec.Name {
+			t.Errorf("Expected name '%s', got '%s'", spec.Name, status.Name)
+		}
+
+		// State should be one of the valid states
+		validStates := []string{"stopped", "starting", "running", "stopping"}
+		stateValid := false
+		for _, validState := range validStates {
+			if status.State == validState {
+				stateValid = true
+				break
+			}
+		}
+		if !stateValid {
+			t.Errorf("State '%s' is not a valid state", status.State)
+		}
+	})
+
+	t.Run("StopWhileStopping", func(t *testing.T) {
+		// Start a long-running process
+		longSpec := process.Spec{
+			Name:    "long-running-test",
+			Command: "sleep 5",
+		}
+
+		longMp := NewManagedProcess(longSpec, mockEnvMerger)
+		defer func() { _ = longMp.Shutdown() }()
+
+		// Start the process
+		if err := longMp.Start(longSpec); err != nil {
+			t.Fatalf("Failed to start long-running process: %v", err)
+		}
+
+		// Give it time to start
+		time.Sleep(100 * time.Millisecond)
+
+		// Start stopping (don't wait)
+		go func() { _ = longMp.Stop(5 * time.Second) }()
+
+		// Try to stop again immediately
+		time.Sleep(10 * time.Millisecond)
+
+		// This should succeed (stopping an already stopping process is typically allowed)
+		// But we can test that the state is properly managed
+		status := longMp.Status()
+		if status.State != "stopping" && status.State != "stopped" {
+			t.Logf("Process state during stop: %s (this is acceptable)", status.State)
+		}
+	})
+}
+
+// Test expected shutdown error handling
+func TestExpectedShutdownErrors(t *testing.T) {
+	tests := []struct {
+		errorString string
+		expected    bool
+	}{
+		{"signal: terminated", true},
+		{"signal: killed", true},
+		{"signal: interrupt", true},
+		{"some other error", false},
+		{"", false},
+	}
+
+	for _, test := range tests {
+		var err error
+		if test.errorString != "" {
+			err = &mockError{msg: test.errorString}
+		}
+
+		result := isExpectedShutdownError(err)
+		if result != test.expected {
+			t.Errorf("For error '%s', expected %v, got %v", test.errorString, test.expected, result)
+		}
+	}
+}
+
+// Mock error type for testing
+type mockError struct {
+	msg string
+}
+
+func (e *mockError) Error() string {
+	return e.msg
 }

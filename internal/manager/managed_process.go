@@ -121,11 +121,7 @@ func (up *ManagedProcess) Status() process.Status {
 	up.mu.RUnlock()
 
 	if proc == nil {
-		return process.Status{
-			//Name:    up.name,
-			//Running: false,
-			//Restarts: 0up.spec.RetryCount,
-		}
+		return process.Status{}
 	}
 
 	// Get process status (process handles its own locking)
