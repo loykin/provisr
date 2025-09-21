@@ -383,14 +383,15 @@ func (up *ManagedProcess) handleUpdateSpec(newSpec process.Spec) error {
 
 // handleShutdown performs graceful shutdown
 func (up *ManagedProcess) handleShutdown() error {
-	// Do NOT stop the underlying process here.
-	// Requirement: parent (manager) may die but the child process should keep running.
-	// We only stop on explicit Stop() requests.
+	err := up.handleStop(3 * time.Second)
+	if err != nil && !isExpectedShutdownError(err) {
+		return err
+	}
 
-	// Clean up resources locally
+	// Clean up resources
 	up.mu.Lock()
 	if up.proc != nil {
-		// Do not remove PID file either, it's needed for re-attachment after restart
+		up.proc.RemovePIDFile()
 	}
 	up.mu.Unlock()
 
