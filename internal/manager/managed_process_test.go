@@ -13,14 +13,6 @@ func mockEnvMerger(spec process.Spec) []string {
 	return append([]string{"TEST_ENV=test"}, spec.Env...)
 }
 
-func mockStartLogger(_ *process.Process) {
-	// Mock start logging
-}
-
-func mockStopLogger(_ *process.Process, _ error) {
-	// Mock stop logging
-}
-
 func TestNewManagedProcess(t *testing.T) {
 	spec := process.Spec{
 		Name:    "test-process",
@@ -30,8 +22,6 @@ func TestNewManagedProcess(t *testing.T) {
 	mp := NewManagedProcess(
 		spec,
 		mockEnvMerger,
-		mockStartLogger,
-		mockStopLogger,
 	)
 
 	if mp == nil {
@@ -54,7 +44,7 @@ func TestManagedProcessStatus(t *testing.T) {
 		Command: "echo hello",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Test initial status
 	status := mp.Status()
@@ -77,7 +67,7 @@ func TestManagedProcessStartStop(t *testing.T) {
 		Command: "sleep 0.1",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 	// Test start
 	err := mp.Start(spec)
@@ -108,7 +98,7 @@ func TestManagedProcessUpdateSpec(t *testing.T) {
 		Command: "echo original",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Test updating spec
 	newSpec := process.Spec{
@@ -129,7 +119,7 @@ func TestManagedProcessStateMachine(t *testing.T) {
 		Command: "sleep 0.05",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// Initial state should be Stopped
@@ -161,7 +151,7 @@ func TestManagedProcessConcurrentOperations(t *testing.T) {
 		Command: "sleep 0.1",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// Start multiple goroutines to test concurrent access
@@ -209,7 +199,7 @@ func TestManagedProcessShutdown(t *testing.T) {
 		Command: "sleep 10",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Start process
 	err := mp.Start(spec)
@@ -236,7 +226,7 @@ func TestManagedProcessQuickCommands(t *testing.T) {
 		Command: "true", // Very quick command
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// Test starting a quick command
@@ -259,7 +249,7 @@ func TestManagedProcessMultipleStarts(t *testing.T) {
 		Command: "sleep 0.05",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// First start
@@ -283,7 +273,7 @@ func TestManagedProcessStopNonRunning(t *testing.T) {
 		Command: "echo hello",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Try to stop a process that was never started - should be no-op, not error
 	err := mp.Stop(1 * time.Second)
@@ -342,10 +332,8 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 	}
 
 	envMerger := func(spec process.Spec) []string { return spec.Env }
-	startLogger := func(proc *process.Process) {}
-	stopLogger := func(proc *process.Process, err error) {}
 
-	mp := NewManagedProcess(spec, envMerger, startLogger, stopLogger)
+	mp := NewManagedProcess(spec, envMerger)
 	defer func() { _ = mp.Stop(5 * time.Second) }()
 
 	// Start the process
@@ -407,10 +395,8 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	}
 
 	envMerger := func(spec process.Spec) []string { return spec.Env }
-	startLogger := func(proc *process.Process) {}
-	stopLogger := func(proc *process.Process, err error) {}
 
-	mp := NewManagedProcess(spec, envMerger, startLogger, stopLogger)
+	mp := NewManagedProcess(spec, envMerger)
 	defer func() { _ = mp.Stop(2 * time.Second) }()
 
 	// Start the process

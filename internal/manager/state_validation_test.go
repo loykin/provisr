@@ -15,7 +15,7 @@ func TestStateBasedCommandValidation(t *testing.T) {
 		Command: "sleep 0.5",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	t.Run("StartAlreadyRunning", func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestStateBasedCommandValidation(t *testing.T) {
 			StartDuration: 200 * time.Millisecond,                         // Process must stay up for this duration
 		}
 
-		slowMp := NewManagedProcess(slowSpec, mockEnvMerger, mockStartLogger, mockStopLogger)
+		slowMp := NewManagedProcess(slowSpec, mockEnvMerger)
 		defer func() { _ = slowMp.Shutdown() }()
 
 		// Start the process (don't wait for completion)
@@ -108,7 +108,7 @@ func TestStateBasedCommandValidation(t *testing.T) {
 			Command: "sleep 5",
 		}
 
-		longMp := NewManagedProcess(longSpec, mockEnvMerger, mockStartLogger, mockStopLogger)
+		longMp := NewManagedProcess(longSpec, mockEnvMerger)
 		defer func() { _ = longMp.Shutdown() }()
 
 		// Start the process

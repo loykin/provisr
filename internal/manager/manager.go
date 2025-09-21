@@ -229,8 +229,6 @@ func (m *Manager) ensureProcess(name string) *ManagedProcess {
 		up = NewManagedProcess(
 			spec,
 			m.mergeEnv,
-			m.recordStart,
-			m.recordStop,
 		)
 		m.processes[name] = up
 	}

@@ -368,31 +368,6 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	// Set global environment - 직접 필드 접근
 	mgr.SetGlobalEnv(cfg.GlobalEnv)
 
-	// Setup store from config
-	if cfg.Store != nil && cfg.Store.Enabled {
-		if err := mgr.SetStoreFromDSN(cfg.Store.DSN); err != nil {
-			return fmt.Errorf("error setting up store: %w", err)
-		}
-	}
-
-	// Setup history from config
-	var historySinks []provisr.HistorySink
-	if cfg.History != nil && cfg.History.Enabled {
-		if cfg.History.OpenSearchURL != "" && cfg.History.OpenSearchIndex != "" {
-			historySinks = append(historySinks, provisr.NewOpenSearchHistorySink(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex))
-		}
-		if cfg.History.ClickHouseURL != "" && cfg.History.ClickHouseTable != "" {
-			historySinks = append(historySinks, provisr.NewClickHouseHistorySink(cfg.History.ClickHouseURL, cfg.History.ClickHouseTable))
-		}
-
-		// Note: Store history control would need additional Manager method
-		// For now, we assume it's enabled by default if store is enabled
-	}
-
-	if len(historySinks) > 0 {
-		mgr.SetHistorySinks(historySinks...)
-	}
-
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {
 		if cfg.Metrics.Listen != "" {

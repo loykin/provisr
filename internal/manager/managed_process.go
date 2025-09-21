@@ -19,28 +19,14 @@ import (
 // State Machine:
 // Stopped -> Starting -> Running -> Stopping -> Stopped
 type ManagedProcess struct {
-	//// Immutable after creation
-	//name string
-
-	// State lock (minimal scope, clearly defined)
-	mu    sync.RWMutex
-	state processState
-	//spec        process.Spec
-	proc *process.Process
-	//autoRestart bool
-	restarts uint32
-
-	// Control channels (lock-free communication)
-	cmdChan  chan command
-	doneChan chan struct{}
-
-	// Throttle restarts respecting spec.RestartInterval
+	mu            sync.RWMutex
+	state         processState
+	proc          *process.Process
+	restarts      uint32
+	cmdChan       chan command
+	doneChan      chan struct{}
 	lastRestartAt time.Time
-
-	// Callbacks (injected dependencies)
-	envMerger   func(process.Spec) []string
-	startLogger func(*process.Process)
-	stopLogger  func(*process.Process, error)
+	envMerger     func(process.Spec) []string
 }
 
 type processState int32
@@ -87,19 +73,13 @@ const (
 func NewManagedProcess(
 	spec process.Spec,
 	envMerger func(process.Spec) []string,
-	startLogger func(*process.Process),
-	stopLogger func(*process.Process, error),
 ) *ManagedProcess {
 	up := &ManagedProcess{
-		state: StateStopped,
-		//spec:        spec,
-		//autoRestart: spec.AutoRestart,
-		proc:        process.New(spec),
-		cmdChan:     make(chan command, 16), // Buffered to prevent blocking
-		doneChan:    make(chan struct{}),
-		envMerger:   envMerger,
-		startLogger: startLogger,
-		stopLogger:  stopLogger,
+		state:     StateStopped,
+		proc:      process.New(spec),
+		cmdChan:   make(chan command, 16), // Buffered to prevent blocking
+		doneChan:  make(chan struct{}),
+		envMerger: envMerger,
 	}
 
 	go up.runStateMachine()
@@ -329,9 +309,6 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 
 	// Record metrics and history (lock-free)
 	metrics.IncStart(newSpec.Name)
-	if up.startLogger != nil {
-		up.startLogger(up.proc)
-	}
 
 	return nil
 }
@@ -372,9 +349,6 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 
 	// Record metrics
 	metrics.IncStop(up.proc.GetName())
-	if up.stopLogger != nil {
-		up.stopLogger(up.proc, nil)
-	}
 
 	return nil
 }
@@ -456,9 +430,7 @@ func (up *ManagedProcess) checkProcessHealth() {
 	if !alive {
 		// Process died; transition to stopped and log. Do NOT restart here.
 		up.setState(StateStopped)
-		if up.stopLogger != nil {
-			up.stopLogger(up.proc, fmt.Errorf("process exited unexpectedly"))
-		}
+
 		// Auto-restart, if any, will be coordinated by Manager.reconcileProcess.
 	} else if up.proc.StopRequested() {
 	}
