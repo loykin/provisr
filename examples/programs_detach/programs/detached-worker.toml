@@ -16,7 +16,3 @@ detached = true
 # Do not auto-restart for the purpose of this demo
 auto_restart = false
 
-# Optional logging (writes to the directory defined in the example's config.toml)
-[spec.log]
-stdout = "./provisr-programs-detach-demo/detached-worker.out"
-stderr = "./provisr-programs-detach-demo/detached-worker.err"

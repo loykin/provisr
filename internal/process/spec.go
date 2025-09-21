@@ -1,6 +1,7 @@
 package process
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -35,6 +36,25 @@ type Spec struct {
 	Detectors       []detector.Detector `json:"-" mapstructure:"-"`                               // excluded from mapstructure
 	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"`               // for config parsing
 	Log             logger.Config       `json:"log" mapstructure:"log"`                           // unified slog-based logging configuration
+}
+
+// Validate enforces Spec invariants.
+func (s *Spec) Validate() error {
+	// Basic required fields
+	if strings.TrimSpace(s.Name) == "" {
+		return fmt.Errorf("process requires name")
+	}
+	if strings.TrimSpace(s.Command) == "" {
+		return fmt.Errorf("process %q requires command", s.Name)
+	}
+	// Detached mode must not configure file logging, because manager-supplied
+	// writers may hold the child process via open fds. Enforce mutual exclusion.
+	if s.Detached {
+		if s.Log.File.Dir != "" || s.Log.File.StdoutPath != "" || s.Log.File.StderrPath != "" {
+			return fmt.Errorf("process %q: detached=true cannot be combined with log outputs; remove log config for detached processes", s.Name)
+		}
+	}
+	return nil
 }
 
 func (s *Spec) DeepCopy() *Spec {
