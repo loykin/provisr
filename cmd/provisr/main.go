@@ -1,5 +1,6 @@
 package main
 
+import _ "net/http/pprof"
 import (
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ func main() {
 	root, bind := buildRoot(mgr)
 	// set up metrics hook
 	bind()
+
 	if err := root.Execute(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
