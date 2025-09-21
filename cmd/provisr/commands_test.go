@@ -11,16 +11,6 @@ import (
 	"github.com/loykin/provisr"
 )
 
-// Test helper that uses direct manager instead of API
-func (c *command) startDirect(f StartFlags) error {
-	spec := provisr.Spec{
-		Name:    f.Name,
-		Command: f.Cmd,
-	}
-
-	return c.mgr.Start(spec)
-}
-
 func (c *command) startDirectWithConfig(f StartFlags) error {
 	config, err := provisr.LoadConfig(f.ConfigPath)
 	if err != nil {

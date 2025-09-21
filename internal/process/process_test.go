@@ -1,10 +1,14 @@
 package process
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -74,7 +78,6 @@ func TestConfigureCmdAppliesEnvWorkdirLogging(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		_ = c.Wait()
-		r.CloseWaitDone()
 		close(done)
 	}()
 	select {
@@ -111,11 +114,10 @@ func TestEnforceStartDurationEarlyExit(t *testing.T) {
 	if err := r.TryStart(cmd); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	// Simulate monitor: wait for exit then close waitDone and mark exited
+	// Wait for exit and mark exited
 	c := r.CopyCmd()
 	go func() {
 		err := c.Wait()
-		r.CloseWaitDone()
 		r.MarkExited(err)
 	}()
 
@@ -144,7 +146,6 @@ func TestEnforceStartDurationSuccess(t *testing.T) {
 	c := r.CopyCmd()
 	go func() {
 		err := c.Wait()
-		r.CloseWaitDone()
 		r.MarkExited(err)
 	}()
 
@@ -173,20 +174,6 @@ func TestStopRequestedToggleAndIncRestarts(t *testing.T) {
 	}
 }
 
-func TestMonitoringStartIfNeededAndStop(t *testing.T) {
-	r := New(Spec{Name: "m"})
-	if got := r.MonitoringStartIfNeeded(); !got {
-		t.Fatalf("first MonitoringStartIfNeeded should return true")
-	}
-	if got := r.MonitoringStartIfNeeded(); got {
-		t.Fatalf("second MonitoringStartIfNeeded should return false (idempotent)")
-	}
-	r.MonitoringStop()
-	if got := r.MonitoringStartIfNeeded(); !got {
-		t.Fatalf("after stop, MonitoringStartIfNeeded should return true again")
-	}
-}
-
 func TestCloseWritersAndRemovePIDFileAndDetectAlive(t *testing.T) {
 	requireUnix(t)
 	dir := t.TempDir()
@@ -211,7 +198,6 @@ func TestCloseWritersAndRemovePIDFileAndDetectAlive(t *testing.T) {
 	c := r.CopyCmd()
 	_ = c.Process.Kill()
 	_, _ = c.Process.Wait()
-	r.CloseWaitDone()
 	r.MarkExited(nil)
 
 	// RemovePIDFile should remove the file and be idempotent
@@ -263,7 +249,6 @@ func TestDetectorsAndUpdateSpec(t *testing.T) {
 	// Wait quickly
 	c := r.CopyCmd()
 	_ = c.Wait()
-	r.CloseWaitDone()
 	r.MarkExited(nil)
 	// ensure EnforceStartDuration with 0 is no-op
 	if err := r.EnforceStartDuration(0); err != nil {
@@ -283,58 +268,6 @@ func waitUntilProc(timeout, step time.Duration, fn func() bool) bool {
 	return false
 }
 
-//func TestProcessStopWithoutMonitor(t *testing.T) {
-//	requireUnix(t)
-//	r := New(Spec{Name: "stop-nomon", Command: "sleep 1"})
-//	cmd := r.ConfigureCmd(nil)
-//	if err := r.TryStart(cmd); err != nil {
-//		t.Fatalf("start: %v", err)
-//	}
-//	if r.IsMonitoring() {
-//		t.Fatalf("expected no monitor initially")
-//	}
-//	_ = r.Stop(500 * time.Millisecond)
-//	if ok, _ := r.DetectAlive(); ok {
-//		t.Fatalf("expected not alive after Stop")
-//	}
-//	if ch := r.WaitDoneChan(); ch != nil {
-//		t.Fatalf("expected waitDone to be cleared by Stop when owning wait")
-//	}
-//}
-
-func TestProcessStopWithSimulatedMonitor(t *testing.T) {
-	requireUnix(t)
-	r := New(Spec{Name: "stop-mon", Command: "sleep 1"})
-	cmd := r.ConfigureCmd(nil)
-	if err := r.TryStart(cmd); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if !r.MonitoringStartIfNeeded() {
-		t.Fatalf("failed to claim monitoring")
-	}
-	done := make(chan struct{})
-	go func() {
-		c := r.CopyCmd()
-		_ = c.Wait()
-		r.CloseWaitDone()
-		r.MarkExited(nil)
-		r.CloseWriters()
-		r.MonitoringStop()
-		close(done)
-	}()
-	// give the process a brief moment to be fully up
-	time.Sleep(50 * time.Millisecond)
-	_ = r.Stop(700 * time.Millisecond)
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second):
-		t.Fatalf("monitor waiter timeout")
-	}
-	if ok, _ := r.DetectAlive(); ok {
-		t.Fatalf("expected not alive after Stop with monitor")
-	}
-}
-
 func TestProcessKillWithoutMonitor(t *testing.T) {
 	requireUnix(t)
 	r := New(Spec{Name: "kill-nomon", Command: "sleep 10"})
@@ -345,34 +278,6 @@ func TestProcessKillWithoutMonitor(t *testing.T) {
 	_ = r.Kill()
 	if !waitUntilProc(1*time.Second, 20*time.Millisecond, func() bool { alive, _ := r.DetectAlive(); return !alive }) {
 		t.Fatalf("expected process to be dead after Kill")
-	}
-}
-
-func TestProcessKillWithSimulatedMonitor(t *testing.T) {
-	requireUnix(t)
-	r := New(Spec{Name: "kill-mon", Command: "sleep 10"})
-	cmd := r.ConfigureCmd(nil)
-	if err := r.TryStart(cmd); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if !r.MonitoringStartIfNeeded() {
-		t.Fatalf("failed to claim monitoring")
-	}
-	done := make(chan struct{})
-	go func() {
-		c := r.CopyCmd()
-		_ = c.Wait()
-		r.CloseWaitDone()
-		r.MarkExited(nil)
-		r.CloseWriters()
-		r.MonitoringStop()
-		close(done)
-	}()
-	_ = r.Kill()
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second):
-		t.Fatalf("monitor waiter timeout after Kill")
 	}
 }
 
@@ -398,7 +303,6 @@ func TestProcessDetectAliveParallel(t *testing.T) {
 	}
 	c := r.CopyCmd()
 	_ = c.Wait()
-	r.CloseWaitDone()
 	r.MarkExited(nil)
 	for i := 0; i < 20; i++ {
 		select {
@@ -406,5 +310,276 @@ func TestProcessDetectAliveParallel(t *testing.T) {
 		case <-time.After(1 * time.Second):
 			t.Fatalf("goroutine %d did not finish", i)
 		}
+	}
+}
+
+func TestEnforceStartDurationFail(t *testing.T) {
+	spec := Spec{
+		Name:    "test-fail",
+		Command: "false", // 'false' command exits immediately with status 1
+	}
+
+	p := New(spec)
+
+	// Start process (should succeed)
+	var env []string
+	cmd := p.ConfigureCmd(env)
+	err := p.TryStart(cmd)
+	if err != nil {
+		t.Fatalf("TryStart should succeed: %v", err)
+	}
+
+	t.Logf("Process started with PID: %d", cmd.Process.Pid)
+
+	// Wait a bit to see if process exits quickly
+	time.Sleep(100 * time.Millisecond)
+
+	alive, source := p.DetectAlive()
+	t.Logf("After 100ms: DetectAlive=%v, source=%s", alive, source)
+
+	// Enforce start duration (should fail because process exits immediately)
+	err = p.EnforceStartDuration(50 * time.Millisecond)
+	if err == nil {
+		t.Fatalf("EnforceStartDuration should fail for quickly exiting process")
+	}
+
+	t.Logf("✅ Got expected error: %v", err)
+}
+
+// TestDetectAlive_ProcessLifecycle tests the complete lifecycle of process detection
+func TestDetectAlive_ProcessLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		timeout time.Duration
+	}{
+		{
+			name:    "simple_echo_process",
+			command: "sh -c 'echo test process; sleep 5'",
+			timeout: 10 * time.Second,
+		},
+		{
+			name:    "long_running_process",
+			command: "sh -c 'while true; do echo running; sleep 1; done'",
+			timeout: 15 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a minimal process spec
+			spec := Spec{
+				Name:    tt.name,
+				Command: tt.command,
+			}
+
+			// Create process instance
+			proc := New(spec)
+
+			// Phase 1: Start process and verify it's alive
+			t.Log("Phase 1: Starting process and verifying alive detection")
+
+			// Build and start command
+			cmd := spec.BuildCommand()
+			err := proc.TryStart(cmd)
+			if err != nil {
+				t.Fatalf("Failed to start process: %v", err)
+			}
+			proc.SetStarted(cmd)
+
+			defer func() {
+				if proc.cmd != nil && proc.cmd.Process != nil {
+					_ = proc.cmd.Process.Kill()
+				}
+			}()
+
+			// Wait a moment for process to fully start
+			time.Sleep(100 * time.Millisecond)
+
+			// Verify process is detected as alive
+			alive, source := proc.DetectAlive()
+			if !alive {
+				t.Fatalf("Process should be alive after start, got alive=%v, source=%s", alive, source)
+			}
+			t.Logf("✓ Process correctly detected as alive: source=%s", source)
+
+			// Get the PID for verification
+			if proc.cmd == nil || proc.cmd.Process == nil {
+				t.Fatal("Process command or process is nil")
+			}
+			pid := proc.cmd.Process.Pid
+			t.Logf("Process PID: %d", pid)
+
+			// Phase 2: Kill the process and verify it's detected as dead
+			t.Log("Phase 2: Killing process and verifying dead detection")
+
+			// Kill the process forcefully
+			err = proc.cmd.Process.Kill()
+			if err != nil {
+				t.Fatalf("Failed to kill process: %v", err)
+			}
+
+			// Wait for process to die
+			err = proc.cmd.Wait()
+			if err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					t.Logf("Process exited as expected: %v", exitErr)
+				}
+			}
+			// Give some time for the system to clean up
+			time.Sleep(200 * time.Millisecond)
+
+			// Phase 3: Verify DetectAlive correctly identifies dead process
+			t.Log("Phase 3: Verifying dead process detection")
+
+			maxAttempts := 5
+			var lastResult bool
+			var lastSource string
+
+			for i := 0; i < maxAttempts; i++ {
+				alive, source = proc.DetectAlive()
+				lastResult = alive
+				lastSource = source
+
+				t.Logf("Attempt %d: DetectAlive returned alive=%v, source=%s", i+1, alive, source)
+
+				if !alive {
+					t.Logf("✓ Process correctly detected as dead after %d attempts", i+1)
+					break
+				}
+
+				// Wait a bit before retrying
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			if lastResult {
+				// This is the critical failure - false positive detection
+				t.Errorf("CRITICAL: DetectAlive shows false positive! Process PID %d is dead but DetectAlive returned alive=true, source=%s", pid, lastSource)
+
+				// Additional verification using system tools
+				t.Logf("Additional verification for PID %d:", pid)
+
+				// Test with direct kill signal
+				err := syscall.Kill(pid, 0)
+				t.Logf("syscall.Kill(pid, 0) error: %v", err)
+
+				// Test with ps command
+				cmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid))
+				output, err := cmd.CombinedOutput()
+				t.Logf("ps command output: %s, error: %v", string(output), err)
+			}
+		})
+	}
+}
+
+// TestDetectAlive_FalsePositiveScenarios tests specific scenarios known to cause false positives
+func TestDetectAlive_FalsePositiveScenarios(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	// Test the specific api-server command that's causing issues
+	spec := Spec{
+		Name:    "test-api-server",
+		Command: "sh -c 'while true; do echo api-server running; sleep 2; done'",
+	}
+
+	proc := New(spec)
+
+	// Start the process
+	cmd := spec.BuildCommand()
+	err := proc.TryStart(cmd)
+	if err != nil {
+		t.Fatalf("Failed to start test process: %v", err)
+	}
+	proc.SetStarted(cmd)
+
+	defer func() {
+		if proc.cmd != nil && proc.cmd.Process != nil {
+			_ = proc.cmd.Process.Kill()
+		}
+	}()
+
+	// Wait for process to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify alive
+	alive, source := proc.DetectAlive()
+	if !alive {
+		t.Fatalf("Process should be alive, got alive=%v, source=%s", alive, source)
+	}
+
+	pid := proc.cmd.Process.Pid
+	t.Logf("Started test process with PID: %d", pid)
+
+	// Kill with SIGKILL
+	t.Logf("Killing process PID %d with SIGKILL", pid)
+	err = syscall.Kill(pid, syscall.SIGKILL)
+	if err != nil {
+		t.Fatalf("Failed to send SIGKILL: %v", err)
+	}
+
+	// Wait for process to die
+	err = proc.cmd.Wait()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			t.Logf("Process exited as expected: %v", exitErr)
+		}
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// This is the critical test - should detect as dead
+	alive, source = proc.DetectAlive()
+	if alive {
+		t.Errorf("FALSE POSITIVE DETECTED: PID %d is dead but DetectAlive returned alive=true, source=%s", pid, source)
+
+		// Debug information
+		t.Logf("OS: %s", runtime.GOOS)
+
+		// Test raw syscall
+		killErr := syscall.Kill(pid, 0)
+		t.Logf("Raw syscall.Kill(%d, 0) error: %v", pid, killErr)
+
+		// Test ps command
+		psCmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid))
+		psOutput, psErr := psCmd.CombinedOutput()
+		t.Logf("ps -p %d output: %s, error: %v", pid, string(psOutput), psErr)
+	} else {
+		t.Logf("✓ Correctly detected dead process: alive=%v, source=%s", alive, source)
+	}
+}
+
+// BenchmarkDetectAlive benchmarks the performance of DetectAlive
+func BenchmarkDetectAlive(b *testing.B) {
+	spec := Spec{
+		Name:    "benchmark-process",
+		Command: "sleep 10",
+	}
+
+	proc := New(spec)
+
+	cmd := spec.BuildCommand()
+	err := proc.TryStart(cmd)
+	if err != nil {
+		b.Fatalf("Failed to start process: %v", err)
+	}
+	proc.SetStarted(cmd)
+
+	defer func() {
+		if proc.cmd != nil && proc.cmd.Process != nil {
+			_ = proc.cmd.Process.Kill()
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		proc.DetectAlive()
 	}
 }
