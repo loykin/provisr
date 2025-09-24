@@ -33,6 +33,25 @@ type ManagedProcess struct {
 	envMerger     func(process.Spec) []string
 }
 
+// Recover seeds the process with a PID and spec loaded from a PID file and sets state accordingly.
+func (up *ManagedProcess) Recover(spec process.Spec, pid int) {
+	up.mu.Lock()
+	if up.proc == nil {
+		up.proc = process.New(spec)
+	} else {
+		up.proc.UpdateSpec(spec)
+	}
+	up.proc.SeedPID(pid)
+	up.mu.Unlock()
+
+	alive, _ := up.proc.DetectAlive()
+	if alive {
+		up.setState(StateRunning)
+	} else {
+		up.setState(StateStopped)
+	}
+}
+
 type processState int32
 
 const (

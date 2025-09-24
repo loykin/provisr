@@ -384,13 +384,9 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		return fmt.Errorf("server must be configured to run serve command")
 	}
 
-	// Auto-start all processes from config
-	for _, spec := range cfg.Specs {
-		if err := mgr.StartN(spec); err != nil {
-			fmt.Printf("Warning: failed to start process %s: %v\n", spec.Name, err)
-		} else {
-			fmt.Printf("Auto-started process: %s\n", spec.Name)
-		}
+	// Apply config: recover from PID files, start missing, and cleanup removed processes
+	if err := mgr.ApplyConfig(cfg.Specs); err != nil {
+		fmt.Printf("Warning: failed to apply config: %v\n", err)
 	}
 
 	// Start cron scheduler (if any cron jobs are defined)

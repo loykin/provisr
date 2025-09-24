@@ -33,9 +33,10 @@ type HistorySink = history.Sink
 
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
-func (m *Manager) SetGlobalEnv(kvs []string) { m.inner.SetGlobalEnv(kvs) }
-func (m *Manager) Start(s Spec) error        { return m.inner.Start(s) }
-func (m *Manager) StartN(s Spec) error       { return m.inner.StartN(s) }
+func (m *Manager) SetGlobalEnv(kvs []string)      { m.inner.SetGlobalEnv(kvs) }
+func (m *Manager) Start(s Spec) error             { return m.inner.Start(s) }
+func (m *Manager) StartN(s Spec) error            { return m.inner.StartN(s) }
+func (m *Manager) ApplyConfig(specs []Spec) error { return m.inner.ApplyConfig(specs) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
 }
