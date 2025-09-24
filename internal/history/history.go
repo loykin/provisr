@@ -3,8 +3,6 @@ package history
 import (
 	"context"
 	"time"
-
-	"github.com/loykin/provisr/internal/store"
 )
 
 // EventType defines the kind of lifecycle event.
@@ -15,11 +13,20 @@ const (
 	EventStop  EventType = "stop"
 )
 
+// Record is a minimal process record used for history events.
+type Record struct {
+	Name       string    `json:"name"`
+	PID        int       `json:"pid"`
+	LastStatus string    `json:"last_status"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	SpecJSON   string    `json:"spec_json"`
+}
+
 // Event represents a lifecycle event to be exported to external systems.
 type Event struct {
-	Type       EventType    `json:"type"`
-	OccurredAt time.Time    `json:"occurred_at"`
-	Record     store.Record `json:"record"`
+	Type       EventType `json:"type"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Record     Record    `json:"record"`
 }
 
 // Sink is a destination for history events (analytics/statistics systems).

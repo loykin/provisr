@@ -4,14 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/loykin/provisr"
 	"github.com/loykin/provisr/internal/config"
-	storePostgres "github.com/loykin/provisr/internal/store/postgres"
-	storeSqlite "github.com/loykin/provisr/internal/store/sqlite"
 	"github.com/spf13/cobra"
 )
 
@@ -364,54 +361,8 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		return fmt.Errorf("error loading config: %w", err)
 	}
 
-	// Create manager (optionally with persistent store)
-	var mgr *provisr.Manager
-	if cfg.Store != nil && cfg.Store.Enabled {
-		dsn := strings.TrimSpace(cfg.Store.DSN)
-		if dsn != "" {
-			lower := strings.ToLower(dsn)
-			if strings.HasPrefix(lower, "sqlite://") {
-				// Normalize to path accepted by sqlite.New
-				path := strings.TrimPrefix(dsn, "sqlite://")
-				if path == "" || path == "sqlite::memory:" || path == ":memory:" {
-					path = ":memory:"
-				}
-				db, err2 := storeSqlite.New(path)
-				if err2 == nil {
-					if mgr, err = provisr.NewWithStore(db); err != nil {
-						fmt.Printf("Warning: NewWithStore failed: %v (falling back to no-store)\n", err)
-					}
-				} else {
-					fmt.Printf("Warning: failed to open SQLite store at %q: %v (falling back to no-store)\n", path, err2)
-				}
-			} else if strings.HasPrefix(lower, "postgres://") {
-				db, err2 := storePostgres.New(dsn)
-				if err2 == nil {
-					if mgr, err = provisr.NewWithStore(db); err != nil {
-						fmt.Printf("Warning: NewWithStore failed: %v (falling back to no-store)\n", err)
-					}
-				} else {
-					fmt.Printf("Warning: failed to open Postgres store: %v (falling back to no-store)\n", err2)
-				}
-			} else {
-				// Treat as SQLite file path
-				db, err2 := storeSqlite.New(dsn)
-				if err2 == nil {
-					if mgr, err = provisr.NewWithStore(db); err != nil {
-						fmt.Printf("Warning: NewWithStore failed: %v (falling back to no-store)\n", err)
-					}
-				} else {
-					fmt.Printf("Warning: failed to open SQLite store at %q: %v (falling back to no-store)\n", dsn, err2)
-				}
-			}
-		}
-	}
-	if mgr == nil {
-		mgr = provisr.New()
-	}
-	if err != nil {
-		return fmt.Errorf("error loading config: %w", err)
-	}
+	// Create manager (PID-only management; persistent store removed)
+	mgr := provisr.New()
 
 	// Apply global environment
 	// Set global environment - 직접 필드 접근

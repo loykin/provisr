@@ -12,7 +12,6 @@ import (
 	"github.com/loykin/provisr/internal/process"
 	pg "github.com/loykin/provisr/internal/process_group"
 	iapi "github.com/loykin/provisr/internal/server"
-	"github.com/loykin/provisr/internal/store"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -33,16 +32,6 @@ type HistoryConfig = cfg.HistoryConfig
 type HistorySink = history.Sink
 
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
-
-// NewWithStore constructs a manager wired with the provided store and preloads
-// previously persisted processes from it.
-func NewWithStore(s store.Store) (*Manager, error) {
-	inner, err := manager.NewManagerWithStore(s)
-	if err != nil {
-		return nil, err
-	}
-	return &Manager{inner: inner}, nil
-}
 
 func (m *Manager) SetGlobalEnv(kvs []string) { m.inner.SetGlobalEnv(kvs) }
 func (m *Manager) Start(s Spec) error        { return m.inner.Start(s) }
