@@ -26,9 +26,6 @@ func main() {
 	}
 
 	mgr := provisr.New()
-	if err := mgr.SetStoreFromDSN(dsn); err != nil {
-		panic(fmt.Errorf("failed to set store from DSN: %w", err))
-	}
 
 	// Start a short-lived demo process
 	spec := provisr.Spec{
@@ -50,6 +47,7 @@ func main() {
 
 	// Wait for the process to finish naturally, then reconcile and show final state
 	time.Sleep(500 * time.Millisecond)
+
 	st2, _ := mgr.Status("store-demo")
 	b2, _ := json.MarshalIndent(st2, "", "  ")
 	fmt.Println("Status after exit + reconcile:")

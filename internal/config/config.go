@@ -98,6 +98,13 @@ func decodeTo[T any](m map[string]any) (T, error) {
 	if err := dec.Decode(m); err != nil {
 		return out, err
 	}
+	// If the target type implements a Validate() error method, call it.
+	if v, ok := any(&out).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			var zero T
+			return zero, err
+		}
+	}
 	return out, nil
 }
 

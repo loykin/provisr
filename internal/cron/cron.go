@@ -72,6 +72,24 @@ func (j *Job) validate() error {
 	return nil
 }
 
+// Validate is an external validator used by config decoding.
+// It validates the embedded Spec (basic invariants) and cron-specific constraints
+// that do not depend on Name/Schedule presence here (those are validated by config).
+func (j *Job) Validate() error {
+	// Validate the underlying process spec
+	if err := j.Spec.Validate(); err != nil {
+		return err
+	}
+	// Enforce cron-specific constraints that are independent of Name/Schedule
+	if j.Spec.AutoRestart {
+		return errors.New("cron job cannot have autorestart=true")
+	}
+	if j.Spec.Instances > 1 {
+		return errors.New("cron job cannot run with instances > 1")
+	}
+	return nil
+}
+
 // Scheduler runs cron jobs using a shared process.Manager.
 // Use Start to launch the background tickers, and Stop to cancel them.
 
