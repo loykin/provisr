@@ -277,3 +277,73 @@ func (m *Manager) mergeEnv(spec process.Spec) []string {
 
 	return envManager.Merge(spec.Env)
 }
+
+// ApplyConfig loads processes from PID files and reconciles running processes with the given specs.
+// Behavior:
+// 1) For each desired spec (expanding Instances), if a PID file is present and alive, recover it.
+// 2) Otherwise, start the process from the spec.
+// 3) Any managed process whose name is not present in the desired set will be gracefully shut down and cleaned up.
+func (m *Manager) ApplyConfig(specs []process.Spec) error {
+	// Build desired instances map: name -> instance spec
+	desired := make(map[string]process.Spec)
+	for _, s := range specs {
+		if s.Instances <= 1 {
+			ds := s
+			ds.Name = s.Name
+			desired[ds.Name] = ds
+			continue
+		}
+		for i := 1; i <= s.Instances; i++ {
+			ds := s
+			ds.Name = fmt.Sprintf("%s-%d", s.Name, i)
+			desired[ds.Name] = ds
+		}
+	}
+
+	// First, ensure desired processes are running or recovered from PID files
+	for name, ds := range desired {
+		up := m.ensureProcess(name)
+
+		// Try recover from PID file if configured
+		if ds.PIDFile != "" {
+			if pid, specFromFile, err := process.ReadPIDFile(ds.PIDFile); err == nil && pid > 0 {
+				// Prefer spec from PID file if available (preserve historical details)
+				if specFromFile != nil {
+					// ensure instance-expanded name is set
+					specFromFile.Name = name
+					up.Recover(*specFromFile, pid)
+				} else {
+					ds.Name = name
+					up.Recover(ds, pid)
+				}
+				// After recover, if alive state was false, we'll fall through to start
+			}
+		}
+
+		// Check current status; if not running, start it
+		st := up.Status()
+		if !st.Running {
+			_ = up.Start(ds)
+		}
+	}
+
+	// Then, stop and cleanup processes that are no longer desired
+	m.mu.RLock()
+	existing := make(map[string]*ManagedProcess, len(m.processes))
+	for n, up := range m.processes {
+		existing[n] = up
+	}
+	m.mu.RUnlock()
+
+	for name, up := range existing {
+		if _, ok := desired[name]; !ok {
+			_ = up.Shutdown()
+			// Remove from map
+			m.mu.Lock()
+			delete(m.processes, name)
+			m.mu.Unlock()
+		}
+	}
+
+	return nil
+}

@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -1052,6 +1054,96 @@ func TestExpectedShutdownErrors(t *testing.T) {
 		if result != test.expected {
 			t.Errorf("For error '%s', expected %v, got %v", test.errorString, test.expected, result)
 		}
+	}
+}
+
+// Test that ApplyConfig recovers a running process from its PID file without starting a duplicate
+func TestApplyConfig_RecoversFromPIDFile(t *testing.T) {
+	// Skip on non-unix if sleep not available; tests already rely on sleep elsewhere
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "demo.pid")
+
+	// Start a manager and a process writing a PID file
+	mgr1 := NewManager()
+	defer func() { _ = mgr1.Shutdown() }()
+
+	spec := process.Spec{Name: "demo", Command: "sleep 2", PIDFile: pidfile}
+	if err := mgr1.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Wait for pidfile to be written
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("pidfile not written")
+		}
+		if _, err := os.Stat(pidfile); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	st1, err := mgr1.Status("demo")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !st1.Running || st1.PID <= 0 {
+		t.Fatalf("expected running with pid, got %+v", st1)
+	}
+
+	// Create a fresh manager and apply config – it should load from the pidfile
+	mgr2 := NewManager()
+	defer func() { _ = mgr2.Shutdown() }()
+	if err := mgr2.ApplyConfig([]process.Spec{spec}); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	st2, err := mgr2.Status("demo")
+	if err != nil {
+		t.Fatalf("status2: %v", err)
+	}
+	if !st2.Running {
+		t.Fatalf("expected recovered process to be running, got %+v", st2)
+	}
+	if st2.PID != st1.PID {
+		t.Fatalf("expected same PID after recovery, got %d vs %d", st2.PID, st1.PID)
+	}
+}
+
+// Test that ApplyConfig cleans up processes removed from config (stop + remove pidfile)
+func TestApplyConfig_CleansRemoved(t *testing.T) {
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "to-clean.pid")
+
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	spec := process.Spec{Name: "to-clean", Command: "sleep 2", PIDFile: pidfile}
+	if err := mgr.ApplyConfig([]process.Spec{spec}); err != nil {
+		t.Fatalf("apply1: %v", err)
+	}
+	// Ensure it started
+	st, err := mgr.Status("to-clean")
+	if err != nil || !st.Running {
+		t.Fatalf("expected running after apply, err=%v st=%+v", err, st)
+	}
+	// pidfile must exist
+	if _, err := os.Stat(pidfile); err != nil {
+		t.Fatalf("pidfile missing after start: %v", err)
+	}
+
+	// Now apply empty config – the process should be stopped and pidfile removed
+	if err := mgr.ApplyConfig(nil); err != nil {
+		t.Fatalf("apply2: %v", err)
+	}
+
+	// Give a moment for shutdown
+	time.Sleep(100 * time.Millisecond)
+	_, err = mgr.Status("to-clean")
+	// It might still be in the map but should be stopped; check pidfile removed as the main assertion
+	if _, statErr := os.Stat(pidfile); !os.IsNotExist(statErr) {
+		t.Fatalf("expected pidfile removed, stat err=%v", statErr)
 	}
 }
 
