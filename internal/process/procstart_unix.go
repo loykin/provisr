@@ -24,6 +24,10 @@ func getProcStartUnix(pid int) int64 {
 		return getProcStartUnixLinux(pid)
 	default:
 		// Best-effort for Darwin/BSD via gopsutil (uses sysctl under the hood)
+		// Ensure safe conversion from int (arch-dependent) to int32 to avoid truncation
+		if pid > (1<<31 - 1) {
+			return 0
+		}
 		p, err := gopsproc.NewProcess(int32(pid))
 		if err != nil {
 			return 0
