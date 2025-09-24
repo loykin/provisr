@@ -31,7 +31,9 @@ func (d PIDFileDetector) Alive() (bool, error) {
 		}
 		return false, err
 	}
-	pidStr := strings.TrimSpace(string(data))
+	// Support extended pidfile format: first line is PID, rest may contain metadata.
+	firstLine, _, _ := strings.Cut(string(data), "\n")
+	pidStr := strings.TrimSpace(firstLine)
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		return false, fmt.Errorf("invalid pid in %s: %w", d.PIDFile, err)
