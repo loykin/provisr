@@ -1,12 +1,16 @@
 package manager
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/internal/store"
 )
 
 // ManagedProcess combines Manager-Handler-Supervisor responsibilities into a single,
@@ -19,28 +23,16 @@ import (
 // State Machine:
 // Stopped -> Starting -> Running -> Stopping -> Stopped
 type ManagedProcess struct {
-	//// Immutable after creation
-	//name string
-
-	// State lock (minimal scope, clearly defined)
-	mu    sync.RWMutex
-	state processState
-	//spec        process.Spec
-	proc *process.Process
-	//autoRestart bool
-	restarts uint32
-
-	// Control channels (lock-free communication)
-	cmdChan  chan command
-	doneChan chan struct{}
-
-	// Throttle restarts respecting spec.RestartInterval
+	mu            sync.RWMutex
+	state         processState
+	proc          *process.Process
+	restarts      uint32
+	cmdChan       chan command
+	doneChan      chan struct{}
 	lastRestartAt time.Time
-
-	// Callbacks (injected dependencies)
-	envMerger   func(process.Spec) []string
-	startLogger func(*process.Process)
-	stopLogger  func(*process.Process, error)
+	store         store.Store
+	history       []history.Sink
+	envMerger     func(process.Spec) []string
 }
 
 type processState int32
@@ -87,23 +79,31 @@ const (
 func NewManagedProcess(
 	spec process.Spec,
 	envMerger func(process.Spec) []string,
-	startLogger func(*process.Process),
-	stopLogger func(*process.Process, error),
 ) *ManagedProcess {
 	up := &ManagedProcess{
-		state: StateStopped,
-		//spec:        spec,
-		//autoRestart: spec.AutoRestart,
-		proc:        process.New(spec),
-		cmdChan:     make(chan command, 16), // Buffered to prevent blocking
-		doneChan:    make(chan struct{}),
-		envMerger:   envMerger,
-		startLogger: startLogger,
-		stopLogger:  stopLogger,
+		state:     StateStopped,
+		proc:      process.New(spec),
+		cmdChan:   make(chan command, 16), // Buffered to prevent blocking
+		doneChan:  make(chan struct{}),
+		envMerger: envMerger,
 	}
 
 	go up.runStateMachine()
 	return up
+}
+
+// SetStore configures the persistence store (thread-safe)
+func (up *ManagedProcess) SetStore(s store.Store) {
+	up.mu.Lock()
+	up.store = s
+	up.mu.Unlock()
+}
+
+// SetHistory configures history sinks (thread-safe)
+func (up *ManagedProcess) SetHistory(sinks ...history.Sink) {
+	up.mu.Lock()
+	up.history = append([]history.Sink(nil), sinks...)
+	up.mu.Unlock()
 }
 
 // Start initiates process start (non-blocking)
@@ -141,11 +141,7 @@ func (up *ManagedProcess) Status() process.Status {
 	up.mu.RUnlock()
 
 	if proc == nil {
-		return process.Status{
-			//Name:    up.name,
-			//Running: false,
-			//Restarts: 0up.spec.RetryCount,
-		}
+		return process.Status{}
 	}
 
 	// Get process status (process handles its own locking)
@@ -327,11 +323,9 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 	// Successfully started
 	up.setState(StateRunning)
 
-	// Record metrics and history (lock-free)
+	// Record metrics and persist
 	metrics.IncStart(newSpec.Name)
-	if up.startLogger != nil {
-		up.startLogger(up.proc)
-	}
+	up.persistStart()
 
 	return nil
 }
@@ -365,16 +359,15 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 
 	if err := up.proc.Stop(wait); err != nil {
 		up.setState(StateStopped) // Force state transition even on error
+		up.persistStop()
 		return fmt.Errorf("failed to stop process: %w", err)
 	}
 
 	up.setState(StateStopped)
+	up.persistStop()
 
 	// Record metrics
 	metrics.IncStop(up.proc.GetName())
-	if up.stopLogger != nil {
-		up.stopLogger(up.proc, nil)
-	}
 
 	return nil
 }
@@ -390,7 +383,6 @@ func (up *ManagedProcess) handleUpdateSpec(newSpec process.Spec) error {
 
 // handleShutdown performs graceful shutdown
 func (up *ManagedProcess) handleShutdown() error {
-	// Stop process if running
 	err := up.handleStop(3 * time.Second)
 	if err != nil && !isExpectedShutdownError(err) {
 		return err
@@ -441,6 +433,9 @@ func (up *ManagedProcess) setState(newState processState) {
 	// Update current state metrics - set old state to 0, new state to 1
 	metrics.SetCurrentState(name, oldStateStr, false)
 	metrics.SetCurrentState(name, newStateStr, true)
+
+	// Persist current status on any state change
+	up.persistStatus()
 }
 
 // checkProcessHealth monitors process health and transitions state.
@@ -454,12 +449,94 @@ func (up *ManagedProcess) checkProcessHealth() {
 
 	alive, _ := up.proc.DetectAlive()
 	if !alive {
-		// Process died; transition to stopped and log. Do NOT restart here.
+		// Process died; transition to stopped and persist stop event.
 		up.setState(StateStopped)
-		if up.stopLogger != nil {
-			up.stopLogger(up.proc, fmt.Errorf("process exited unexpectedly"))
-		}
-		// Auto-restart, if any, will be coordinated by Manager.reconcileProcess.
+		up.persistStop()
+
+		// Auto-restart (if enabled) is handled by the runStateMachine ticker below.
 	} else if up.proc.StopRequested() {
+		// No-op: stopping is driven explicitly via doStop.
 	}
+}
+
+// // --- Persistence & History helpers ---
+func (up *ManagedProcess) makeRecordLocked() store.Record {
+	// Assumes up.mu is at least RLocked (or Locked)
+	st := up.proc.Snapshot()
+	spec := up.proc.GetSpec()
+	b, _ := json.Marshal(spec)
+	return store.Record{
+		Name:       spec.Name,
+		PID:        st.PID,
+		LastStatus: up.state.String(),
+		UpdatedAt:  time.Now().UTC(),
+		SpecJSON:   string(b),
+	}
+}
+
+func (up *ManagedProcess) persistStart() {
+	up.mu.Lock()
+	now := time.Now().UTC()
+	st := up.proc.Snapshot()
+	spec := up.proc.GetSpec()
+	storeInst := up.store
+	sinks := append([]history.Sink(nil), up.history...)
+	up.mu.Unlock()
+
+	if storeInst != nil {
+		rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateRunning.String(), UpdatedAt: now}
+		// include spec JSON
+		if b, err := json.Marshal(spec); err == nil {
+			rec.SpecJSON = string(b)
+		}
+		_ = storeInst.Record(context.Background(), rec)
+	}
+
+	if len(sinks) > 0 {
+		rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateRunning.String(), UpdatedAt: now}
+		if b, err := json.Marshal(spec); err == nil {
+			rec.SpecJSON = string(b)
+		}
+		evt := history.Event{Type: history.EventStart, OccurredAt: now, Record: rec}
+		for _, h := range sinks {
+			_ = h.Send(context.Background(), evt)
+		}
+	}
+}
+
+func (up *ManagedProcess) persistStop() {
+	up.mu.RLock()
+	now := time.Now().UTC()
+	s := up.store
+	sinks := append([]history.Sink(nil), up.history...)
+	st := up.proc.Snapshot()
+	spec := up.proc.GetSpec()
+	up.mu.RUnlock()
+
+	// Minimal record for event consumers and store
+	rec := store.Record{Name: spec.Name, PID: st.PID, LastStatus: StateStopped.String(), UpdatedAt: now}
+	if b, err := json.Marshal(spec); err == nil {
+		rec.SpecJSON = string(b)
+	}
+	ctx := context.Background()
+	if s != nil {
+		_ = s.Record(ctx, rec)
+	}
+	if len(sinks) > 0 {
+		evt := history.Event{Type: history.EventStop, OccurredAt: now, Record: rec}
+		for _, h := range sinks {
+			_ = h.Send(ctx, evt)
+		}
+	}
+}
+
+func (up *ManagedProcess) persistStatus() {
+	up.mu.RLock()
+	rec := up.makeRecordLocked()
+	s := up.store
+	up.mu.RUnlock()
+	if s == nil {
+		return
+	}
+	_ = s.Record(context.Background(), rec)
 }

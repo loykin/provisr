@@ -1,9 +1,14 @@
 package manager
 
 import (
+	"context"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/loykin/provisr/internal/history"
+	storeSqlite "github.com/loykin/provisr/internal/store/sqlite"
 
 	"github.com/loykin/provisr/internal/process"
 )
@@ -11,14 +16,6 @@ import (
 // Mock functions for testing ManagedProcess
 func mockEnvMerger(spec process.Spec) []string {
 	return append([]string{"TEST_ENV=test"}, spec.Env...)
-}
-
-func mockStartLogger(_ *process.Process) {
-	// Mock start logging
-}
-
-func mockStopLogger(_ *process.Process, _ error) {
-	// Mock stop logging
 }
 
 func TestNewManagedProcess(t *testing.T) {
@@ -30,8 +27,6 @@ func TestNewManagedProcess(t *testing.T) {
 	mp := NewManagedProcess(
 		spec,
 		mockEnvMerger,
-		mockStartLogger,
-		mockStopLogger,
 	)
 
 	if mp == nil {
@@ -54,7 +49,7 @@ func TestManagedProcessStatus(t *testing.T) {
 		Command: "echo hello",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Test initial status
 	status := mp.Status()
@@ -77,7 +72,7 @@ func TestManagedProcessStartStop(t *testing.T) {
 		Command: "sleep 0.1",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 	// Test start
 	err := mp.Start(spec)
@@ -108,7 +103,7 @@ func TestManagedProcessUpdateSpec(t *testing.T) {
 		Command: "echo original",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Test updating spec
 	newSpec := process.Spec{
@@ -129,7 +124,7 @@ func TestManagedProcessStateMachine(t *testing.T) {
 		Command: "sleep 0.05",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// Initial state should be Stopped
@@ -161,7 +156,7 @@ func TestManagedProcessConcurrentOperations(t *testing.T) {
 		Command: "sleep 0.1",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// Start multiple goroutines to test concurrent access
@@ -209,7 +204,7 @@ func TestManagedProcessShutdown(t *testing.T) {
 		Command: "sleep 10",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Start process
 	err := mp.Start(spec)
@@ -236,7 +231,7 @@ func TestManagedProcessQuickCommands(t *testing.T) {
 		Command: "true", // Very quick command
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// Test starting a quick command
@@ -259,7 +254,7 @@ func TestManagedProcessMultipleStarts(t *testing.T) {
 		Command: "sleep 0.05",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 	defer func() { _ = mp.Shutdown() }()
 
 	// First start
@@ -283,7 +278,7 @@ func TestManagedProcessStopNonRunning(t *testing.T) {
 		Command: "echo hello",
 	}
 
-	mp := NewManagedProcess(spec, mockEnvMerger, mockStartLogger, mockStopLogger)
+	mp := NewManagedProcess(spec, mockEnvMerger)
 
 	// Try to stop a process that was never started - should be no-op, not error
 	err := mp.Stop(1 * time.Second)
@@ -342,10 +337,8 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 	}
 
 	envMerger := func(spec process.Spec) []string { return spec.Env }
-	startLogger := func(proc *process.Process) {}
-	stopLogger := func(proc *process.Process, err error) {}
 
-	mp := NewManagedProcess(spec, envMerger, startLogger, stopLogger)
+	mp := NewManagedProcess(spec, envMerger)
 	defer func() { _ = mp.Stop(5 * time.Second) }()
 
 	// Start the process
@@ -407,10 +400,8 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	}
 
 	envMerger := func(spec process.Spec) []string { return spec.Env }
-	startLogger := func(proc *process.Process) {}
-	stopLogger := func(proc *process.Process, err error) {}
 
-	mp := NewManagedProcess(spec, envMerger, startLogger, stopLogger)
+	mp := NewManagedProcess(spec, envMerger)
 	defer func() { _ = mp.Stop(2 * time.Second) }()
 
 	// Start the process
@@ -457,4 +448,204 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	}
 
 	t.Logf("✓ Correctly did NOT auto-restart when AutoRestart=false")
+}
+
+type countingSink struct {
+	mu     sync.Mutex
+	starts int
+	stops  int
+}
+
+func (c *countingSink) Send(_ context.Context, e history.Event) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch e.Type {
+	case history.EventStart:
+		c.starts++
+	case history.EventStop:
+		c.stops++
+	}
+	return nil
+}
+
+func TestPersistStartStop_StoreAndHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping store/history integration test in short mode")
+	}
+	// Setup store and history
+	db, err := storeSqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.EnsureSchema(context.Background()); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+
+	sink1 := &countingSink{}
+	sink2 := &countingSink{}
+
+	spec := process.Spec{
+		Name:        "persist-start-stop-test",
+		Command:     "sleep 0.2",
+		AutoRestart: false,
+	}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	t.Cleanup(func() { _ = mp.Shutdown() })
+	mp.SetStore(db)
+	mp.SetHistory(sink1, sink2)
+
+	if err := mp.Start(spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	_ = mp.Stop(200 * time.Millisecond)
+
+	// Allow async persistence
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify final record is stopped
+	rec, err := db.GetByName(context.Background(), spec.Name)
+	if err != nil {
+		t.Fatalf("GetByName: %v", err)
+	}
+	if rec.LastStatus != "stopped" {
+		t.Fatalf("expected last status 'stopped', got %q", rec.LastStatus)
+	}
+
+	// Verify history events counted
+	if sink1.starts == 0 || sink2.starts == 0 {
+		t.Errorf("expected start events to be sent to both sinks; got sink1=%d, sink2=%d", sink1.starts, sink2.starts)
+	}
+	if sink1.stops == 0 || sink2.stops == 0 {
+		t.Errorf("expected stop events to be sent to both sinks; got sink1=%d, sink2=%d", sink1.stops, sink2.stops)
+	}
+}
+
+func TestConcurrentStoreHistoryAccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent store/history test in short mode")
+	}
+	db, err := storeSqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.EnsureSchema(context.Background()); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+	sinkA := &countingSink{}
+	sinkB := &countingSink{}
+
+	spec := process.Spec{Name: "concurrent-store-history", Command: "sleep 0.05"}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	t.Cleanup(func() { _ = mp.Shutdown() })
+	mp.SetStore(db)
+	mp.SetHistory(sinkA, sinkB)
+
+	var wg sync.WaitGroup
+	// Fire multiple concurrent starts; only one should actually run
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = mp.Start(spec)
+		}()
+	}
+	wg.Wait()
+	time.Sleep(50 * time.Millisecond)
+	// Concurrent stops (idempotent / safe)
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = mp.Stop(50 * time.Millisecond)
+		}()
+	}
+	wg.Wait()
+	time.Sleep(200 * time.Millisecond) // allow async flush
+
+	// Store should show final status not running
+	rec, err := db.GetByName(context.Background(), spec.Name)
+	if err != nil {
+		t.Fatalf("GetByName: %v", err)
+	}
+	if rec.LastStatus == "running" {
+		t.Fatalf("expected process not running at end; got status=%q", rec.LastStatus)
+	}
+
+	if sinkA.starts == 0 || sinkB.starts == 0 {
+		t.Errorf("expected starts to be recorded in both sinks; got A=%d, B=%d", sinkA.starts, sinkB.starts)
+	}
+	if sinkA.stops == 0 || sinkB.stops == 0 {
+		t.Errorf("expected stops to be recorded in both sinks; got A=%d, B=%d", sinkA.stops, sinkB.stops)
+	}
+}
+
+// Test that each state transition is persisted to the store: starting -> running -> stopped
+func TestStoreRecordsStateTransitions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	db, err := storeSqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.EnsureSchema(context.Background()); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+
+	spec := process.Spec{
+		Name:          "state-transitions",
+		Command:       "sleep 1",
+		StartDuration: 300 * time.Millisecond, // ensure we observe 'starting'
+	}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	t.Cleanup(func() { _ = mp.Shutdown() })
+	mp.SetStore(db)
+
+	// Start asynchronously so we can observe 'starting' before 'running'
+	doneStart := make(chan error, 1)
+	go func() { doneStart <- mp.Start(spec) }()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	// Wait for 'starting'
+	seenStarting := false
+	for time.Now().Before(deadline) {
+		rec, err := db.GetByName(ctx, spec.Name)
+		if err == nil && rec.LastStatus == "starting" {
+			seenStarting = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !seenStarting {
+		t.Fatalf("did not observe 'starting' status in store")
+	}
+	// Then wait for 'running'
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		rec, err := db.GetByName(ctx, spec.Name)
+		if err == nil && rec.LastStatus == "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := <-doneStart; err != nil {
+		t.Fatalf("start returned error: %v", err)
+	}
+
+	// Initiate stop and then verify 'stopped' eventually recorded
+	_ = mp.Stop(500 * time.Millisecond)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		rec, err := db.GetByName(ctx, spec.Name)
+		if err == nil && rec.LastStatus == "stopped" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("did not observe 'stopped' status in store")
 }

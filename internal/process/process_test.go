@@ -109,6 +109,14 @@ func TestConfigureCmdAppliesEnvWorkdirLogging(t *testing.T) {
 	}
 }
 
+// IsBeforeStartErr reports whether the error indicates the process exited before start duration elapsed.
+func IsBeforeStartErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "exited before start duration")
+}
+
 func TestEnforceStartDurationEarlyExit(t *testing.T) {
 	requireUnix(t)
 	spec := Spec{Name: "early", Command: "sh -c 'sleep 0.05'"}

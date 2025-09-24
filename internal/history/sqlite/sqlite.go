@@ -48,52 +48,26 @@ func New(dsn string) (*Sink, error) {
 }
 
 func (s *Sink) ensureSchema(ctx context.Context) error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS process_history(
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			occurred_at TIMESTAMP NOT NULL,
-			event TEXT NOT NULL,
-			name TEXT NOT NULL,
-			pid INTEGER NOT NULL,
-			started_at TIMESTAMP NOT NULL,
-			stopped_at TIMESTAMP NULL,
-			running BOOLEAN NOT NULL,
-			exit_err TEXT NULL,
-			uniq TEXT NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_process_history_name ON process_history(name);`,
-		`CREATE INDEX IF NOT EXISTS idx_process_history_uniq ON process_history(uniq);`,
-		`CREATE INDEX IF NOT EXISTS idx_process_history_occurred_at ON process_history(occurred_at);`,
-	}
-
-	for _, query := range queries {
-		if _, err := s.db.ExecContext(ctx, query); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	// Simple audit table, no primary key. Timestamp defaults to CURRENT_TIMESTAMP when not provided.
+	stmt := `CREATE TABLE IF NOT EXISTS process_history(
+		timestamp TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+		pid INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		status TEXT NOT NULL,
+		error TEXT
+	);`
+	_, err := s.db.ExecContext(ctx, stmt)
+	return err
 }
 
 func (s *Sink) Send(ctx context.Context, e history.Event) error {
 	rec := e.Record
 	occur := e.OccurredAt.UTC()
 
-	var stopped interface{} = nil
-	if rec.StoppedAt.Valid {
-		stopped = rec.StoppedAt.Time.UTC()
-	}
-
-	var exitErr interface{} = nil
-	if rec.ExitErr.Valid {
-		exitErr = rec.ExitErr.String
-	}
-
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO process_history(occurred_at, event, name, pid, started_at, stopped_at, running, exit_err, uniq)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		occur, string(e.Type), rec.Name, rec.PID, rec.StartedAt.UTC(), stopped, rec.Running, exitErr, rec.Key())
-
+		INSERT INTO process_history(timestamp, pid, name, status, error)
+		VALUES(?, ?, ?, ?, NULL);`,
+		occur, rec.PID, rec.Name, rec.LastStatus)
 	return err
 }
 
