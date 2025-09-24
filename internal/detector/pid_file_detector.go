@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +24,10 @@ type PIDFileDetector struct {
 	PIDFile string
 }
 
+type pidMeta struct {
+	StartUnix int64 `json:"start_unix"`
+}
+
 func (d PIDFileDetector) Alive() (bool, error) {
 	data, err := os.ReadFile(d.PIDFile)
 	if err != nil {
@@ -31,11 +36,39 @@ func (d PIDFileDetector) Alive() (bool, error) {
 		}
 		return false, err
 	}
-	pidStr := strings.TrimSpace(string(data))
+	// Support extended pidfile format: first line is PID, then optional Spec JSON and optional Meta JSON.
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	if len(lines) == 0 {
+		return false, fmt.Errorf("empty pidfile: %s", d.PIDFile)
+	}
+	pidStr := strings.TrimSpace(lines[0])
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		return false, fmt.Errorf("invalid pid in %s: %w", d.PIDFile, err)
 	}
+
+	// Try parse meta from 3rd line
+	var metaStart int64
+	if len(lines) >= 3 {
+		var m pidMeta
+		if err := json.Unmarshal([]byte(strings.TrimSpace(lines[2])), &m); err == nil {
+			metaStart = m.StartUnix
+		}
+	} else if len(lines) >= 2 {
+		// In case the second line is actually meta (unlikely), try parse
+		var m pidMeta
+		if err := json.Unmarshal([]byte(strings.TrimSpace(lines[1])), &m); err == nil && m.StartUnix > 0 {
+			metaStart = m.StartUnix
+		}
+	}
+
+	if metaStart > 0 {
+		cur := getProcStartUnix(pid)
+		if cur > 0 && cur != metaStart {
+			return false, nil // PID reused; not our process
+		}
+	}
+
 	return pidAlive(pid), nil
 }
 

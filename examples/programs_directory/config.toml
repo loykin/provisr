@@ -19,8 +19,7 @@ compress = true
 listen = "127.0.0.1:8080"
 base_path = "/api"
 
-[store]
-enabled = false
+# Persistent store has been removed in recent versions; PID files and in-memory state are used for recovery.
 
 [metrics] 
 enabled = true

@@ -1,0 +1,30 @@
+# Configuration for examples/embedded_manager
+# Demonstrates Manager.ApplyConfig usage.
+
+# Optional global env (visible to all processes when applied)
+# [global]
+# Not used here; the embedding example sets env via mgr.SetGlobalEnv when needed.
+
+global_env = ["DEMO=1"]
+
+# Optional logging defaults (kept empty for example simplicity)
+[log]
+
+# Optional metrics (not used by this example)
+[metrics]
+
+# Define processes in unified schema (type + spec)
+[[processes]]
+# Discriminated union entry
+type = "process"
+[processes.spec]
+name = "mgr-echo"
+command = "sh -c 'echo hello from mgr-echo; sleep 1'"
+priority = 10
+
+[[processes]]
+type = "process"
+[processes.spec]
+name = "mgr-sleeper"
+command = "sleep 2"
+priority = 20

@@ -10,7 +10,6 @@ type StartFlags struct {
 	EnvFiles        []string
 	Name            string
 	Cmd             string
-	PIDFile         string
 	Retries         uint32
 	RetryInterval   time.Duration
 	AutoRestart     bool

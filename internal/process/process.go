@@ -1,6 +1,7 @@
 package process
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -202,8 +203,12 @@ func (r *Process) WritePIDFile() {
 	r.mu.Lock()
 	pidFile := r.spec.PIDFile
 	pid := 0
+	var specCopy *Spec
 	if r.cmd != nil && r.cmd.Process != nil {
 		pid = r.cmd.Process.Pid
+	}
+	if r.spec.Name != "" {
+		specCopy = r.spec.DeepCopy()
 	}
 	r.mu.Unlock()
 
@@ -211,7 +216,30 @@ func (r *Process) WritePIDFile() {
 		return
 	}
 	_ = os.MkdirAll(filepath.Dir(pidFile), 0o750)
-	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o600)
+
+	// Write PID in first line for backward compatibility, then JSON-encoded Spec,
+	// and optionally a third line with PIDMeta JSON containing process start time.
+	var body []byte
+	if specCopy != nil {
+		if jb, err := json.Marshal(specCopy); err == nil {
+			body = append([]byte(strconv.Itoa(pid)), '\n')
+			body = append(body, jb...)
+			// Append meta
+			startUnix := getProcStartUnix(pid)
+			if startUnix > 0 {
+				meta := PIDMeta{StartUnix: startUnix}
+				if mb, err := json.Marshal(&meta); err == nil {
+					body = append(body, '\n')
+					body = append(body, mb...)
+				}
+			}
+		} else {
+			body = []byte(strconv.Itoa(pid))
+		}
+	} else {
+		body = []byte(strconv.Itoa(pid))
+	}
+	_ = os.WriteFile(pidFile, body, 0o600)
 }
 
 // RemovePIDFile best-effort

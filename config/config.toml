@@ -8,6 +8,10 @@ env = ["GLOBAL_NAME=provisr", "SHARED_PORT=9000", "CHAIN=${GLOBAL_NAME}-x"]
 # env_files = ["/path/to/.env"]
 # use_os_env = true
 
+# Default directory for process PID files (when spec.pid_file is not set)
+# Relative paths are resolved relative to this config file location
+pid_dir = "./run"
+
 # Optional global log defaults
 [log]
 dir = "./provisr-logs"
@@ -25,20 +29,7 @@ compress = false
 name = "backend"
 members = ["api-server", "long-sleeper"]
 
-# Persistent store configuration (optional)
-# Enable to persist process lifecycle and support high availability across restarts.
-# You can also control this via CLI: --store-dsn to enable/select DSN, or --no-store to disable.
-# Supported DSNs:
-#   - SQLite:   "sqlite:///tmp/provisr.db"   (or a bare path like "/tmp/provisr.db")
-#   - In-memory SQLite for testing: "sqlite::memory:" or "sqlite://:memory:"
-#   - Postgres: "postgres://user:pass@host:port/dbname?sslmode=disable"
-[store]
-# Set to true to enable the persistent store
-enabled = true
-# Default to SQLite on local filesystem; adjust path as needed
-dsn = "sqlite:///tmp/provisr.db"
-# Example Postgres DSN (uncomment to use instead)
-# dsn = "postgres://user:pass@127.0.0.1:5432/provisr?sslmode=disable"
+# Persistent store has been removed. State is managed in-memory with PID-file based recovery.
 
 # Optional HTTP API server configuration
 # When enabled, `provisr serve --config config/config.toml` will start an HTTP server.
@@ -67,6 +58,12 @@ enabled = true
 listen = ":8080"
 # Base path for endpoints: {base}/start, {base}/stop, {base}/status
 base_path = "/api"
+# Optional: PID file for the provisr daemon itself (used when --daemonize is set)
+# When set, the daemon will write its PID to this path.
+pidfile = "./provisr.pid"
+# Optional: Daemon log file path (when running with --daemonize)
+# If not set here, you can still pass --logfile via CLI.
+logfile = "./provisr.log"
 
 # Optional Prometheus metrics server configuration
 # When enabled, exposes metrics on /metrics endpoint

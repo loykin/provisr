@@ -1,8 +1,6 @@
 package manager
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,7 +9,6 @@ import (
 	"github.com/loykin/provisr/internal/env"
 	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/store"
 )
 
 // Manager provides a cleaner interface with reduced complexity
@@ -30,7 +27,6 @@ type Manager struct {
 
 	// Shared resources
 	envManager *env.Env
-	store      store.Store
 	histSinks  []history.Sink
 }
 
@@ -42,51 +38,7 @@ func NewManager() *Manager {
 	}
 }
 
-// NewManagerWithStore creates a new manager wired with the provided store.
-// It ensures the store schema and preloads previously managed processes
-// from the store, restoring their specs and last known states.
-func NewManagerWithStore(s store.Store) (*Manager, error) {
-	m := &Manager{
-		processes:  make(map[string]*ManagedProcess),
-		envManager: env.New(),
-		store:      s,
-	}
-	if s != nil {
-		if err := s.EnsureSchema(context.Background()); err != nil {
-			return nil, err
-		}
-		// Preload existing processes from store
-		recs, err := s.List(context.Background())
-		if err == nil {
-			for _, r := range recs {
-				var spec process.Spec
-				if strings.TrimSpace(r.SpecJSON) != "" {
-					_ = json.Unmarshal([]byte(r.SpecJSON), &spec)
-				}
-				if strings.TrimSpace(spec.Name) == "" {
-					spec.Name = r.Name
-				}
-				up := NewManagedProcess(spec, m.mergeEnv)
-				up.SetStore(s)
-				if len(m.histSinks) > 0 {
-					up.SetHistory(m.histSinks...)
-				}
-				// Seed PID from store so we can reattach and send signals even without cmd
-				if r.PID > 0 {
-					up.proc.SeedPID(r.PID)
-				}
-				// Determine current state by detection to ensure live processes remain monitored
-				if alive, _ := up.proc.DetectAlive(); alive {
-					up.setState(StateRunning)
-				} else if st, ok := parseProcessState(r.LastStatus); ok {
-					up.setState(st)
-				}
-				m.processes[spec.Name] = up
-			}
-		}
-	}
-	return m, nil
-}
+// NewManagerWithStore has been removed. Use NewManager() and provide specs via Start/StartN as needed.
 
 // SetGlobalEnv configures global environment variables
 func (m *Manager) SetGlobalEnv(kvs []string) {
@@ -104,17 +56,7 @@ func (m *Manager) SetGlobalEnv(kvs []string) {
 	m.mu.Unlock()
 }
 
-// SetStore configures persistence store
-func (m *Manager) SetStore(s store.Store) error {
-	m.mu.Lock()
-	m.store = s
-	m.mu.Unlock()
-
-	if s == nil {
-		return nil
-	}
-	return s.EnsureSchema(context.Background())
-}
+// SetStore removed: persistence via store is no longer supported.
 
 // SetHistorySinks configures history sinks
 func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
@@ -277,10 +219,7 @@ func (m *Manager) ensureProcess(name string) *ManagedProcess {
 			spec,
 			m.mergeEnv,
 		)
-		// Inject shared resources so that persistence/history work immediately
-		if m.store != nil {
-			up.SetStore(m.store)
-		}
+		// Inject shared history sinks so that events work immediately
 		if len(m.histSinks) > 0 {
 			up.SetHistory(m.histSinks...)
 		}
@@ -339,18 +278,72 @@ func (m *Manager) mergeEnv(spec process.Spec) []string {
 	return envManager.Merge(spec.Env)
 }
 
-// parseProcessState maps a string status to processState
-func parseProcessState(s string) (processState, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "stopped":
-		return StateStopped, true
-	case "starting":
-		return StateStarting, true
-	case "running":
-		return StateRunning, true
-	case "stopping":
-		return StateStopping, true
-	default:
-		return StateStopped, false
+// ApplyConfig loads processes from PID files and reconciles running processes with the given specs.
+// Behavior:
+// 1) For each desired spec (expanding Instances), if a PID file is present and alive, recover it.
+// 2) Otherwise, start the process from the spec.
+// 3) Any managed process whose name is not present in the desired set will be gracefully shut down and cleaned up.
+func (m *Manager) ApplyConfig(specs []process.Spec) error {
+	// Build desired instances map: name -> instance spec
+	desired := make(map[string]process.Spec)
+	for _, s := range specs {
+		if s.Instances <= 1 {
+			ds := s
+			ds.Name = s.Name
+			desired[ds.Name] = ds
+			continue
+		}
+		for i := 1; i <= s.Instances; i++ {
+			ds := s
+			ds.Name = fmt.Sprintf("%s-%d", s.Name, i)
+			desired[ds.Name] = ds
+		}
 	}
+
+	// First, ensure desired processes are running or recovered from PID files
+	for name, ds := range desired {
+		up := m.ensureProcess(name)
+
+		// Try recover from PID file if configured
+		if ds.PIDFile != "" {
+			if pid, specFromFile, err := process.ReadPIDFile(ds.PIDFile); err == nil && pid > 0 {
+				// Prefer spec from PID file if available (preserve historical details)
+				if specFromFile != nil {
+					// ensure instance-expanded name is set
+					specFromFile.Name = name
+					up.Recover(*specFromFile, pid)
+				} else {
+					ds.Name = name
+					up.Recover(ds, pid)
+				}
+				// After recover, if alive state was false, we'll fall through to start
+			}
+		}
+
+		// Check current status; if not running, start it
+		st := up.Status()
+		if !st.Running {
+			_ = up.Start(ds)
+		}
+	}
+
+	// Then, stop and cleanup processes that are no longer desired
+	m.mu.RLock()
+	existing := make(map[string]*ManagedProcess, len(m.processes))
+	for n, up := range m.processes {
+		existing[n] = up
+	}
+	m.mu.RUnlock()
+
+	for name, up := range existing {
+		if _, ok := desired[name]; !ok {
+			_ = up.Shutdown()
+			// Remove from map
+			m.mu.Lock()
+			delete(m.processes, name)
+			m.mu.Unlock()
+		}
+	}
+
+	return nil
 }

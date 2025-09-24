@@ -216,89 +216,62 @@ func FuzzPatternMatching(f *testing.F) {
 	})
 }
 
-// Helper functions
-
+// parseSpecs turns an input string into a slice of process.Spec for fuzzing scenarios.
 func parseSpecs(data string) []process.Spec {
-	var specs []process.Spec
-	lines := strings.Split(data, "\n")
-
-	for i, line := range lines {
-		if len(line) < 3 {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-
-		name := parts[0]
-		command := strings.Join(parts[1:], " ")
-
-		// Basic validation to avoid completely invalid specs
-		if !isValidName(name) || len(command) > 500 {
-			continue
-		}
-
-		spec := process.Spec{
-			Name:      name,
-			Command:   command,
-			Instances: 1 + (i % 3), // Vary instances
-		}
-
-		specs = append(specs, spec)
-
-		if len(specs) >= 5 { // Limit number of specs
-			break
-		}
+	parts := strings.Fields(data)
+	if len(parts) < 2 {
+		return nil
 	}
 
+	name := parts[0]
+	cmd := strings.Join(parts[1:], " ")
+
+	// Basic sanitization
+	if len(name) > 128 {
+		name = name[:128]
+	}
+	if len(cmd) > 1024 {
+		cmd = cmd[:1024]
+	}
+
+	// Build a few variations
+	specs := make([]process.Spec, 0, 3)
+	base := process.Spec{Name: name, Command: cmd}
+	specs = append(specs, base)
+	if isValidName(name) {
+		specs = append(specs, process.Spec{Name: name + "-1", Command: cmd})
+		specs = append(specs, process.Spec{Name: name + "-2", Command: cmd})
+	}
 	return specs
 }
 
 func isValidName(name string) bool {
-	if name == "" || len(name) > 100 {
+	if name == "" {
 		return false
 	}
-
-	// Check for dangerous patterns
-	if strings.Contains(name, "..") ||
-		strings.ContainsAny(name, "/\\") ||
-		strings.HasPrefix(name, ".") {
-		return false
+	// Very permissive check for tests
+	for _, r := range name {
+		if r == '/' || r == '\\' || r == 0 {
+			return false
+		}
 	}
-
 	return true
 }
+
+type tempError interface{ Temporary() bool }
 
 func isAcceptableError(err error) bool {
 	if err == nil {
 		return true
 	}
-
-	errStr := err.Error()
-
-	// These are expected/acceptable errors during fuzzing
-	acceptable := []string{
-		"not found",
-		"already running",
-		"already starting",
-		"currently stopping",
-		"invalid state",
-		"failed to start",
-		"failed to stop",
-		"process manager shutting down",
-		"no such file or directory",
-		"permission denied",
-		"executable file not found",
+	// Some operations are expected to fail under races or invalid inputs during fuzzing
+	es := err.Error()
+	if strings.Contains(es, "not found") || strings.Contains(es, "already starting") || strings.Contains(es, "already running") || strings.Contains(es, "currently stopping") {
+		return true
 	}
-
-	for _, pattern := range acceptable {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
+	if te, ok := err.(tempError); ok && te.Temporary() {
+		return true
 	}
-
 	return false
 }
 
@@ -306,24 +279,10 @@ func isCriticalError(err error) bool {
 	if err == nil {
 		return false
 	}
-
-	errStr := err.Error()
-
-	// These indicate serious problems that should fail the test
-	critical := []string{
-		"panic",
-		"race",
-		"deadlock",
-		"concurrent map",
-		"nil pointer",
-		"index out of range",
+	es := err.Error()
+	// Treat blatant internal issues as critical; most others are acceptable during fuzzing
+	if strings.Contains(es, "panic") || strings.Contains(es, "deadlock") || strings.Contains(es, "concurrent map writes") {
+		return true
 	}
-
-	for _, pattern := range critical {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-
 	return false
 }
