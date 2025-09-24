@@ -35,10 +35,6 @@ func daemonize(pidFile string, logFile string) error {
 		if arg == "--daemonize" {
 			continue
 		}
-		if arg == "--pidfile" {
-			skipNext = true
-			continue
-		}
 		if arg == "--logfile" {
 			skipNext = true
 			continue
@@ -47,10 +43,7 @@ func daemonize(pidFile string, logFile string) error {
 		newArgs = append(newArgs, arg)
 	}
 
-	// Add back pidfile and logfile if they were specified
-	if pidFile != "" {
-		newArgs = append(newArgs, "--pidfile", pidFile)
-	}
+	// Add back logfile if it was specified via CLI; pidfile is now config-driven
 	if logFile != "" {
 		newArgs = append(newArgs, "--logfile", logFile)
 	}

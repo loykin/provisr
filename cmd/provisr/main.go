@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -33,7 +34,6 @@ type GlobalFlags struct {
 type ProcessFlags struct {
 	Name            string
 	CmdStr          string
-	PIDFile         string
 	Retries         uint32
 	RetryInterval   time.Duration
 	AutoRestart     bool
@@ -117,7 +117,6 @@ Examples:
 				ConfigPath:      globalFlags.ConfigPath,
 				Name:            processFlags.Name,
 				Cmd:             processFlags.CmdStr,
-				PIDFile:         processFlags.PIDFile,
 				Retries:         processFlags.Retries,
 				RetryInterval:   processFlags.RetryInterval,
 				AutoRestart:     processFlags.AutoRestart,
@@ -133,7 +132,6 @@ Examples:
 	// Add flags specific to start command
 	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name")
 	cmd.Flags().StringVar(&processFlags.CmdStr, "cmd", "sleep 60", "command to execute")
-	cmd.Flags().StringVar(&processFlags.PIDFile, "pidfile", "", "pidfile path (optional)")
 	cmd.Flags().Uint32Var(&processFlags.Retries, "retries", 0, "retry attempts on failure")
 	cmd.Flags().DurationVar(&processFlags.RetryInterval, "retry-interval", 500*time.Millisecond, "retry delay")
 	cmd.Flags().BoolVar(&processFlags.AutoRestart, "autorestart", false, "auto-restart on exit")
@@ -320,8 +318,7 @@ All configuration is loaded from config.toml file.
 Examples:
   provisr serve                     # Start daemon (uses --config)
   provisr serve config.toml         # Start with specific config file
-  provisr serve --daemonize         # Run as daemon in background
-  provisr serve --daemonize --pidfile=/var/run/provisr.pid  # Daemon with PID file`,
+  provisr serve --daemonize         # Run as daemon in background (daemon pidfile configured via [server].pidfile)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSimpleServeCommand(serveFlags, args)
 		},
@@ -329,18 +326,12 @@ Examples:
 
 	// Add daemonize flags
 	cmd.Flags().BoolVar(&serveFlags.Daemonize, "daemonize", false, "run as daemon in background")
-	cmd.Flags().StringVar(&serveFlags.PidFile, "pidfile", "", "write daemon PID to file")
 	cmd.Flags().StringVar(&serveFlags.LogFile, "logfile", "", "redirect daemon logs to file")
 
 	return cmd
 }
 
 func runSimpleServeCommand(flags *ServeFlags, args []string) error {
-	// Handle daemonization first
-	if flags.Daemonize {
-		return daemonize(flags.PidFile, flags.LogFile)
-	}
-
 	configPath := flags.ConfigPath
 	if len(args) > 0 {
 		configPath = args[0]
@@ -350,15 +341,35 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		return fmt.Errorf("config file required for serve command. Use --config=config.toml or provide as argument")
 	}
 
-	// Setup daemon cleanup if running as daemon (child process)
-	if flags.PidFile != "" && os.Getppid() == 1 {
-		defer func() { _ = removePidFile(flags.PidFile) }()
-	}
-
 	// Load unified config once
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
+	}
+
+	// Enforce that pid_dir is configured and usable for PID file creation
+	if cfg.PIDDir == "" {
+		return fmt.Errorf("pid_dir must be set in the config to determine where to write process PID files")
+	}
+	pidDir := cfg.PIDDir
+	if !filepath.IsAbs(pidDir) {
+		pidDir = filepath.Join(filepath.Dir(configPath), pidDir)
+	}
+	if err := os.MkdirAll(pidDir, 0o750); err != nil {
+		return fmt.Errorf("failed to create pid_dir %s: %w", pidDir, err)
+	}
+
+	// If daemonize is requested, now that we have cfg.Server, use its pidfile/logfile
+	if flags.Daemonize {
+		pidfile := ""
+		logfile := flags.LogFile
+		if cfg.Server != nil {
+			pidfile = cfg.Server.PidFile
+			if logfile == "" {
+				logfile = cfg.Server.LogFile
+			}
+		}
+		return daemonize(pidfile, logfile)
 	}
 
 	// Create manager (PID-only management; persistent store removed)

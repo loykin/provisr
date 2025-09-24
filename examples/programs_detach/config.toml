@@ -19,11 +19,7 @@ compress = true
 listen = "127.0.0.1:18080"
 base_path = "/api"
 
-[store]
-# Enable persistent store so provisr can recover/reattach across restarts
-enabled = true
-# Use a local SQLite database file (created automatically)
-dsn = "sqlite://./provisr-detach-demo.db"
+# Persistent store has been removed in recent versions; PID files and in-memory state are used for recovery.
 
 [metrics]
 enabled = false
