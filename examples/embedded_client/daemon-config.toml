@@ -1,6 +1,9 @@
 # Example daemon configuration for embedded client testing
 env = ["DAEMON_MODE=embedded_example"]
 
+# Required: default directory to write process PID files
+pid_dir = "./run"
+
 [log]
 level = "info"
 format = "text"
@@ -12,11 +15,10 @@ source = false
 enabled = true
 listen = "127.0.0.1:8080"
 base_path = "/api"
+# Daemon PID will be written here when running with --daemonize
+pidfile = "./provisr-daemon.pid"
 
 [metrics]
-enabled = false
-
-[store]
 enabled = false
 
 [history]

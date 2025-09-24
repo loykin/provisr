@@ -43,7 +43,6 @@ func (c *command) startViaAPI(f StartFlags, apiClient *APIClient) error {
 	spec := provisr.Spec{
 		Name:            f.Name,
 		Command:         f.Cmd,
-		PIDFile:         f.PIDFile,
 		RetryCount:      f.Retries,
 		RetryInterval:   f.RetryInterval,
 		StartDuration:   f.StartDuration,

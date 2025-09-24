@@ -87,7 +87,7 @@ Notes:
 
 - The server requires a config file and reads the [server] section from it.
 - At startup, the manager applies the config once: it recovers processes from PID files (when configured), starts missing ones, and gracefully stops/removes programs not present in the config.
-- Daemonization is supported: use `--daemonize`, `--pidfile` (for the daemon itself), and `--logfile` to redirect daemon logs.
+- Daemonization is supported: use `--daemonize`. The daemon PID file path is configured via `[server].pidfile` in the config. For logs, use `--logfile` or set `[server].logfile` in the config.
 
 Example TOML snippet (also present in config/config.toml):
 
@@ -176,6 +176,7 @@ API_BASE=/api go run .
 - examples/embedded_metrics — Prometheus metrics
 - examples/embedded_metrics_add — custom metrics
 - examples/embedded_config_file — config-driven
+- examples/embedded_manager — manager-driven config apply (uses Manager.ApplyConfig)
 - examples/embedded_config_structure — struct-driven configuration
 - examples/programs_directory — directory-based programs loading with groups and priorities
 - examples/programs_detach — demonstrate detached worker managed via programs config
@@ -190,6 +191,7 @@ This project reads/writes a few files at well-defined locations. The defaults an
 
 - PID file (spec.pid_file)
     - If provided, the manager writes the child PID to this file immediately after a successful start.
+    - You can also configure a default directory for PID files via `pid_dir` in the main config. When set, any process spec without an explicit `pid_file` will default to `<pid_dir>/<name>.pid` (resolved relative to the config file if not absolute).
     - Extended format for safety and recovery:
         1) First line: PID
         2) Second line: JSON-encoded Spec snapshot (optional; used to recover process details on restart)
@@ -197,7 +199,7 @@ This project reads/writes a few files at well-defined locations. The defaults an
     - Older single-line and two-line formats remain supported for backward compatibility.
     - The PIDFile detector validates that the PID refers to the same process by comparing the recorded start time with the current process start time, preventing PID reuse mistakes.
     - The parent directory is created if missing (mode 0750).
-    - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid).
+    - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid) when submitted via HTTP API; the CLI/config can use relative paths which are resolved against the config file directory.
 
 - Logs (spec.log)
     - If log.stdoutPath or log.stderrPath are set, logs are written exactly to those files.
@@ -233,5 +235,5 @@ This project reads/writes a few files at well-defined locations. The defaults an
 ## Notes and breaking changes
 
 - Persistence store removed: internal/store has been deleted. The manager now operates purely via in-memory state and PID files for recovery.
-- Serve flags simplified: `provisr serve` requires a config file. Daemonization flags are `--daemonize`, `--pidfile`, and `--logfile`. API listen/base are configured via the TOML `[server]` section.
+- Serve flags simplified: `provisr serve` requires a config file. Daemonization uses `--daemonize`; the daemon PID file is configured via `[server].pidfile`. API listen/base are configured via the TOML `[server]` section.
 - Config-driven reconciliation: at startup, processes are recovered from PID files when available; processes not present in the config are gracefully shut down and cleaned up.
