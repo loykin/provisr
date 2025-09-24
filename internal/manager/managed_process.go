@@ -466,21 +466,6 @@ func (up *ManagedProcess) checkProcessHealth() {
 	}
 }
 
-// // --- Persistence & History helpers ---
-func (up *ManagedProcess) makeRecordLocked() history.Record {
-	// Assumes up.mu is at least RLocked (or Locked)
-	st := up.proc.Snapshot()
-	spec := up.proc.GetSpec()
-	b, _ := json.Marshal(spec)
-	return history.Record{
-		Name:       spec.Name,
-		PID:        st.PID,
-		LastStatus: up.state.String(),
-		UpdatedAt:  time.Now().UTC(),
-		SpecJSON:   string(b),
-	}
-}
-
 func (up *ManagedProcess) persistStart() {
 	up.mu.Lock()
 	now := time.Now().UTC()

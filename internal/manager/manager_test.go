@@ -1141,6 +1141,10 @@ func TestApplyConfig_CleansRemoved(t *testing.T) {
 	// Give a moment for shutdown
 	time.Sleep(100 * time.Millisecond)
 	_, err = mgr.Status("to-clean")
+	if err == nil {
+		t.Fatalf("expected process to be stopped after apply2")
+	}
+
 	// It might still be in the map but should be stopped; check pidfile removed as the main assertion
 	if _, statErr := os.Stat(pidfile); !os.IsNotExist(statErr) {
 		t.Fatalf("expected pidfile removed, stat err=%v", statErr)
