@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -11,62 +13,9 @@ import (
 
 	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// MockStore implements store.Store interface for testing
-type MockStore struct {
-	records map[string]store.Record
-	calls   []string
-}
-
-func NewMockStore() *MockStore {
-	return &MockStore{
-		records: make(map[string]store.Record),
-		calls:   make([]string, 0),
-	}
-}
-
-func (ms *MockStore) EnsureSchema(_ context.Context) error {
-	ms.calls = append(ms.calls, "EnsureSchema")
-	return nil
-}
-
-func (ms *MockStore) Record(_ context.Context, rec store.Record) error {
-	ms.calls = append(ms.calls, fmt.Sprintf("Record:%s:%s", rec.Name, rec.LastStatus))
-	ms.records[rec.Name] = rec
-	return nil
-}
-
-func (ms *MockStore) GetByName(_ context.Context, name string) (store.Record, error) {
-	ms.calls = append(ms.calls, fmt.Sprintf("GetByName:%s", name))
-	if r, ok := ms.records[name]; ok {
-		return r, nil
-	}
-	return store.Record{}, fmt.Errorf("not found")
-}
-
-func (ms *MockStore) Close() error {
-	ms.calls = append(ms.calls, "Close")
-	return nil
-}
-
-func (ms *MockStore) Delete(_ context.Context, name string) error {
-	ms.calls = append(ms.calls, fmt.Sprintf("Delete:%s", name))
-	delete(ms.records, name)
-	return nil
-}
-
-func (ms *MockStore) List(_ context.Context) ([]store.Record, error) {
-	ms.calls = append(ms.calls, "List")
-	res := make([]store.Record, 0, len(ms.records))
-	for _, r := range ms.records {
-		res = append(res, r)
-	}
-	return res, nil
-}
 
 // MockHistorySink implements history.Sink for testing
 type MockHistorySink struct {
@@ -129,28 +78,6 @@ func TestManagerSetGlobalEnv(t *testing.T) {
 
 	// Clean up
 	_ = mgr.Stop("test-env-process", 2*time.Second)
-}
-
-func TestManagerSetStore(t *testing.T) {
-	mgr := NewManager()
-	mockStore := NewMockStore()
-
-	// Test setting store
-	err := mgr.SetStore(mockStore)
-	if err != nil {
-		t.Errorf("SetStore failed: %v", err)
-	}
-
-	// Verify EnsureSchema was called
-	if len(mockStore.calls) == 0 || mockStore.calls[0] != "EnsureSchema" {
-		t.Error("EnsureSchema was not called on store")
-	}
-
-	// Test setting nil store
-	err = mgr.SetStore(nil)
-	if err != nil {
-		t.Errorf("SetStore(nil) should not fail: %v", err)
-	}
 }
 
 func TestManagerSetHistorySinks(t *testing.T) {
@@ -384,31 +311,6 @@ func TestManagerInternalHelpers(t *testing.T) {
 			t.Errorf("matchesPattern('%s', '%s') = %v, expected %v",
 				tc.name, tc.pattern, result, tc.expected)
 		}
-	}
-}
-
-func TestManagerWithMockStore(t *testing.T) {
-	mgr := NewManager()
-	mockStore := NewMockStore()
-
-	_ = mgr.SetStore(mockStore)
-	defer func() { _ = mgr.Shutdown() }()
-	spec := process.Spec{
-		Name:    "store-test",
-		Command: "echo hello",
-	}
-
-	err := mgr.Start(spec)
-	if err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Wait a bit for process to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify store interactions (this is limited since recordStart/recordStop are stubs)
-	if len(mockStore.calls) == 0 {
-		t.Log("Note: Store calls may be empty due to stub implementations")
 	}
 }
 
@@ -1155,6 +1057,100 @@ func TestExpectedShutdownErrors(t *testing.T) {
 	}
 }
 
+// Test that ApplyConfig recovers a running process from its PID file without starting a duplicate
+func TestApplyConfig_RecoversFromPIDFile(t *testing.T) {
+	// Skip on non-unix if sleep not available; tests already rely on sleep elsewhere
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "demo.pid")
+
+	// Start a manager and a process writing a PID file
+	mgr1 := NewManager()
+	defer func() { _ = mgr1.Shutdown() }()
+
+	spec := process.Spec{Name: "demo", Command: "sleep 2", PIDFile: pidfile}
+	if err := mgr1.Start(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Wait for pidfile to be written
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("pidfile not written")
+		}
+		if _, err := os.Stat(pidfile); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	st1, err := mgr1.Status("demo")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !st1.Running || st1.PID <= 0 {
+		t.Fatalf("expected running with pid, got %+v", st1)
+	}
+
+	// Create a fresh manager and apply config – it should load from the pidfile
+	mgr2 := NewManager()
+	defer func() { _ = mgr2.Shutdown() }()
+	if err := mgr2.ApplyConfig([]process.Spec{spec}); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	st2, err := mgr2.Status("demo")
+	if err != nil {
+		t.Fatalf("status2: %v", err)
+	}
+	if !st2.Running {
+		t.Fatalf("expected recovered process to be running, got %+v", st2)
+	}
+	if st2.PID != st1.PID {
+		t.Fatalf("expected same PID after recovery, got %d vs %d", st2.PID, st1.PID)
+	}
+}
+
+// Test that ApplyConfig cleans up processes removed from config (stop + remove pidfile)
+func TestApplyConfig_CleansRemoved(t *testing.T) {
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "to-clean.pid")
+
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	spec := process.Spec{Name: "to-clean", Command: "sleep 2", PIDFile: pidfile}
+	if err := mgr.ApplyConfig([]process.Spec{spec}); err != nil {
+		t.Fatalf("apply1: %v", err)
+	}
+	// Ensure it started
+	st, err := mgr.Status("to-clean")
+	if err != nil || !st.Running {
+		t.Fatalf("expected running after apply, err=%v st=%+v", err, st)
+	}
+	// pidfile must exist
+	if _, err := os.Stat(pidfile); err != nil {
+		t.Fatalf("pidfile missing after start: %v", err)
+	}
+
+	// Now apply empty config – the process should be stopped and pidfile removed
+	if err := mgr.ApplyConfig(nil); err != nil {
+		t.Fatalf("apply2: %v", err)
+	}
+
+	// Give a moment for shutdown
+	time.Sleep(100 * time.Millisecond)
+	_, err = mgr.Status("to-clean")
+	if err == nil {
+		t.Fatalf("expected process to be stopped after apply2")
+	}
+
+	// It might still be in the map but should be stopped; check pidfile removed as the main assertion
+	if _, statErr := os.Stat(pidfile); !os.IsNotExist(statErr) {
+		t.Fatalf("expected pidfile removed, stat err=%v", statErr)
+	}
+}
+
 // Mock error type for testing
 type mockError struct {
 	msg string
@@ -1162,65 +1158,4 @@ type mockError struct {
 
 func (e *mockError) Error() string {
 	return e.msg
-}
-
-// New test: ensure manager reload via store continues monitoring existing process
-func TestManager_ReloadsFromStore_ContinuesMonitoring(t *testing.T) {
-	ms := NewMockStore()
-	mgrA, err := NewManagerWithStore(ms)
-	if err != nil {
-		t.Fatalf("NewManagerWithStore A: %v", err)
-	}
-
-	spec := process.Spec{
-		Name:        "reload-monitor",
-		Command:     "sleep 3",
-		PIDFile:     "/tmp/provisr_test_reload.pid",
-		AutoRestart: false,
-	}
-	if err := mgrA.Start(spec); err != nil {
-		t.Fatalf("mgrA.Start: %v", err)
-	}
-	if !waitUntil2(2*time.Second, 50*time.Millisecond, func() bool {
-		st, err := mgrA.Status(spec.Name)
-		return err == nil && st.Running
-	}) {
-		st, _ := mgrA.Status(spec.Name)
-		t.Fatalf("process not running under mgrA; status=%+v", st)
-	}
-
-	mgrA = nil
-
-	mgrB, err := NewManagerWithStore(ms)
-	if err != nil {
-		t.Fatalf("NewManagerWithStore B: %v", err)
-	}
-	if !waitUntil2(2*time.Second, 50*time.Millisecond, func() bool {
-		st, err := mgrB.Status(spec.Name)
-		return err == nil && st.Running
-	}) {
-		st, err := mgrB.Status(spec.Name)
-		t.Fatalf("mgrB failed to reattach; err=%v status=%+v", err, st)
-	}
-	if err := mgrB.Stop(spec.Name, 1*time.Second); err != nil {
-		t.Fatalf("mgrB.Stop: %v", err)
-	}
-	if !waitUntil2(2*time.Second, 50*time.Millisecond, func() bool {
-		st, err := mgrB.Status(spec.Name)
-		return err == nil && !st.Running
-	}) {
-		st, _ := mgrB.Status(spec.Name)
-		t.Fatalf("process did not stop under mgrB; status=%+v", st)
-	}
-}
-
-func waitUntil2(d time.Duration, step time.Duration, fn func() bool) bool {
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return true
-		}
-		time.Sleep(step)
-	}
-	return false
 }

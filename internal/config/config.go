@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
@@ -21,8 +23,8 @@ type Config struct {
 	EnvFiles          []string       `mapstructure:"env_files"`
 	Env               []string       `mapstructure:"env"`
 	ProgramsDirectory string         `mapstructure:"programs_directory"`
+	PIDDir            string         `mapstructure:"pid_dir"`
 	Groups            []GroupConfig  `mapstructure:"groups"`
-	Store             *StoreConfig   `mapstructure:"store"`
 	History           *HistoryConfig `mapstructure:"history"`
 	Metrics           *MetricsConfig `mapstructure:"metrics"`
 	Log               *LogConfig     `mapstructure:"log"`
@@ -43,11 +45,6 @@ type Config struct {
 type GroupConfig struct {
 	Name    string   `mapstructure:"name"`
 	Members []string `mapstructure:"members"`
-}
-
-type StoreConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	DSN     string `mapstructure:"dsn"`
 }
 
 type HistoryConfig struct {
@@ -77,6 +74,8 @@ type LogConfig struct {
 type ServerConfig struct {
 	Listen   string `mapstructure:"listen"`
 	BasePath string `mapstructure:"base_path"`
+	PidFile  string `mapstructure:"pidfile"`
+	LogFile  string `mapstructure:"logfile"`
 }
 
 type ProcessConfig struct {
@@ -85,11 +84,31 @@ type ProcessConfig struct {
 }
 
 // helper to decode map[string]any to a target type using mapstructure
+// stringToDurationHook converts string values like "150ms", "2s" to time.Duration
+func stringToDurationHook() mapstructure.DecodeHookFunc {
+	return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
+		// Only handle string -> time.Duration
+		if from.Kind() == reflect.String && to == reflect.TypeOf(time.Duration(0)) {
+			s := strings.TrimSpace(data.(string))
+			if s == "" {
+				return time.Duration(0), nil
+			}
+			d, err := time.ParseDuration(s)
+			if err != nil {
+				return nil, fmt.Errorf("cannot parse value as 'time.Duration': %w", err)
+			}
+			return d, nil
+		}
+		return data, nil
+	}
+}
+
 func decodeTo[T any](m map[string]any) (T, error) {
 	var out T
 	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		TagName:          "mapstructure",
 		WeaklyTypedInput: true,
+		DecodeHook:       mapstructure.ComposeDecodeHookFunc(stringToDurationHook()),
 		Result:           &out,
 	})
 	if err != nil {
@@ -216,6 +235,19 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to compute global env: %w", err)
 	}
 	config.GlobalEnv = globalEnv
+
+	// Apply default pid_dir to specs if configured and PIDFile is empty
+	if strings.TrimSpace(config.PIDDir) != "" {
+		pidDir := config.PIDDir
+		if !filepath.IsAbs(pidDir) {
+			pidDir = filepath.Join(filepath.Dir(configPath), pidDir)
+		}
+		for i := range config.Specs {
+			if strings.TrimSpace(config.Specs[i].PIDFile) == "" {
+				config.Specs[i].PIDFile = filepath.Join(pidDir, config.Specs[i].Name+".pid")
+			}
+		}
+	}
 
 	// Build groups using the aggregated specs
 	groupSpecs, err := buildGroups(config.Groups, config.Specs)
