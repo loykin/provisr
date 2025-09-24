@@ -12,11 +12,11 @@ A minimal supervisord-like process manager written in Go.
 
 - Start/stop/status for processes and multiple instances
 - Auto-restart, retry with interval, start duration window
-- Pluggable detectors (pidfile, pid, command)
+- Robust liveness via detectors (pidfile, pid, command) with PID reuse protection using process start time metadata
 - Unified slog-based structured logging with rotating file logs (lumberjack)
 - Cron-like scheduler (@every duration)
 - Process groups (start/stop/status together)
-- Config via TOML (Cobra + Viper)
+- Config-driven reconciliation: recover running processes from PID files, start missing ones, and gracefully stop/remove programs no longer in config
 - Embeddable HTTP API (Gin-based) with configurable basePath and JSON I/O
 - Wildcard support for querying/stopping processes via REST (e.g., demo-*, *worker*)
 - Easy embedding into existing Gin and Echo apps (see examples)
@@ -85,9 +85,9 @@ provisr serve --config config/config.toml
 
 Notes:
 
-- The server reads the [server] section from the TOML file.
-- You can override config via flags: `--api-listen` and `--api-base`.
-- If `server.enabled` is false or missing, you must provide `--api-listen` to start anyway.
+- The server requires a config file and reads the [server] section from it.
+- At startup, the manager applies the config once: it recovers processes from PID files (when configured), starts missing ones, and gracefully stops/removes programs not present in the config.
+- Daemonization is supported: use `--daemonize`, `--pidfile` (for the daemon itself), and `--logfile` to redirect daemon logs.
 
 Example TOML snippet (also present in config/config.toml):
 
@@ -167,15 +167,18 @@ API_BASE=/api go run .
 
 ## More examples
 
-- examples/programs_directory — directory-based programs loading with groups and priorities
-- examples/unified_logging_demo — unified slog-based logging demo
 - examples/embedded — minimal embedding
+- examples/embedded_client — client/daemon interaction demo (uses examples/embedded_client/daemon-config.toml)
+- examples/embedded_http_gin — embed the HTTP API into a Gin app
+- examples/embedded_http_echo — embed the HTTP API into an Echo app
 - examples/embedded_process_group — process group management
 - examples/embedded_logger — logging integration
 - examples/embedded_metrics — Prometheus metrics
 - examples/embedded_metrics_add — custom metrics
 - examples/embedded_config_file — config-driven
 - examples/embedded_config_structure — struct-driven configuration
+- examples/programs_directory — directory-based programs loading with groups and priorities
+- examples/programs_detach — demonstrate detached worker managed via programs config
 
 ## Files and Paths
 
@@ -187,6 +190,12 @@ This project reads/writes a few files at well-defined locations. The defaults an
 
 - PID file (spec.pid_file)
     - If provided, the manager writes the child PID to this file immediately after a successful start.
+    - Extended format for safety and recovery:
+        1) First line: PID
+        2) Second line: JSON-encoded Spec snapshot (optional; used to recover process details on restart)
+        3) Third line: JSON-encoded meta with `{ "start_unix": <seconds> }` (optional; used to verify PID identity)
+    - Older single-line and two-line formats remain supported for backward compatibility.
+    - The PIDFile detector validates that the PID refers to the same process by comparing the recorded start time with the current process start time, preventing PID reuse mistakes.
     - The parent directory is created if missing (mode 0750).
     - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid).
 
@@ -217,5 +226,12 @@ This project reads/writes a few files at well-defined locations. The defaults an
 
 - The HTTP API performs input validation for process specs to mitigate uncontrolled path usage (CodeQL: "Uncontrolled
   data used in path expression").
+- PID reuse protection: PID file meta includes the process start time and is validated against the live process using platform-native methods (procfs on Linux, sysctl on Darwin/BSD via gopsutil, WinAPI on Windows). No external `ps` calls are used.
 - Even with validation, run the server with least privileges and restrict log directories and pid file locations to
   trusted paths.
+
+## Notes and breaking changes
+
+- Persistence store removed: internal/store has been deleted. The manager now operates purely via in-memory state and PID files for recovery.
+- Serve flags simplified: `provisr serve` requires a config file. Daemonization flags are `--daemonize`, `--pidfile`, and `--logfile`. API listen/base are configured via the TOML `[server]` section.
+- Config-driven reconciliation: at startup, processes are recovered from PID files when available; processes not present in the config are gracefully shut down and cleaned up.

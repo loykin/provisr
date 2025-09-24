@@ -217,12 +217,22 @@ func (r *Process) WritePIDFile() {
 	}
 	_ = os.MkdirAll(filepath.Dir(pidFile), 0o750)
 
-	// Write PID in first line for backward compatibility, then JSON-encoded Spec.
+	// Write PID in first line for backward compatibility, then JSON-encoded Spec,
+	// and optionally a third line with PIDMeta JSON containing process start time.
 	var body []byte
 	if specCopy != nil {
 		if jb, err := json.Marshal(specCopy); err == nil {
 			body = append([]byte(strconv.Itoa(pid)), '\n')
 			body = append(body, jb...)
+			// Append meta
+			startUnix := getProcStartUnix(pid)
+			if startUnix > 0 {
+				meta := PIDMeta{StartUnix: startUnix}
+				if mb, err := json.Marshal(&meta); err == nil {
+					body = append(body, '\n')
+					body = append(body, mb...)
+				}
+			}
 		} else {
 			body = []byte(strconv.Itoa(pid))
 		}

@@ -7,29 +7,62 @@ import (
 	"strings"
 )
 
-// ReadPIDFile reads a PID file written by Process.WritePIDFile.
-// It returns the PID and, if present, the JSON-encoded Spec that follows.
-// For legacy files that contain only the PID, spec will be nil.
-func ReadPIDFile(path string) (int, *Spec, error) {
+// PIDMeta holds additional identity information for a PID to avoid PID reuse issues.
+// StartUnix is the process start time in Unix seconds (UTC/local agnostic for equality checks).
+type PIDMeta struct {
+	StartUnix int64 `json:"start_unix"`
+}
+
+// ReadPIDFileWithMeta reads a PID file written by Process.WritePIDFile.
+// Returns PID, optional Spec, and optional Meta (may be nil if absent or unparsable).
+func ReadPIDFileWithMeta(path string) (int, *Spec, *PIDMeta, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
-	// Split into first line (pid) and the rest (json)
-	pidLine, rest, _ := strings.Cut(string(b), "\n")
-	pidStr := strings.TrimSpace(pidLine)
+	content := string(b)
+	// First line: PID
+	first, rest, _ := strings.Cut(content, "\n")
+	pidStr := strings.TrimSpace(first)
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	rest = strings.TrimSpace(rest)
 	if rest == "" {
-		return pid, nil, nil
+		return pid, nil, nil, nil
 	}
+
+	// If there is a second JSON line, it could be either Spec (legacy extended)
+	// or Meta (in newer format we append meta as a third line).
+	secondJSON := rest
+	thirdJSON := ""
+	if l2, l3, ok := strings.Cut(rest, "\n"); ok {
+		secondJSON = strings.TrimSpace(l2)
+		thirdJSON = strings.TrimSpace(l3)
+	}
+
 	var spec Spec
-	if err := json.Unmarshal([]byte(rest), &spec); err != nil {
-		// Return PID even if spec cannot be parsed
-		return pid, nil, nil
+	var specPtr *Spec
+	if secondJSON != "" {
+		if err := json.Unmarshal([]byte(secondJSON), &spec); err == nil {
+			specPtr = &spec
+		}
 	}
-	return pid, &spec, nil
+
+	var metaPtr *PIDMeta
+	if thirdJSON != "" {
+		var meta PIDMeta
+		if err := json.Unmarshal([]byte(thirdJSON), &meta); err == nil {
+			metaPtr = &meta
+		}
+	}
+
+	return pid, specPtr, metaPtr, nil
+}
+
+// ReadPIDFile is a compatibility wrapper returning only pid and spec.
+func ReadPIDFile(path string) (int, *Spec, error) {
+	pid, spec, _, err := ReadPIDFileWithMeta(path)
+	return pid, spec, err
 }
