@@ -2,6 +2,7 @@ package process
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,14 @@ func ReadPIDFileWithMeta(path string) (int, *Spec, *PIDMeta, error) {
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		return 0, nil, nil, err
+	}
+
+	// Validate PID is in reasonable range
+	if pid <= 0 {
+		return 0, nil, nil, fmt.Errorf("invalid PID %d: must be positive", pid)
+	}
+	if pid > 4194304 { // Linux default max PID
+		return 0, nil, nil, fmt.Errorf("invalid PID %d: exceeds maximum", pid)
 	}
 	rest = strings.TrimSpace(rest)
 	if rest == "" {

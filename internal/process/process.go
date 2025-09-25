@@ -63,7 +63,9 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 
 	if !spec.Detached && (spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "") {
 		if spec.Log.File.Dir != "" {
-			_ = os.MkdirAll(spec.Log.File.Dir, 0o750)
+			if err := os.MkdirAll(spec.Log.File.Dir, 0o750); err != nil {
+				slog.Warn("Failed to create log directory", "dir", spec.Log.File.Dir, "error", err)
+			}
 		}
 		// Use unified config for both structured logging and file writers
 		outW, errW, _ := spec.Log.ProcessWriters(spec.Name)
@@ -72,12 +74,14 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 		if ow != nil {
 			cmd.Stdout = ow
 		} else {
-			cmd.Stdout, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
+			// Use io.Discard to avoid opening file handles for /dev/null
+			cmd.Stdout = io.Discard
 		}
 		if ew != nil {
 			cmd.Stderr = ew
 		} else {
-			cmd.Stderr, _ = os.OpenFile(os.DevNull, os.O_RDWR, 0)
+			// Use io.Discard to avoid opening file handles for /dev/null
+			cmd.Stderr = io.Discard
 		}
 	}
 	return cmd
@@ -189,11 +193,15 @@ func (r *Process) EnsureLogClosers(stdout, stderr io.WriteCloser) {
 func (r *Process) CloseWriters() {
 	r.mu.Lock()
 	if r.outCloser != nil {
-		_ = r.outCloser.Close()
+		if err := r.outCloser.Close(); err != nil {
+			slog.Warn("Failed to close stdout writer", "error", err)
+		}
 		r.outCloser = nil
 	}
 	if r.errCloser != nil {
-		_ = r.errCloser.Close()
+		if err := r.errCloser.Close(); err != nil {
+			slog.Warn("Failed to close stderr writer", "error", err)
+		}
 		r.errCloser = nil
 	}
 	r.mu.Unlock()
@@ -215,7 +223,10 @@ func (r *Process) WritePIDFile() {
 	if pidFile == "" || pid == 0 {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(pidFile), 0o750)
+	if err := os.MkdirAll(filepath.Dir(pidFile), 0o750); err != nil {
+		slog.Warn("Failed to create PID file directory", "dir", filepath.Dir(pidFile), "error", err)
+		return
+	}
 
 	// Write PID in first line for backward compatibility, then JSON-encoded Spec,
 	// and optionally a third line with PIDMeta JSON containing process start time.
@@ -239,7 +250,9 @@ func (r *Process) WritePIDFile() {
 	} else {
 		body = []byte(strconv.Itoa(pid))
 	}
-	_ = os.WriteFile(pidFile, body, 0o600)
+	if err := os.WriteFile(pidFile, body, 0o600); err != nil {
+		slog.Warn("Failed to write PID file", "file", pidFile, "error", err)
+	}
 }
 
 // RemovePIDFile best-effort
@@ -251,7 +264,9 @@ func (r *Process) RemovePIDFile() {
 	if pidFile == "" {
 		return
 	}
-	_ = os.Remove(pidFile)
+	if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
+		slog.Warn("Failed to remove PID file", "file", pidFile, "error", err)
+	}
 }
 
 // Snapshot returns a copy of the current status.
@@ -338,8 +353,9 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 	// Quick check: if process already gone
 	r.mu.Lock()
 	cmd := r.cmd
+	hasProcess := cmd != nil && cmd.Process != nil
 	r.mu.Unlock()
-	if cmd == nil || cmd.Process == nil {
+	if !hasProcess {
 		return errBeforeStart(d)
 	}
 
@@ -367,6 +383,8 @@ func (r *Process) StopWithSignal(sig syscall.Signal) error {
 	if cmd != nil && cmd.Process != nil {
 		pid := cmd.Process.Pid
 		if err := syscall.Kill(-pid, sig); err != nil {
+			slog.Warn("Failed to send signal to process group, falling back to SIGKILL",
+				"pid", pid, "signal", sig, "error", err)
 			// Fall back to SIGKILL best-effort; upper layers manage further retries
 			return r.Kill()
 		}
@@ -378,8 +396,12 @@ func (r *Process) StopWithSignal(sig syscall.Signal) error {
 	r.mu.Unlock()
 	if pid > 0 {
 		if err := syscall.Kill(-pid, sig); err != nil {
+			slog.Warn("Failed to send signal to stored PID, falling back to SIGKILL",
+				"pid", pid, "signal", sig, "error", err)
 			// Fall back to SIGKILL on the same PID
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			if killErr := syscall.Kill(-pid, syscall.SIGKILL); killErr != nil {
+				slog.Warn("Failed to kill process with SIGKILL fallback", "pid", pid, "error", killErr)
+			}
 		}
 	}
 	return nil
@@ -398,6 +420,8 @@ func (r *Process) Kill() error {
 		return nil
 	}
 	pid := cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		slog.Warn("Failed to kill process", "pid", pid, "error", err)
+	}
 	return nil
 }

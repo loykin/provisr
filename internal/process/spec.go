@@ -73,7 +73,7 @@ func (s *Spec) DeepCopy() *Spec {
 		copySpec.DetectorConfigs = append([]DetectorConfig(nil), s.DetectorConfigs...)
 	}
 
-	s.Log = *s.Log.DeepCopy()
+	copySpec.Log = *s.Log.DeepCopy()
 
 	return &copySpec
 }
