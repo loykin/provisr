@@ -40,14 +40,14 @@ func (c *APIClient) IsReachable() bool {
 	return resp.StatusCode != http.StatusNotFound // Accept any response except 404
 }
 
-// StartProcess starts a process via API
-func (c *APIClient) StartProcess(spec interface{}) error {
+// RegisterProcess registers and starts a process via API
+func (c *APIClient) RegisterProcess(spec interface{}) error {
 	data, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
 
-	resp, err := c.client.Post(c.baseURL+"/start", "application/json", bytes.NewReader(data))
+	resp, err := c.client.Post(c.baseURL+"/register", "application/json", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -127,6 +127,75 @@ func (c *APIClient) StopProcess(name string, wait ...time.Duration) error {
 // StopAll stops all instances with the same base name via API
 func (c *APIClient) StopAll(base string, wait ...time.Duration) error {
 	url := c.baseURL + "/stop?base=" + base
+	if len(wait) > 0 {
+		url += "&wait=" + wait[0].String()
+	}
+	resp, err := c.client.Post(url, "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error string `json:"error"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return err
+		}
+		return fmt.Errorf("API error: %s", errorResp.Error)
+	}
+	return nil
+}
+
+// StartProcess starts an already registered process via API
+func (c *APIClient) StartProcess(name string) error {
+	url := c.baseURL + "/start?name=" + name
+
+	resp, err := c.client.Post(url, "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error string `json:"error"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return err
+		}
+		return fmt.Errorf("API error: %s", errorResp.Error)
+	}
+
+	return nil
+}
+
+// UnregisterProcess stops and unregisters a process via API
+func (c *APIClient) UnregisterProcess(name string, wait ...time.Duration) error {
+	url := c.baseURL + "/unregister?name=" + name
+	if len(wait) > 0 {
+		url += "&wait=" + wait[0].String()
+	}
+	resp, err := c.client.Post(url, "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error string `json:"error"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return err
+		}
+		return fmt.Errorf("API error: %s", errorResp.Error)
+	}
+	return nil
+}
+
+// UnregisterAllProcesses stops and unregisters all processes with the same base name via API
+func (c *APIClient) UnregisterAllProcesses(base string, wait ...time.Duration) error {
+	url := c.baseURL + "/unregister?base=" + base
 	if len(wait) > 0 {
 		url += "&wait=" + wait[0].String()
 	}

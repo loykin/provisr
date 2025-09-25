@@ -15,15 +15,16 @@ type command struct {
 // startViaAPI starts processes using the daemon API
 func (c *command) startViaAPI(f StartFlags, apiClient *APIClient) error {
 	if f.ConfigPath != "" {
-		// For config-based starts, we need to load config and start each spec
+		// For config-based starts, we need to load config and resume each process
 		config, err := provisr.LoadConfig(f.ConfigPath)
 		if err != nil {
 			return err
 		}
 
 		for _, spec := range config.Specs {
-			if err := apiClient.StartProcess(spec); err != nil {
-				return fmt.Errorf("failed to start %s: %w", spec.Name, err)
+			// Try to start existing process first
+			if err := apiClient.StartProcess(spec.Name); err != nil {
+				return fmt.Errorf("failed to start %s: %w (process may not be registered)", spec.Name, err)
 			}
 		}
 
@@ -39,19 +40,12 @@ func (c *command) startViaAPI(f StartFlags, apiClient *APIClient) error {
 		return nil
 	}
 
-	// Single process start
-	spec := provisr.Spec{
-		Name:            f.Name,
-		Command:         f.Cmd,
-		RetryCount:      f.Retries,
-		RetryInterval:   f.RetryInterval,
-		StartDuration:   f.StartDuration,
-		AutoRestart:     f.AutoRestart,
-		RestartInterval: f.RestartInterval,
-		Instances:       f.Instances,
+	// Single process start - only resume existing registered process
+	if f.Name == "" {
+		return fmt.Errorf("process name is required")
 	}
 
-	return apiClient.StartProcess(spec)
+	return apiClient.StartProcess(f.Name)
 }
 
 // statusViaAPI gets status using the daemon API
@@ -227,7 +221,7 @@ func (c *command) groupStartViaAPI(f GroupFlags, apiClient *APIClient) error {
 
 	// Start each member of the group
 	for _, member := range gs.Members {
-		if err := apiClient.StartProcess(member); err != nil {
+		if err := apiClient.StartProcess(member.Name); err != nil {
 			return fmt.Errorf("failed to start %s: %w", member.Name, err)
 		}
 	}

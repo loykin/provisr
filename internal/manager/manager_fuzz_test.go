@@ -64,7 +64,7 @@ func FuzzManagerConcurrentOperations(f *testing.F) {
 					// Random operations
 					switch r.Intn(4) {
 					case 0: // Start
-						if err := mgr.Start(spec); err != nil && !isAcceptableError(err) {
+						if err := mgr.Register(spec); err != nil && !isAcceptableError(err) {
 							errChan <- fmt.Errorf("start %s: %w", spec.Name, err)
 						}
 					case 1: // Stop
@@ -132,7 +132,7 @@ func FuzzProcessSpecValidation(f *testing.F) {
 		}()
 
 		// Test start - should handle invalid specs gracefully
-		err := mgr.Start(spec)
+		err := mgr.Register(spec)
 
 		// For fuzzing, we mainly care that the system doesn't crash
 		// Some invalid specs might be accepted by the manager but fail later
@@ -192,7 +192,7 @@ func FuzzPatternMatching(f *testing.F) {
 				Command:   "sleep 0.1",
 				Instances: 1,
 			}
-			_ = mgr.Start(spec) // Ignore errors for fuzzing
+			_ = mgr.Register(spec) // Ignore errors for fuzzing
 		}
 
 		// Test pattern matching operations - should not panic

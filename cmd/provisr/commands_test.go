@@ -18,7 +18,7 @@ func (c *command) startDirectWithConfig(f StartFlags) error {
 	}
 
 	for _, spec := range config.Specs {
-		if err := c.mgr.Start(spec); err != nil {
+		if err := c.mgr.Register(spec); err != nil {
 			return fmt.Errorf("failed to start %s: %w", spec.Name, err)
 		}
 	}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -37,8 +38,10 @@ func (r *Router) Handler() http.Handler {
 	g := gin.New()
 	g.Use(gin.Recovery())
 	group := g.Group(r.basePath)
+	group.POST("/register", r.handleRegister)
 	group.POST("/start", r.handleStart)
 	group.POST("/stop", r.handleStop)
+	group.POST("/unregister", r.handleUnregister)
 	group.GET("/status", r.handleStatus)
 	group.GET("/debug/processes", r.handleDebugProcesses)
 	return g
@@ -90,7 +93,62 @@ type okResp struct {
 	OK bool `json:"ok"`
 }
 
-func (r *Router) handleStart(c *gin.Context) {
+// processSelector holds the parsed query parameters for process selection
+type processSelector struct {
+	name string
+	base string
+	wild string
+	wait time.Duration
+}
+
+// parseProcessSelector extracts and validates process selector parameters from the request
+func parseProcessSelector(c *gin.Context) (*processSelector, error) {
+	name := c.Query("name")
+	base := c.Query("base")
+	wild := c.Query("wildcard")
+	waitStr := c.Query("wait")
+	wait := 2 * time.Second
+	if waitStr != "" {
+		if d, err := time.ParseDuration(waitStr); err == nil {
+			wait = d
+		}
+	}
+
+	// ensure exactly one selector is provided
+	selCount := 0
+	if name != "" {
+		selCount++
+	}
+	if base != "" {
+		selCount++
+	}
+	if wild != "" {
+		selCount++
+	}
+	if selCount == 0 {
+		return nil, fmt.Errorf("one of name, base, wildcard query param required")
+	}
+	if selCount > 1 {
+		return nil, fmt.Errorf("exactly one of name, base, or wildcard must be provided")
+	}
+
+	// Validate process identifiers to avoid path traversal
+	if name != "" && !isSafeName(name) {
+		return nil, fmt.Errorf("invalid name: allowed [A-Za-z0-9._-] and no '..' or path separators")
+	}
+	if base != "" && !isSafeName(base) {
+		return nil, fmt.Errorf("invalid base: allowed [A-Za-z0-9._-] and no '..' or path separators")
+	}
+
+	return &processSelector{
+		name: name,
+		base: base,
+		wild: wild,
+		wait: wait,
+	}, nil
+}
+
+func (r *Router) handleRegister(c *gin.Context) {
 	var spec process.Spec
 	// ok: safe path checked
 	if err := c.ShouldBindJSON(&spec); err != nil {
@@ -127,7 +185,7 @@ func (r *Router) handleStart(c *gin.Context) {
 		return
 	}
 	// ok: safe path checked
-	if err := r.mgr.StartN(spec); err != nil {
+	if err := r.mgr.RegisterN(spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
@@ -135,52 +193,22 @@ func (r *Router) handleStart(c *gin.Context) {
 }
 
 func (r *Router) handleStop(c *gin.Context) {
-	name := c.Query("name")
-	base := c.Query("base")
-	wild := c.Query("wildcard")
-	waitStr := c.Query("wait")
-	wait := 2 * time.Second
-	if waitStr != "" {
-		if d, err := time.ParseDuration(waitStr); err == nil {
-			wait = d
-		}
-	}
-	// ensure exactly one selector is provided
-	selCount := 0
-	if name != "" {
-		selCount++
-	}
-	if base != "" {
-		selCount++
-	}
-	if wild != "" {
-		selCount++
-	}
-	if selCount == 0 {
-		writeJSON(c, http.StatusBadRequest, errorResp{Error: "one of name, base, wildcard query param required"})
+	selector, err := parseProcessSelector(c)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
-	if selCount > 1 {
-		writeJSON(c, http.StatusBadRequest, errorResp{Error: "only one of name, base, wildcard must be provided"})
-		return
+
+	if selector.base != "" {
+		err = r.mgr.StopAll(selector.base, selector.wait)
+	} else if selector.wild != "" {
+		err = r.mgr.StopMatch(selector.wild, selector.wait)
+	} else {
+		// single process by name
+		err = r.mgr.Stop(selector.name, selector.wait)
 	}
-	if base != "" {
-		if err := r.mgr.StopAll(base, wait); err != nil {
-			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
-			return
-		}
-		writeJSON(c, http.StatusOK, okResp{OK: true})
-		return
-	}
-	if wild != "" {
-		if err := r.mgr.StopMatch(wild, wait); err != nil {
-			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
-			return
-		}
-		writeJSON(c, http.StatusOK, okResp{OK: true})
-		return
-	}
-	if err := r.mgr.Stop(name, wait); err != nil {
+
+	if err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
@@ -281,4 +309,49 @@ func getHealthStatus(status process.Status) string {
 	}
 
 	return "healthy"
+}
+
+func (r *Router) handleStart(c *gin.Context) {
+	name := c.Query("name")
+	if name == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "name parameter required"})
+		return
+	}
+
+	// Validate process name to avoid path traversal
+	if !isSafeName(name) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+
+	// Start only existing registered process
+	if err := r.mgr.Start(name); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleUnregister(c *gin.Context) {
+	selector, err := parseProcessSelector(c)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	if selector.name != "" {
+		err = r.mgr.Unregister(selector.name, selector.wait)
+	} else if selector.base != "" {
+		err = r.mgr.UnregisterAll(selector.base, selector.wait)
+	} else {
+		err = r.mgr.UnregisterMatch(selector.wild, selector.wait)
+	}
+
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, okResp{OK: true})
 }
