@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
-	"github.com/loykin/provisr/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -342,7 +341,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 
 	// Load unified config once
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := provisr.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
 	}
