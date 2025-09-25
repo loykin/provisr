@@ -65,25 +65,25 @@ func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
 	m.mu.Unlock()
 }
 
-// Start starts a single process
-func (m *Manager) Start(spec process.Spec) error {
+// Register registers and starts a new process
+func (m *Manager) Register(spec process.Spec) error {
 	up := m.ensureProcess(spec.Name)
 	return up.Start(spec)
 }
 
-// StartN starts N instances of a process
-func (m *Manager) StartN(spec process.Spec) error {
+// RegisterN registers and starts N instances of a process
+func (m *Manager) RegisterN(spec process.Spec) error {
 	if spec.Instances <= 1 {
-		return m.Start(spec)
+		return m.Register(spec)
 	}
 
-	// Start multiple instances with numbered names
+	// Register multiple instances with numbered names
 	var firstErr error
 	for i := 1; i <= spec.Instances; i++ {
 		instanceSpec := spec
 		instanceSpec.Name = fmt.Sprintf("%s-%d", spec.Name, i)
 
-		if err := m.Start(instanceSpec); err != nil && firstErr == nil {
+		if err := m.Register(instanceSpec); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -91,7 +91,34 @@ func (m *Manager) StartN(spec process.Spec) error {
 	return firstErr
 }
 
-// Stop stops a process
+// Start starts an already registered process without creating a new one
+func (m *Manager) Start(name string) error {
+	m.mu.RLock()
+	up := m.processes[name]
+	m.mu.RUnlock()
+
+	if up == nil {
+		return fmt.Errorf("process %q is not registered", name)
+	}
+
+	// Get current spec from the managed process
+	up.mu.RLock()
+	proc := up.proc
+	up.mu.RUnlock()
+
+	if proc == nil {
+		return fmt.Errorf("process %q has no process instance", name)
+	}
+
+	spec := proc.GetSpec()
+	if spec == nil {
+		return fmt.Errorf("process %q has no spec defined", name)
+	}
+
+	return up.Start(*spec)
+}
+
+// Stop stops a process without unregistering it
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	m.mu.RLock()
 	up := m.processes[name]
@@ -102,6 +129,27 @@ func (m *Manager) Stop(name string, wait time.Duration) error {
 	}
 
 	return up.Stop(wait)
+}
+
+// Unregister stops and removes a process from management
+func (m *Manager) Unregister(name string, wait time.Duration) error {
+	m.mu.Lock()
+	up := m.processes[name]
+	if up == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("process %s not found", name)
+	}
+
+	// Remove from processes map immediately to prevent new operations
+	delete(m.processes, name)
+	m.mu.Unlock()
+
+	// Stop the process
+	if err := up.Stop(wait); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Status returns status for a single process
@@ -139,9 +187,44 @@ func (m *Manager) StopAll(base string, wait time.Duration) error {
 	return firstErr
 }
 
+// UnregisterAll stops and unregisters all processes matching a base name pattern
+func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
+	var processes []*ManagedProcess
+	var names []string
+
+	m.mu.Lock()
+	for name, up := range m.processes {
+		if m.matchesPattern(name, base) {
+			processes = append(processes, up)
+			names = append(names, name)
+		}
+	}
+
+	// Remove all matched processes from map first
+	for _, name := range names {
+		delete(m.processes, name)
+	}
+	m.mu.Unlock()
+
+	// Stop all processes
+	var firstErr error
+	for _, up := range processes {
+		if err := up.Stop(wait); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
 // StopMatch stops all processes matching a pattern (alias for StopAll)
 func (m *Manager) StopMatch(pattern string, wait time.Duration) error {
 	return m.StopAll(pattern, wait)
+}
+
+// UnregisterMatch stops and unregisters all processes matching a pattern (alias for UnregisterAll)
+func (m *Manager) UnregisterMatch(pattern string, wait time.Duration) error {
+	return m.UnregisterAll(pattern, wait)
 }
 
 // StatusMatch returns status for all processes matching a pattern (alias for StatusAll)
@@ -320,7 +403,7 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 			}
 		}
 
-		// Check current status; if not running, start it
+		// Check current status; if not running, register and start it
 		st := up.Status()
 		if !st.Running {
 			_ = up.Start(ds)

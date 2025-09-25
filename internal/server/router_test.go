@@ -88,9 +88,10 @@ func TestWildcardStatusAndStop(t *testing.T) {
 		Command:   "go version",
 		Instances: 2,
 	}
-	rec := doReq(t, h, http.MethodPost, "/start", startSpec)
+	// First register the process
+	rec := doReq(t, h, http.MethodPost, "/register", startSpec)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("start expected 200, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("register expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	// query wildcard
 	rec = doReq(t, h, http.MethodGet, "/status?wildcard=demo-*", nil)
@@ -118,14 +119,14 @@ func TestStartInvalidNameAndPaths(t *testing.T) {
 	h := setupRouter(t, "")
 	// invalid name
 	badNameSpec := process.Spec{Name: "../bad", Command: "go version"} // invalid name - should fail
-	rec := doReq(t, h, http.MethodPost, "/start", badNameSpec)
+	rec := doReq(t, h, http.MethodPost, "/register", badNameSpec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid name expected 400, got %d", rec.Code)
 	}
 
 	// invalid workdir (relative)
 	badWorkDirSpec := process.Spec{Name: "ok", Command: "go version", WorkDir: "rel/path"} // relative path - should fail
-	rec = doReq(t, h, http.MethodPost, "/start", badWorkDirSpec)
+	rec = doReq(t, h, http.MethodPost, "/register", badWorkDirSpec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid workdir expected 400, got %d", rec.Code)
 	}
@@ -135,7 +136,7 @@ func TestStartInvalidNameAndPaths(t *testing.T) {
 		Command: "go version",
 		PIDFile: "pid.pid", // relative path - should fail
 	}
-	rec = doReq(t, h, http.MethodPost, "/start", spec1)
+	rec = doReq(t, h, http.MethodPost, "/register", spec1)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid pidfile expected 400, got %d", rec.Code)
 	}
@@ -146,7 +147,7 @@ func TestStartInvalidNameAndPaths(t *testing.T) {
 		Command: "go version",
 		Log:     logger.Config{File: logger.FileConfig{Dir: "logs"}}, // relative path - should fail
 	}
-	rec = doReq(t, h, http.MethodPost, "/start", spec2)
+	rec = doReq(t, h, http.MethodPost, "/register", spec2)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.dir expected 400, got %d", rec.Code)
 	}
@@ -156,7 +157,7 @@ func TestStartInvalidNameAndPaths(t *testing.T) {
 		Command: "go version",
 		Log:     logger.Config{File: logger.FileConfig{StdoutPath: "out.log"}}, // relative path - should fail
 	}
-	rec = doReq(t, h, http.MethodPost, "/start", spec3)
+	rec = doReq(t, h, http.MethodPost, "/register", spec3)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.stdoutPath expected 400, got %d", rec.Code)
 	}
@@ -166,7 +167,7 @@ func TestStartInvalidNameAndPaths(t *testing.T) {
 		Command: "go version",
 		Log:     logger.Config{File: logger.FileConfig{StderrPath: "err.log"}}, // relative path - should fail
 	}
-	rec = doReq(t, h, http.MethodPost, "/start", spec4)
+	rec = doReq(t, h, http.MethodPost, "/register", spec4)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.stderrPath expected 400, got %d", rec.Code)
 	}
@@ -193,9 +194,9 @@ func TestStartThenStatusByBaseAndName(t *testing.T) {
 		Name:    "svc",
 		Command: "go version",
 	}
-	rec := doReq(t, h, http.MethodPost, "/api/start", startSpec)
+	rec := doReq(t, h, http.MethodPost, "/api/register", startSpec)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("start expected 200, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("register expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	// status by base should return an array (len>=1)
 	rec = doReq(t, h, http.MethodGet, "/api/status?base=svc", nil)

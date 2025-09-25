@@ -74,7 +74,7 @@ func TestApplyGlobalEnvFromFlags(t *testing.T) {
 	outFile := filepath.Join(tdir, "out.txt")
 	cmd := "sh -c 'echo " + "${A}-${B}-${C}" + " > " + outFile + "'"
 	spec := provisr.Spec{Name: "envtest", Command: cmd, StartDuration: 0}
-	if err := mgr.Start(spec); err != nil {
+	if err := mgr.Register(spec); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	// wait a bit and then check file
@@ -151,7 +151,7 @@ func TestPrintDetailedStatusByBase(t *testing.T) {
 		Command:       "sleep 0.1",
 		StartDuration: 10 * time.Millisecond,
 	}
-	err := mgr.Start(spec)
+	err := mgr.Register(spec)
 	if err != nil {
 		t.Fatalf("Failed to start test process: %v", err)
 	}

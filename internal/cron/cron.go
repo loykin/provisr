@@ -157,7 +157,7 @@ func (s *Scheduler) runJob(j *Job, period time.Duration) {
 			// run in separate goroutine to avoid blocking the ticker if Start waits start duration
 			go func(j *Job) {
 				defer j.running.Store(false)
-				_ = s.mgr.Start(j.Spec)
+				_ = s.mgr.Register(j.Spec)
 				// We don't wait for process completion; it's managed by Manager. Cron semantics fire start attempts.
 			}(j)
 		}
