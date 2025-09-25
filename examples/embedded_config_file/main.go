@@ -53,9 +53,9 @@ func main() {
 	for _, sp := range specs {
 		var startErr error
 		if sp.Instances > 1 {
-			startErr = mgr.StartN(sp)
+			startErr = mgr.RegisterN(sp)
 		} else {
-			startErr = mgr.Start(sp)
+			startErr = mgr.Register(sp)
 		}
 		if startErr != nil {
 			hadError = true
