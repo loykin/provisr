@@ -24,6 +24,7 @@ type Manager struct {
 	// Manager-level state (protected by mu)
 	mu        sync.RWMutex
 	processes map[string]*ManagedProcess
+	groups    map[string]GroupSpec
 
 	// Shared resources
 	envManager *env.Env
@@ -34,6 +35,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		processes:  make(map[string]*ManagedProcess),
+		groups:     make(map[string]GroupSpec),
 		envManager: env.New(),
 	}
 }
@@ -429,4 +431,107 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 	}
 
 	return nil
+}
+
+// GroupSpec defines a group of processes to be managed together
+type GroupSpec struct {
+	Name    string
+	Members []process.Spec
+}
+
+// SetGroups configures the group definitions
+func (m *Manager) SetGroups(groups []GroupSpec) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Clear existing groups
+	m.groups = make(map[string]GroupSpec)
+
+	// Set new groups
+	for _, group := range groups {
+		m.groups[group.Name] = group
+	}
+}
+
+// GetGroup returns the group specification by name
+func (m *Manager) GetGroup(name string) (GroupSpec, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	group, exists := m.groups[name]
+	if !exists {
+		return GroupSpec{}, fmt.Errorf("group %s not found", name)
+	}
+	return group, nil
+}
+
+// GroupStatus returns status of all processes in a group
+func (m *Manager) GroupStatus(groupName string) (map[string][]process.Status, error) {
+	group, err := m.GetGroup(groupName)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]process.Status)
+
+	for _, member := range group.Members {
+		// Get all instances of this member (e.g., web-1, web-2)
+		statuses, err := m.StatusAll(member.Name)
+		if err != nil {
+			// If no processes found, add empty entry
+			result[member.Name] = []process.Status{}
+		} else {
+			result[member.Name] = statuses
+		}
+	}
+
+	return result, nil
+}
+
+// GroupStart starts all processes in a group
+func (m *Manager) GroupStart(groupName string) error {
+	group, err := m.GetGroup(groupName)
+	if err != nil {
+		return err
+	}
+
+	var firstError error
+	for _, member := range group.Members {
+		// Start all instances of this member
+		for i := 1; i <= member.Instances; i++ {
+			instanceName := member.Name
+			if member.Instances > 1 {
+				instanceName = fmt.Sprintf("%s-%d", member.Name, i)
+			}
+			if err := m.Start(instanceName); err != nil {
+				if firstError == nil {
+					firstError = fmt.Errorf("failed to start %s: %w", instanceName, err)
+				}
+				// Continue starting other processes even if one fails
+			}
+		}
+	}
+
+	return firstError
+}
+
+// GroupStop stops all processes in a group
+func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
+	group, err := m.GetGroup(groupName)
+	if err != nil {
+		return err
+	}
+
+	var firstError error
+	for _, member := range group.Members {
+		// Stop all instances of this member base
+		if err := m.StopAll(member.Name, wait); err != nil {
+			if firstError == nil {
+				firstError = fmt.Errorf("failed to stop %s: %w", member.Name, err)
+			}
+			// Continue stopping other processes even if one fails
+		}
+	}
+
+	return firstError
 }

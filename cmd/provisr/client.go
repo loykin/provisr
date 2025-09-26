@@ -215,3 +215,74 @@ func (c *APIClient) UnregisterAllProcesses(base string, wait ...time.Duration) e
 	}
 	return nil
 }
+
+// GetGroupStatus gets the status of all processes in a group
+func (c *APIClient) GetGroupStatus(groupName string) (interface{}, error) {
+	url := c.baseURL + "/group/status?group=" + groupName
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if errorMap, ok := result.(map[string]interface{}); ok {
+			if errorMsg, exists := errorMap["error"]; exists {
+				return nil, fmt.Errorf("API error: %v", errorMsg)
+			}
+		}
+		return nil, fmt.Errorf("API error: HTTP %d", resp.StatusCode)
+	}
+
+	return result, nil
+}
+
+// GroupStart starts all processes in a group
+func (c *APIClient) GroupStart(groupName string) error {
+	url := c.baseURL + "/group/start?group=" + groupName
+	resp, err := c.client.Post(url, "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error string `json:"error"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return err
+		}
+		return fmt.Errorf("API error: %s", errorResp.Error)
+	}
+	return nil
+}
+
+// GroupStop stops all processes in a group
+func (c *APIClient) GroupStop(groupName string, wait ...time.Duration) error {
+	url := c.baseURL + "/group/stop?group=" + groupName
+	if len(wait) > 0 {
+		url += "&wait=" + wait[0].String()
+	}
+	resp, err := c.client.Post(url, "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error string `json:"error"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return err
+		}
+		return fmt.Errorf("API error: %s", errorResp.Error)
+	}
+	return nil
+}
