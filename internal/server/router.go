@@ -28,11 +28,24 @@ type Router struct {
 	basePath string
 }
 
+// APIEndpoints provides individual access to API handlers for custom registration
+type APIEndpoints struct {
+	mgr      *mng.Manager
+	basePath string
+}
+
 // NewRouter constructs a new Router with configurable basePath.
 // Example basePath: "/abc" results in /abc/start, /abc/stop, /abc/status.
 func NewRouter(mgr *mng.Manager, basePath string) *Router {
 	bp := sanitizeBase(basePath)
 	return &Router{mgr: mgr, basePath: bp}
+}
+
+// NewAPIEndpoints constructs APIEndpoints for individual handler registration.
+// This allows registering each API endpoint separately with custom middleware.
+func NewAPIEndpoints(mgr *mng.Manager, basePath string) *APIEndpoints {
+	bp := sanitizeBase(basePath)
+	return &APIEndpoints{mgr: mgr, basePath: bp}
 }
 
 // Handler returns an http.Handler powered by gin that can be mounted in any server/mux.
@@ -138,6 +151,77 @@ func NewTLSServer(serverConfig config.ServerConfig, mgr *mng.Manager) (*http.Ser
 	}
 
 	return server, nil
+}
+
+// --- APIEndpoints Individual Handler Registration ---
+
+// RegisterHandler returns the gin.HandlerFunc for process registration
+func (e *APIEndpoints) RegisterHandler() gin.HandlerFunc {
+	// Create a temporary router to reuse existing handler logic
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleRegister
+}
+
+// StartHandler returns the gin.HandlerFunc for starting processes
+func (e *APIEndpoints) StartHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleStart
+}
+
+// StopHandler returns the gin.HandlerFunc for stopping processes
+func (e *APIEndpoints) StopHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleStop
+}
+
+// StatusHandler returns the gin.HandlerFunc for getting process status
+func (e *APIEndpoints) StatusHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleStatus
+}
+
+// UnregisterHandler returns the gin.HandlerFunc for unregistering processes
+func (e *APIEndpoints) UnregisterHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleUnregister
+}
+
+// GroupStartHandler returns the gin.HandlerFunc for starting process groups
+func (e *APIEndpoints) GroupStartHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleGroupStart
+}
+
+// GroupStopHandler returns the gin.HandlerFunc for stopping process groups
+func (e *APIEndpoints) GroupStopHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleGroupStop
+}
+
+// GroupStatusHandler returns the gin.HandlerFunc for getting group status
+func (e *APIEndpoints) GroupStatusHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleGroupStatus
+}
+
+// DebugProcessesHandler returns the gin.HandlerFunc for debug information
+func (e *APIEndpoints) DebugProcessesHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleDebugProcesses
+}
+
+// RegisterAll registers all API endpoints to the provided gin router group
+// This is equivalent to using the Router.Handler() but allows for custom middleware
+func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) {
+	group.POST("/register", e.RegisterHandler())
+	group.POST("/start", e.StartHandler())
+	group.POST("/stop", e.StopHandler())
+	group.POST("/unregister", e.UnregisterHandler())
+	group.GET("/status", e.StatusHandler())
+	group.GET("/group/status", e.GroupStatusHandler())
+	group.POST("/group/start", e.GroupStartHandler())
+	group.POST("/group/stop", e.GroupStopHandler())
+	group.GET("/debug/processes", e.DebugProcessesHandler())
 }
 
 // --- Handlers ---

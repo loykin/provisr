@@ -292,6 +292,8 @@ c := client.New(config)
 
 ## Embedding the API
 
+### Standard Integration (All endpoints at once)
+
 - Gin example: examples/embedded_http_gin
 - Echo example: examples/embedded_http_echo
 
@@ -309,6 +311,52 @@ To run the Echo example:
 ```shell
 cd examples/embedded_http_echo
 API_BASE=/api go run .
+```
+
+### Individual Endpoint Registration (Custom middleware per endpoint)
+
+For advanced use cases where you need different middleware for different endpoints:
+
+- Gin individual example: examples/embedded_http_gin_individual
+- Echo individual example: examples/embedded_http_echo_individual
+
+These examples demonstrate:
+- Registering each API endpoint separately
+- Applying custom middleware to specific endpoints
+- Authentication only on protected endpoints
+- Rate limiting on specific operations
+- Custom logging and monitoring per endpoint
+
+To run the individual Gin example:
+
+```shell
+cd examples/embedded_http_gin_individual
+API_BASE=/api go run .
+```
+
+To run the individual Echo example:
+
+```shell
+cd examples/embedded_http_echo_individual
+API_BASE=/api go run .
+```
+
+#### Individual API Usage
+
+```go
+// Create API endpoints for custom registration
+endpoints := server.NewAPIEndpoints(mgr, "/api")
+apiGroup := r.Group("/api")
+
+// Register endpoints individually with custom middleware
+apiGroup.GET("/status", loggingMiddleware(), endpoints.StatusHandler())
+apiGroup.POST("/start", loggingMiddleware(), authMiddleware(), endpoints.StartHandler())
+apiGroup.POST("/stop", loggingMiddleware(), authMiddleware(), endpoints.StopHandler())
+
+// Or register all at once with common middleware
+commonGroup := r.Group("/api")
+commonGroup.Use(loggingMiddleware())
+endpoints.RegisterAll(commonGroup)
 ```
 
 ## More examples
