@@ -1,151 +1,507 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/loykin/provisr"
 )
 
-func (c *command) startDirectWithConfig(f StartFlags) error {
-	config, err := provisr.LoadConfig(f.ConfigPath)
-	if err != nil {
-		return err
-	}
+// Mock API server for testing
+func createMockAPIServer(responses map[string]string, statusCodes map[string]int) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		method := r.Method
+		key := fmt.Sprintf("%s:%s", method, path)
 
-	for _, spec := range config.Specs {
-		if err := c.mgr.Start(spec); err != nil {
-			return fmt.Errorf("failed to start %s: %w", spec.Name, err)
+		// Set the status code first
+		if statusCode, exists := statusCodes[key]; exists {
+			w.WriteHeader(statusCode)
+		} else {
+			w.WriteHeader(http.StatusOK) // Default to 200 if not specified
 		}
-	}
-	return nil
-}
 
-func (c *command) groupStatusDirect(f GroupFlags) error {
-	config, err := provisr.LoadConfig(f.ConfigPath)
-	if err != nil {
-		return err
-	}
-
-	group := provisr.NewGroup(c.mgr)
-
-	// Find the group spec in converted GroupSpecs
-	var groupSpec provisr.GroupSpec
-	found := false
-	for _, g := range config.GroupSpecs {
-		if g.Name == f.GroupName {
-			groupSpec = g
-			found = true
-			break
+		// Then write the response
+		if response, exists := responses[key]; exists {
+			_, _ = w.Write([]byte(response))
+		} else {
+			// Only write "not found" if we explicitly set a 404 status
+			if statusCode, exists := statusCodes[key]; exists && statusCode == 404 {
+				_, _ = w.Write([]byte(`{"error": "not found"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"message": "success"}`))
+			}
 		}
+	}))
+}
+
+func TestCommand_StartViaAPI(t *testing.T) {
+	tests := []struct {
+		name        string
+		flags       StartFlags
+		mockResp    map[string]string
+		statusCodes map[string]int
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name: "successful start",
+			flags: StartFlags{
+				Name: "test-proc",
+			},
+			mockResp: map[string]string{
+				"POST:/api/processes/test-proc/start": `{"status": "started"}`,
+			},
+			statusCodes: map[string]int{
+				"POST:/api/processes/test-proc/start": 200,
+			},
+			expectErr: false,
+		},
+		{
+			name: "empty name should fail",
+			flags: StartFlags{
+				Name: "",
+			},
+			expectErr:   true,
+			errContains: "process name is required",
+		},
+		{
+			name: "API error",
+			flags: StartFlags{
+				Name: "test-proc",
+			},
+			mockResp: map[string]string{
+				"POST:/api/processes/test-proc/start": `{"error": "process not found"}`,
+			},
+			statusCodes: map[string]int{
+				"POST:/api/processes/test-proc/start": 404,
+			},
+			expectErr:   false,
+			errContains: "",
+		},
 	}
 
-	if !found {
-		return fmt.Errorf("group %s not found", f.GroupName)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mockServer *httptest.Server
+			var apiClient *APIClient
+
+			if tt.flags.Name != "" {
+				mockServer = createMockAPIServer(tt.mockResp, tt.statusCodes)
+				defer mockServer.Close()
+				apiClient = NewAPIClient(mockServer.URL+"/api", 5*time.Second)
+			}
+
+			cmd := &command{mgr: &provisr.Manager{}}
+
+			var err error
+			if tt.flags.Name == "" {
+				err = cmd.startViaAPI(tt.flags, nil)
+			} else {
+				err = cmd.startViaAPI(tt.flags, apiClient)
+			}
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error to contain %q, got %v", tt.errContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCommand_StatusViaAPI(t *testing.T) {
+	tests := []struct {
+		name        string
+		flags       StatusFlags
+		mockResp    map[string]string
+		statusCodes map[string]int
+		expectErr   bool
+	}{
+		{
+			name: "successful status",
+			flags: StatusFlags{
+				Name: "test-proc",
+			},
+			mockResp: map[string]string{
+				"GET:/api/processes/test-proc": `{"name": "test-proc", "status": "running"}`,
+			},
+			statusCodes: map[string]int{
+				"GET:/api/processes/test-proc": 200,
+			},
+			expectErr: false,
+		},
+		{
+			name: "API error",
+			flags: StatusFlags{
+				Name: "test-proc",
+			},
+			statusCodes: map[string]int{
+				"GET:/api/processes/test-proc": 500,
+			},
+			expectErr: false,
+		},
 	}
 
-	result, err := group.Status(groupSpec)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockServer := createMockAPIServer(tt.mockResp, tt.statusCodes)
+			defer mockServer.Close()
+
+			apiClient := NewAPIClient(mockServer.URL+"/api", 5*time.Second)
+			cmd := &command{mgr: &provisr.Manager{}}
+
+			err := cmd.statusViaAPI(tt.flags, apiClient)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCommand_StopViaAPI(t *testing.T) {
+	tests := []struct {
+		name        string
+		flags       StopFlags
+		mockResp    map[string]string
+		statusCodes map[string]int
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name: "successful stop",
+			flags: StopFlags{
+				Name: "test-proc",
+				Wait: 3 * time.Second,
+			},
+			mockResp: map[string]string{
+				"POST:/api/processes/test-proc/stop": `{"status": "stopped"}`,
+				"GET:/api/processes/test-proc":       `{"name": "test-proc", "status": "stopped"}`,
+			},
+			statusCodes: map[string]int{
+				"POST:/api/processes/test-proc/stop": 200,
+				"GET:/api/processes/test-proc":       200,
+			},
+			expectErr: false,
+		},
+		{
+			name: "empty name should fail",
+			flags: StopFlags{
+				Name: "",
+			},
+			expectErr:   true,
+			errContains: "process name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.flags.Name == "" {
+				cmd := &command{mgr: &provisr.Manager{}}
+				err := cmd.stopViaAPI(tt.flags, nil)
+				if !tt.expectErr || !strings.Contains(err.Error(), tt.errContains) {
+					t.Fatalf("expected error containing %q, got %v", tt.errContains, err)
+				}
+				return
+			}
+
+			mockServer := createMockAPIServer(tt.mockResp, tt.statusCodes)
+			defer mockServer.Close()
+
+			apiClient := NewAPIClient(mockServer.URL+"/api", 5*time.Second)
+			cmd := &command{mgr: &provisr.Manager{}}
+
+			err := cmd.stopViaAPI(tt.flags, apiClient)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestIsExpectedShutdownError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"signal terminated", errors.New("signal: terminated"), true},
+		{"signal killed", errors.New("signal: killed"), true},
+		{"signal interrupt", errors.New("signal: interrupt"), true},
+		{"exit status 1", errors.New("exit status 1"), true},
+		{"exit status 130", errors.New("exit status 130"), true},
+		{"exit status 143", errors.New("exit status 143"), true},
+		{"wrapped signal terminated", errors.New("failed to stop process: signal: terminated"), true},
+		{"API error signal", errors.New("API error: signal: terminated"), true},
+		{"contains signal terminated", errors.New("some prefix signal: terminated suffix"), true},
+		{"random error", errors.New("random error message"), false},
+		{"empty error", errors.New(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isExpectedShutdownError(tt.err)
+			if result != tt.expected {
+				t.Errorf("isExpectedShutdownError(%v) = %v, expected %v", tt.err, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCommand_GroupStartViaAPI(t *testing.T) {
+	tests := []struct {
+		name        string
+		flags       GroupFlags
+		mockResp    map[string]string
+		statusCodes map[string]int
+		expectErr   bool
+	}{
+		{
+			name: "successful group start",
+			flags: GroupFlags{
+				GroupName: "test-group",
+			},
+			mockResp: map[string]string{
+				"POST:/api/groups/test-group/start": `{"status": "started"}`,
+			},
+			statusCodes: map[string]int{
+				"POST:/api/groups/test-group/start": 200,
+			},
+			expectErr: false,
+		},
+		{
+			name: "API error",
+			flags: GroupFlags{
+				GroupName: "test-group",
+			},
+			statusCodes: map[string]int{
+				"POST:/api/groups/test-group/start": 500,
+			},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockServer := createMockAPIServer(tt.mockResp, tt.statusCodes)
+			defer mockServer.Close()
+
+			apiClient := NewAPIClient(mockServer.URL+"/api", 5*time.Second)
+			cmd := &command{mgr: &provisr.Manager{}}
+
+			err := cmd.groupStartViaAPI(tt.flags, apiClient)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCommand_GroupStopViaAPI(t *testing.T) {
+	mockServer := createMockAPIServer(
+		map[string]string{
+			"POST:/api/groups/test-group/stop": `{"status": "stopped"}`,
+		},
+		map[string]int{
+			"POST:/api/groups/test-group/stop": 200,
+		},
+	)
+	defer mockServer.Close()
+
+	apiClient := NewAPIClient(mockServer.URL+"/api", 5*time.Second)
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := GroupFlags{
+		GroupName: "test-group",
+		Wait:      3 * time.Second,
+	}
+
+	err := cmd.groupStopViaAPI(flags, apiClient)
 	if err != nil {
-		return err
+		t.Fatalf("unexpected error: %v", err)
 	}
-	printJSON(result)
-	return nil
 }
 
-func (c *command) groupStopDirect(f GroupFlags) error {
-	config, err := provisr.LoadConfig(f.ConfigPath)
+func TestCommand_GroupStatusViaAPI(t *testing.T) {
+	mockServer := createMockAPIServer(
+		map[string]string{
+			"GET:/api/groups/test-group": `{"name": "test-group", "members": ["proc1", "proc2"]}`,
+		},
+		map[string]int{
+			"GET:/api/groups/test-group": 200,
+		},
+	)
+	defer mockServer.Close()
+
+	apiClient := NewAPIClient(mockServer.URL+"/api", 5*time.Second)
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := GroupFlags{
+		GroupName: "test-group",
+	}
+
+	err := cmd.groupStatusViaAPI(flags, apiClient)
 	if err != nil {
-		return err
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	group := provisr.NewGroup(c.mgr)
-
-	// Find the group spec in converted GroupSpecs
-	var groupSpec provisr.GroupSpec
-	found := false
-	for _, g := range config.GroupSpecs {
-		if g.Name == f.GroupName {
-			groupSpec = g
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("group %s not found", f.GroupName)
-	}
-
-	err = group.Stop(groupSpec, f.Wait)
-	if err != nil && isExpectedShutdownError(err) {
-		return nil // Ignore expected shutdown errors
-	}
-	return err
 }
 
-func writeTOML(t *testing.T, dir, name, content string) string {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatalf("write toml: %v", err)
+func TestCommand_Start_DaemonNotReachable(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := StartFlags{
+		Name:       "test-proc",
+		APIUrl:     "http://localhost:99999/api", // unreachable
+		APITimeout: 1 * time.Second,
 	}
-	return p
+
+	err := cmd.Start(flags)
+	if err == nil {
+		t.Fatal("expected error for unreachable daemon")
+	}
+
+	if !strings.Contains(err.Error(), "daemon not reachable") {
+		t.Errorf("expected daemon not reachable error, got: %v", err)
+	}
 }
 
-func TestCmdStartAndGroupStatusStop_WithConfig(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("requires Unix sleep")
-	}
-	mgr := provisr.New()
-	dir := t.TempDir()
+func TestCommand_Status_DaemonNotReachable(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
 
-	// Create programs directory structure
-	programsDir := filepath.Join(dir, "programs")
-	if err := os.MkdirAll(programsDir, 0o755); err != nil {
-		t.Fatalf("create programs dir: %v", err)
+	flags := StatusFlags{
+		Name:       "test-proc",
+		APIUrl:     "http://localhost:99999/api", // unreachable
+		APITimeout: 1 * time.Second,
 	}
 
-	// Write individual program files in unified format (type/spec)
-	writeTOML(t, programsDir, "g1-a.toml", `
- type = "process"
- [spec]
- name = "g1-a"
- command = "sleep 1"
- startsecs = "50ms"
-`)
-	writeTOML(t, programsDir, "g1-b.toml", `
- type = "process"
- [spec]
- name = "g1-b"
- command = "sleep 1"
- startsecs = "50ms"
-`)
-
-	// Main config with programs_directory and groups
-	cfg := `
-programs_directory = "programs"
-
-[[groups]]
-name = "grp1"
-members = ["g1-a", "g1-b"]
-`
-	path := writeTOML(t, dir, "config.toml", cfg)
-
-	provisrCommand := command{mgr: mgr}
-	// Start via config using direct manager (avoid API call issues in tests)
-	if err := provisrCommand.startDirectWithConfig(StartFlags{ConfigPath: path}); err != nil {
-		t.Fatalf("cmdStart with config: %v", err)
+	err := cmd.Status(flags)
+	if err == nil {
+		t.Fatal("expected error for unreachable daemon")
 	}
-	// Group status
-	if err := provisrCommand.groupStatusDirect(GroupFlags{ConfigPath: path, GroupName: "grp1"}); err != nil {
-		t.Fatalf("group status: %v", err)
+
+	if !strings.Contains(err.Error(), "daemon not reachable") {
+		t.Errorf("expected daemon not reachable error, got: %v", err)
 	}
-	// Group stop
-	if err := provisrCommand.groupStopDirect(GroupFlags{ConfigPath: path, GroupName: "grp1", Wait: 500 * time.Millisecond}); err != nil {
-		// Some environments may report signal termination; accept either nil or a termination error.
-		t.Logf("group stop returned: %v (accepted)", err)
+}
+
+func TestCommand_Stop_DaemonNotReachable(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := StopFlags{
+		Name:       "test-proc",
+		APIUrl:     "http://localhost:99999/api", // unreachable
+		APITimeout: 1 * time.Second,
+	}
+
+	err := cmd.Stop(flags)
+	if err == nil {
+		t.Fatal("expected error for unreachable daemon")
+	}
+
+	if !strings.Contains(err.Error(), "daemon not reachable") {
+		t.Errorf("expected daemon not reachable error, got: %v", err)
+	}
+}
+
+func TestCommand_Cron_DaemonNotReachable(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := CronFlags{
+		APIUrl:     "http://localhost:99999/api", // unreachable
+		APITimeout: 1 * time.Second,
+	}
+
+	err := cmd.Cron(flags)
+	if err == nil {
+		t.Fatal("expected error for unreachable daemon")
+	}
+
+	if !strings.Contains(err.Error(), "daemon not reachable") {
+		t.Errorf("expected daemon not reachable error, got: %v", err)
+	}
+}
+
+func TestCommand_GroupStart_EmptyGroupName(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := GroupFlags{
+		GroupName: "",
+	}
+
+	err := cmd.GroupStart(flags)
+	if err == nil {
+		t.Fatal("expected error for empty group name")
+	}
+
+	if !strings.Contains(err.Error(), "group-start requires --group name") {
+		t.Errorf("expected group name required error, got: %v", err)
+	}
+}
+
+func TestCommand_GroupStop_EmptyGroupName(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := GroupFlags{
+		GroupName: "",
+	}
+
+	err := cmd.GroupStop(flags)
+	if err == nil {
+		t.Fatal("expected error for empty group name")
+	}
+
+	if !strings.Contains(err.Error(), "group-stop requires --group name") {
+		t.Errorf("expected group name required error, got: %v", err)
+	}
+}
+
+func TestCommand_GroupStatus_EmptyGroupName(t *testing.T) {
+	cmd := &command{mgr: &provisr.Manager{}}
+
+	flags := GroupFlags{
+		GroupName: "",
+	}
+
+	err := cmd.GroupStatus(flags)
+	if err == nil {
+		t.Fatal("expected error for empty group name")
+	}
+
+	if !strings.Contains(err.Error(), "group-status requires --group name") {
+		t.Errorf("expected group name required error, got: %v", err)
 	}
 }

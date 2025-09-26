@@ -2,8 +2,8 @@ package client
 
 import "time"
 
-// StartRequest represents a request to start a process
-type StartRequest struct {
+// RegisterRequest represents a request to register a new process
+type RegisterRequest struct {
 	Name            string        `json:"name"`
 	Command         string        `json:"command"`
 	WorkDir         string        `json:"work_dir,omitempty"`
@@ -18,8 +18,21 @@ type StartRequest struct {
 	Priority        int           `json:"priority,omitempty"`
 }
 
+// StartRequest represents a request to start a registered process
+type StartRequest struct {
+	Name string `json:"name"`
+}
+
 // StopRequest represents a request to stop processes
 type StopRequest struct {
+	Name     string        `json:"name,omitempty"`
+	Base     string        `json:"base,omitempty"`
+	Wildcard string        `json:"wildcard,omitempty"`
+	Wait     time.Duration `json:"wait,omitempty"`
+}
+
+// UnregisterRequest represents a request to unregister processes
+type UnregisterRequest struct {
 	Name     string        `json:"name,omitempty"`
 	Base     string        `json:"base,omitempty"`
 	Wildcard string        `json:"wildcard,omitempty"`

@@ -76,14 +76,14 @@ func TestAPIClientStartProcess(t *testing.T) {
 		"command": "echo hello",
 	}
 
-	err := client.StartProcess(spec)
+	err := client.RegisterProcess(spec)
 	if err != nil {
 		t.Errorf("Expected successful start, got error: %v", err)
 	}
 
 	// Test API error response
 	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/start" && r.Method == "POST" {
+		if r.URL.Path == "/register" && r.Method == "POST" {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"error":"process already running"}`))
 		}
@@ -91,7 +91,7 @@ func TestAPIClientStartProcess(t *testing.T) {
 	defer errorServer.Close()
 
 	client = NewAPIClient(errorServer.URL, time.Second)
-	err = client.StartProcess(spec)
+	err = client.RegisterProcess(spec)
 	if err == nil {
 		t.Fatal("Expected error for API error response, but got nil")
 	} else {
@@ -193,7 +193,7 @@ func TestAPIClientNetworkErrors(t *testing.T) {
 	// Test network error during start
 	client := NewAPIClient("http://localhost:99999", 100*time.Millisecond)
 
-	err := client.StartProcess(map[string]interface{}{"name": "test", "command": "echo test"})
+	err := client.RegisterProcess(map[string]interface{}{"name": "test", "command": "echo test"})
 	if err == nil {
 		t.Error("Expected network error for start")
 	}

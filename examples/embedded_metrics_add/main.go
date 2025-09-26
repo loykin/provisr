@@ -45,10 +45,10 @@ func main() {
 	mgr := provisr.New()
 
 	// Start a couple of short-lived demo processes to generate some metrics.
-	if err := mgr.Start(provisr.Spec{Name: "metrics-add-a", Command: "sleep 1"}); err != nil {
+	if err := mgr.Register(provisr.Spec{Name: "metrics-add-a", Command: "sleep 1"}); err != nil {
 		panic(err)
 	}
-	if err := mgr.Start(provisr.Spec{Name: "metrics-add-b", Command: "sleep 2"}); err != nil {
+	if err := mgr.Register(provisr.Spec{Name: "metrics-add-b", Command: "sleep 2"}); err != nil {
 		panic(err)
 	}
 

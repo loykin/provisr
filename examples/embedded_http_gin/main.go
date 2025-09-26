@@ -31,7 +31,7 @@ func main() {
 	r.Any(base, gin.WrapH(apiRouter.Handler()))
 
 	// Start a demo process so you can see it in /status (2 instances)
-	_ = mgr.StartN(process.Spec{
+	_ = mgr.RegisterN(process.Spec{
 		Name:      "demo",
 		Command:   "/bin/sh -c 'while true; do echo demo; sleep 5; done'",
 		Instances: 2,

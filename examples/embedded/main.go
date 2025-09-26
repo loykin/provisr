@@ -21,7 +21,7 @@ func main() {
 		RetryCount:    0,
 		RetryInterval: 0,
 	}
-	if err := mgr.Start(spec); err != nil {
+	if err := mgr.Register(spec); err != nil {
 		panic(err)
 	}
 	// Query status

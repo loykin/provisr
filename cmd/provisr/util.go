@@ -30,11 +30,11 @@ func startFromSpecs(mgr *provisr.Manager, specs []provisr.Spec) error {
 
 	for _, sp := range sortedSpecs {
 		if sp.Instances > 1 {
-			if err := mgr.StartN(sp); err != nil {
+			if err := mgr.RegisterN(sp); err != nil {
 				return err
 			}
 		} else {
-			if err := mgr.Start(sp); err != nil {
+			if err := mgr.Register(sp); err != nil {
 				return err
 			}
 		}

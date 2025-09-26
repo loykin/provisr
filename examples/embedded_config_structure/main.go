@@ -17,7 +17,7 @@ func main() {
 		Name:    "struct-demo",
 		Command: "sh -c 'echo $HELLO from struct; sleep 1'",
 	}
-	if err := mgr.Start(sp); err != nil {
+	if err := mgr.Register(sp); err != nil {
 		panic(err)
 	}
 	st, _ := mgr.Status("struct-demo")

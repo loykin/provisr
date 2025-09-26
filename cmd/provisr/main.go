@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
-	"github.com/loykin/provisr/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -65,13 +65,13 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 
 	// Add subcommands
 	root.AddCommand(
-		createStartCommand(provisrCommand, globalFlags, processFlags),
-		createStatusCommand(provisrCommand, globalFlags, processFlags),
-		createStopCommand(provisrCommand, globalFlags, processFlags),
-		createCronCommand(provisrCommand, globalFlags, cronFlags),
-		createGroupStartCommand(provisrCommand, globalFlags, groupFlags),
-		createGroupStopCommand(provisrCommand, globalFlags, groupFlags),
-		createGroupStatusCommand(provisrCommand, globalFlags, groupFlags),
+		createStartCommand(provisrCommand, processFlags),
+		createStatusCommand(provisrCommand, processFlags),
+		createStopCommand(provisrCommand, processFlags),
+		createCronCommand(provisrCommand, cronFlags),
+		createGroupStartCommand(provisrCommand, groupFlags),
+		createGroupStopCommand(provisrCommand, groupFlags),
+		createGroupStatusCommand(provisrCommand, groupFlags),
 		createServeCommand(globalFlags),
 	)
 
@@ -102,52 +102,42 @@ Examples:
 }
 
 // createStartCommand creates the start subcommand
-func createStartCommand(provisrCommand command, globalFlags *GlobalFlags, processFlags *ProcessFlags) *cobra.Command {
+func createStartCommand(provisrCommand command, processFlags *ProcessFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start a process",
-		Long: `Start a process with the specified name and command.
+		Long: `Start a registered process with the specified name.
+Processes must be registered first via config file and daemon.
 
 Examples:
-  provisr start --name=web --cmd="python app.py"
-  provisr start --name=api --cmd="node server.js" --instances=3
-  provisr start --name=worker --cmd="./worker" --autorestart`,
+  provisr start --name=web
+  provisr start --name=api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.Start(StartFlags{
-				ConfigPath:      globalFlags.ConfigPath,
-				Name:            processFlags.Name,
-				Cmd:             processFlags.CmdStr,
-				Retries:         processFlags.Retries,
-				RetryInterval:   processFlags.RetryInterval,
-				AutoRestart:     processFlags.AutoRestart,
-				APIUrl:          processFlags.APIUrl,
-				APITimeout:      processFlags.APITimeout,
-				RestartInterval: processFlags.RestartInterval,
-				StartDuration:   processFlags.StartDuration,
-				Instances:       processFlags.Instances,
+				Name:       processFlags.Name,
+				APIUrl:     processFlags.APIUrl,
+				APITimeout: processFlags.APITimeout,
 			})
 		},
 	}
 
 	// Add flags specific to start command
-	cmd.Flags().StringVar(&processFlags.Name, "name", "demo", "process name")
-	cmd.Flags().StringVar(&processFlags.CmdStr, "cmd", "sleep 60", "command to execute")
-	cmd.Flags().Uint32Var(&processFlags.Retries, "retries", 0, "retry attempts on failure")
-	cmd.Flags().DurationVar(&processFlags.RetryInterval, "retry-interval", 500*time.Millisecond, "retry delay")
-	cmd.Flags().BoolVar(&processFlags.AutoRestart, "autorestart", false, "auto-restart on exit")
-	cmd.Flags().DurationVar(&processFlags.RestartInterval, "restart-interval", time.Second, "restart delay")
-	cmd.Flags().DurationVar(&processFlags.StartDuration, "startsecs", 0, "time to stay up to be 'started'")
-	cmd.Flags().IntVar(&processFlags.Instances, "instances", 1, "number of instances")
+	cmd.Flags().StringVar(&processFlags.Name, "name", "", "process name (required)")
 
 	// Remote daemon connection
 	cmd.Flags().StringVar(&processFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&processFlags.APITimeout, "api-timeout", 10*time.Second, "request timeout")
 
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("name"); err != nil {
+		panic(err) // This should never happen during setup
+	}
+
 	return cmd
 }
 
 // createStatusCommand creates the status subcommand
-func createStatusCommand(provisrCommand command, globalFlags *GlobalFlags, processFlags *ProcessFlags) *cobra.Command {
+func createStatusCommand(provisrCommand command, processFlags *ProcessFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show process status",
@@ -156,17 +146,13 @@ func createStatusCommand(provisrCommand command, globalFlags *GlobalFlags, proce
 Examples:
   provisr status                    # Show all processes
   provisr status --name=web         # Show specific process
-  provisr status --watch            # Live monitoring
   provisr status --api-url=http://remote:8080/api  # Remote status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.Status(StatusFlags{
-				ConfigPath: globalFlags.ConfigPath,
 				Name:       processFlags.Name,
 				APIUrl:     processFlags.APIUrl,
 				APITimeout: processFlags.APITimeout,
 				Detailed:   cmd.Flag("detailed").Changed,
-				Watch:      cmd.Flag("watch").Changed,
-				Interval:   3 * time.Second, // Default watch interval
 			})
 		},
 	}
@@ -174,12 +160,11 @@ Examples:
 	cmd.Flags().StringVar(&processFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&processFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
 	cmd.Flags().Bool("detailed", false, "show detailed info")
-	cmd.Flags().Bool("watch", false, "live monitoring")
 	return cmd
 }
 
 // createStopCommand creates the stop subcommand
-func createStopCommand(provisrCommand command, globalFlags *GlobalFlags, processFlags *ProcessFlags) *cobra.Command {
+func createStopCommand(provisrCommand command, processFlags *ProcessFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop",
 		Short: "Stop a process",
@@ -187,26 +172,37 @@ func createStopCommand(provisrCommand command, globalFlags *GlobalFlags, process
 
 Examples:
   provisr stop --name=web           # Stop specific process
-  provisr stop                      # Stop all processes
+  provisr stop --name=web --wait=5s # Stop with custom wait time
   provisr stop --api-url=http://remote:8080/api  # Remote stop`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var waitDuration time.Duration
+			if cmd.Flag("wait").Changed {
+				waitDuration, _ = cmd.Flags().GetDuration("wait")
+			} else {
+				waitDuration = 3 * time.Second
+			}
 			return provisrCommand.Stop(StopFlags{
-				ConfigPath: globalFlags.ConfigPath,
 				Name:       processFlags.Name,
 				APIUrl:     processFlags.APIUrl,
 				APITimeout: processFlags.APITimeout,
-				Wait:       3 * time.Second,
+				Wait:       waitDuration,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&processFlags.Name, "name", "", "process name (optional)")
+	cmd.Flags().StringVar(&processFlags.Name, "name", "", "process name (required)")
+	cmd.Flags().Duration("wait", 3*time.Second, "time to wait for graceful shutdown")
 	cmd.Flags().StringVar(&processFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&processFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("name"); err != nil {
+		panic(err) // This should never happen during setup
+	}
 	return cmd
 }
 
 // createCronCommand creates the cron subcommand
-func createCronCommand(provisrCommand command, globalFlags *GlobalFlags, cronFlags *CronFlags) *cobra.Command {
+func createCronCommand(provisrCommand command, cronFlags *CronFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cron",
 		Short: "Control scheduled jobs via daemon (REST)",
@@ -214,11 +210,10 @@ func createCronCommand(provisrCommand command, globalFlags *GlobalFlags, cronFla
 This command communicates with the running daemon via REST to verify readiness.
 
 Examples:
-  provisr cron --config=config.toml                 # Verify daemon is running and has loaded cron jobs
-  provisr cron --config=config.toml --api-url=http://remote:8080/api`,
+  provisr cron                 # Verify daemon is running and has loaded cron jobs
+  provisr cron --api-url=http://remote:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.Cron(CronFlags{
-				ConfigPath:  globalFlags.ConfigPath,
 				APIUrl:      cronFlags.APIUrl,
 				APITimeout:  cronFlags.APITimeout,
 				NonBlocking: true, // CLI should not block; daemon runs scheduler
@@ -231,75 +226,98 @@ Examples:
 }
 
 // createGroupStartCommand creates the group-start subcommand
-func createGroupStartCommand(provisrCommand command, globalFlags *GlobalFlags, groupFlags *GroupCommandFlags) *cobra.Command {
+func createGroupStartCommand(provisrCommand command, groupFlags *GroupCommandFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "group-start",
 		Short: "Start a process group",
-		Long: `Start all processes in a named group from config file.
+		Long: `Start all processes in a named group.
 
 Example:
-  provisr group-start --config=config.toml --group=webstack --api-url=http://127.0.0.1:8080/api`,
+  provisr group-start --group=webstack
+  provisr group-start --group=webstack --api-url=http://127.0.0.1:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.GroupStart(GroupFlags{
-				ConfigPath: globalFlags.ConfigPath,
 				GroupName:  groupFlags.GroupName,
 				APIUrl:     groupFlags.APIUrl,
 				APITimeout: groupFlags.APITimeout,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name from config")
+	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name (required)")
 	cmd.Flags().StringVar(&groupFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&groupFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("group"); err != nil {
+		panic(err) // This should never happen during setup
+	}
 	return cmd
 }
 
 // createGroupStopCommand creates the group-stop subcommand
-func createGroupStopCommand(provisrCommand command, globalFlags *GlobalFlags, groupFlags *GroupCommandFlags) *cobra.Command {
+func createGroupStopCommand(provisrCommand command, groupFlags *GroupCommandFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "group-stop",
 		Short: "Stop a process group",
-		Long: `Stop all processes in a named group from config file.
+		Long: `Stop all processes in a named group.
 
 Example:
-  provisr group-stop --config=config.toml --group=webstack --api-url=http://127.0.0.1:8080/api`,
+  provisr group-stop --group=webstack
+  provisr group-stop --group=webstack --wait=5s
+  provisr group-stop --group=webstack --api-url=http://127.0.0.1:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var waitDuration time.Duration
+			if cmd.Flag("wait").Changed {
+				waitDuration, _ = cmd.Flags().GetDuration("wait")
+			} else {
+				waitDuration = 3 * time.Second
+			}
 			return provisrCommand.GroupStop(GroupFlags{
-				ConfigPath: globalFlags.ConfigPath,
 				GroupName:  groupFlags.GroupName,
 				APIUrl:     groupFlags.APIUrl,
 				APITimeout: groupFlags.APITimeout,
-				Wait:       3 * time.Second,
+				Wait:       waitDuration,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name from config")
+	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name (required)")
+	cmd.Flags().Duration("wait", 3*time.Second, "time to wait for graceful shutdown")
 	cmd.Flags().StringVar(&groupFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&groupFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("group"); err != nil {
+		panic(err) // This should never happen during setup
+	}
 	return cmd
 }
 
 // createGroupStatusCommand creates the group-status subcommand
-func createGroupStatusCommand(provisrCommand command, globalFlags *GlobalFlags, groupFlags *GroupCommandFlags) *cobra.Command {
+func createGroupStatusCommand(provisrCommand command, groupFlags *GroupCommandFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "group-status",
 		Short: "Show group status",
-		Long: `Show status of all processes in a named group from config file.
+		Long: `Show status of all processes in a named group.
 
 Example:
-  provisr group-status --config=config.toml --group=webstack --api-url=http://127.0.0.1:8080/api`,
+  provisr group-status --group=webstack
+  provisr group-status --group=webstack --api-url=http://127.0.0.1:8080/api`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.GroupStatus(GroupFlags{
-				ConfigPath: globalFlags.ConfigPath,
 				GroupName:  groupFlags.GroupName,
 				APIUrl:     groupFlags.APIUrl,
 				APITimeout: groupFlags.APITimeout,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name from config")
+	cmd.Flags().StringVar(&groupFlags.GroupName, "group", "", "group name (required)")
 	cmd.Flags().StringVar(&groupFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
 	cmd.Flags().DurationVar(&groupFlags.APITimeout, "api-timeout", 30*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("group"); err != nil {
+		panic(err) // This should never happen during setup
+	}
 	return cmd
 }
 
@@ -342,7 +360,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 
 	// Load unified config once
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := provisr.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
 	}
@@ -378,6 +396,16 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	// Apply global environment
 	// Set global environment - 직접 필드 접근
 	mgr.SetGlobalEnv(cfg.GlobalEnv)
+
+	// Convert and set group definitions
+	managerGroups := make([]provisr.ManagerGroupSpec, len(cfg.GroupSpecs))
+	for i, group := range cfg.GroupSpecs {
+		managerGroups[i] = provisr.ManagerGroupSpec{
+			Name:    group.Name,
+			Members: group.Members,
+		}
+	}
+	mgr.SetGroups(managerGroups)
 
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {
@@ -416,12 +444,24 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		fmt.Printf("Started cron scheduler with %d job(s)\n", len(cfg.CronJobs))
 	}
 
-	// Create and start HTTP server
-	fmt.Printf("Starting provisr server on %s%s\n", cfg.Server.Listen, cfg.Server.BasePath)
-	server, err := provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP server: %w", err)
+	// Create and start HTTP/HTTPS server
+	protocol := "HTTP"
+	var server *http.Server
+
+	if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled {
+		protocol = "HTTPS"
+		server, err = provisr.NewTLSServer(*cfg.Server, mgr)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTPS server: %w", err)
+		}
+	} else {
+		server, err = provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTP server: %w", err)
+		}
 	}
+
+	fmt.Printf("Starting provisr %s server on %s%s\n", protocol, cfg.Server.Listen, cfg.Server.BasePath)
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
