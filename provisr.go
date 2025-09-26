@@ -80,9 +80,16 @@ func (s *CronScheduler) Stop()                { s.inner.Stop() }
 
 func LoadConfig(path string) (*cfg.Config, error) {
 	return cfg.LoadConfig(path)
-} // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
+}
+
+// NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
 func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
 	return iapi.NewServer(addr, basePath, m.inner)
+}
+
+// NewTLSServer starts an HTTPS server with TLS configuration from server config
+func NewTLSServer(serverConfig cfg.ServerConfig, m *Manager) (*http.Server, error) {
+	return iapi.NewTLSServer(serverConfig, m.inner)
 }
 
 // Metrics helpers (public facade)

@@ -68,7 +68,7 @@ func (s *Spec) DeepCopy() *Spec {
 		copySpec.Env = append([]string(nil), s.Env...)
 	}
 
-	// DetectorConfigs 슬라이스 복사
+	// Copy DetectorConfigs slice
 	if s.DetectorConfigs != nil {
 		copySpec.DetectorConfigs = append([]DetectorConfig(nil), s.DetectorConfigs...)
 	}

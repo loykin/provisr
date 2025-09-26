@@ -18,7 +18,7 @@ func FuzzIsSafeName(f *testing.F) {
 	f.Add("valid.name")
 	f.Add("name_with-special.chars123")
 	f.Add("...dotted")
-	f.Add("중한국어이름") // Unicode
+	f.Add("unicode한글name") // Unicode
 	f.Add("name\x00null")
 	f.Add("name\nnewline")
 	f.Add("name\ttab")

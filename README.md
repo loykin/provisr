@@ -144,6 +144,93 @@ members = ["web", "api"]
 Cron jobs can also be defined with `type = "cronjob"` in either place. The `provisr cron --config=config.toml` command
 runs them.
 
+## TLS Configuration
+
+Provisr supports HTTPS with flexible TLS configuration options for secure communication.
+
+### Server TLS Configuration
+
+Configure TLS in your `config.toml` under the `[server.tls]` section:
+
+#### Option 1: Auto-generated Self-signed Certificates (Development)
+
+```toml
+[server]
+listen = ":8443"
+base_path = "/api"
+
+[server.tls]
+enabled = true
+dir = "./tls"
+auto_generate = true
+
+[server.tls.auto_gen]
+common_name = "localhost"
+dns_names = ["localhost", "127.0.0.1", "provisr.local"]
+ip_addresses = ["127.0.0.1"]
+valid_days = 365
+```
+
+#### Option 2: Manual Certificate Files (Production)
+
+```toml
+[server]
+listen = ":8443"
+
+[server.tls]
+enabled = true
+cert_file = "/etc/ssl/certs/provisr.crt"
+key_file = "/etc/ssl/private/provisr.key"
+```
+
+#### Option 3: Directory-based Certificates
+
+```toml
+[server.tls]
+enabled = true
+dir = "/etc/provisr/tls"
+# Looks for tls.crt, tls.key, and tls_ca.crt in the directory
+```
+
+### Client TLS Configuration
+
+When connecting to HTTPS endpoints, clients support various TLS options:
+
+```go
+// Basic HTTPS client
+config := client.DefaultTLSConfig()
+c := client.New(config)
+
+// Insecure client (skip verification - development only)
+config := client.InsecureConfig()
+c := client.New(config)
+
+// Custom TLS client with CA certificate
+config := client.Config{
+    BaseURL: "https://provisr.example.com:8443/api",
+    TLS: &client.TLSClientConfig{
+        Enabled:    true,
+        CACert:     "/path/to/ca.crt",
+        ServerName: "provisr.example.com",
+        SkipVerify: false,
+    },
+}
+c := client.New(config)
+```
+
+### TLS Configuration Priority
+
+1. **cert_file + key_file**: Explicit certificate files (highest priority)
+2. **dir + auto_generate=true**: Auto-generate certificates in directory
+3. **dir**: Use existing certificates from directory
+
+### Security Notes
+
+- **Development**: Use `auto_generate = true` for quick setup with self-signed certificates
+- **Production**: Always use certificates from a trusted CA
+- **File Permissions**: Ensure private keys have restrictive permissions (0600)
+- **TLS Versions**: Supports TLS 1.2 and 1.3 (1.3 is default)
+
 ## Embedding the API
 
 - Gin example: examples/embedded_http_gin
