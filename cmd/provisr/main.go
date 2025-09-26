@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -415,12 +416,24 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		fmt.Printf("Started cron scheduler with %d job(s)\n", len(cfg.CronJobs))
 	}
 
-	// Create and start HTTP server
-	fmt.Printf("Starting provisr server on %s%s\n", cfg.Server.Listen, cfg.Server.BasePath)
-	server, err := provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP server: %w", err)
+	// Create and start HTTP/HTTPS server
+	protocol := "HTTP"
+	var server *http.Server
+
+	if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled {
+		protocol = "HTTPS"
+		server, err = provisr.NewTLSServer(*cfg.Server, mgr)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTPS server: %w", err)
+		}
+	} else {
+		server, err = provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTP server: %w", err)
+		}
 	}
+
+	fmt.Printf("Starting provisr %s server on %s%s\n", protocol, cfg.Server.Listen, cfg.Server.BasePath)
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)

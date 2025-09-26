@@ -72,10 +72,30 @@ type LogConfig struct {
 }
 
 type ServerConfig struct {
-	Listen   string `mapstructure:"listen"`
-	BasePath string `mapstructure:"base_path"`
-	PidFile  string `mapstructure:"pidfile"`
-	LogFile  string `mapstructure:"logfile"`
+	Listen        string     `mapstructure:"listen"`
+	BasePath      string     `mapstructure:"base_path"`
+	PidFile       string     `mapstructure:"pidfile"`
+	LogFile       string     `mapstructure:"logfile"`
+	TLS           *TLSConfig `mapstructure:"tls"`
+	TLSMinVersion string     `mapstructure:"tls_min_version"`
+	TLSMaxVersion string     `mapstructure:"tls_max_version"`
+}
+
+type TLSConfig struct {
+	Enabled      bool        `mapstructure:"enabled"`
+	CertFile     string      `mapstructure:"cert_file"`
+	KeyFile      string      `mapstructure:"key_file"`
+	Dir          string      `mapstructure:"dir"`
+	AutoGenerate bool        `mapstructure:"auto_generate"`
+	AutoGen      *AutoGenTLS `mapstructure:"auto_gen"`
+}
+
+type AutoGenTLS struct {
+	CommonName   string   `mapstructure:"common_name"`
+	Organization string   `mapstructure:"organization"`
+	DNSNames     []string `mapstructure:"dns_names"`
+	IPAddresses  []string `mapstructure:"ip_addresses"`
+	ValidDays    int      `mapstructure:"valid_days"`
 }
 
 type ProcessConfig struct {

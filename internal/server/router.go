@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/loykin/provisr/internal/config"
 	mng "github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/process"
+	tlsutil "github.com/loykin/provisr/internal/tls"
 )
 
 // Router provides embeddable HTTP handlers for managing processes.
@@ -65,6 +67,58 @@ func NewServer(addr, basePath string, mgr *mng.Manager) (*http.Server, error) {
 	serverErrCh := make(chan error, 1)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrCh <- err
+		}
+		close(serverErrCh)
+	}()
+
+	// Give the server a moment to start and catch immediate errors
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			return nil, err
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Server started successfully or no immediate error
+	}
+
+	return server, nil
+}
+
+// NewTLSServer starts a standalone HTTPS server using TLS configuration.
+// The returned function can be called to shutdown the server immediately
+// by closing the listener via http.Server's Close.
+func NewTLSServer(serverConfig config.ServerConfig, mgr *mng.Manager) (*http.Server, error) {
+	r := NewRouter(mgr, serverConfig.BasePath)
+
+	// Setup TLS configuration
+	tlsConfig, err := tlsutil.SetupTLS(serverConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup TLS: %w", err)
+	}
+
+	server := &http.Server{
+		Addr:              serverConfig.Listen,
+		Handler:           r.Handler(),
+		TLSConfig:         tlsConfig,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	// Start the server in a goroutine and handle potential errors
+	serverErrCh := make(chan error, 1)
+	go func() {
+		var err error
+		if tlsConfig != nil {
+			// Use HTTPS
+			err = server.ListenAndServeTLS("", "")
+		} else {
+			// Use HTTP
+			err = server.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrCh <- err
 		}
 		close(serverErrCh)

@@ -23,7 +23,7 @@ env = []
 		t.Fatalf("load config: %v", err)
 	}
 
-	// 기본값들 확인
+	// Check default values
 	if config.UseOSEnv != false {
 		t.Errorf("expected UseOSEnv=false, got %v", config.UseOSEnv)
 	}
@@ -34,7 +34,7 @@ env = []
 		t.Errorf("expected empty Env, got %v", config.Env)
 	}
 
-	// Computed fields는 빈 상태여야 함
+	// Computed fields should be empty
 	if len(config.Specs) != 0 {
 		t.Errorf("expected empty Specs, got %d", len(config.Specs))
 	}
@@ -59,7 +59,7 @@ env = ["APP_NAME=provisr", "DEBUG=true"]
 		t.Fatalf("load config: %v", err)
 	}
 
-	// Environment 설정 확인
+	// Check environment settings
 	if !config.UseOSEnv {
 		t.Errorf("expected UseOSEnv=true, got %v", config.UseOSEnv)
 	}
@@ -67,7 +67,7 @@ env = ["APP_NAME=provisr", "DEBUG=true"]
 		t.Fatalf("expected 2 env vars, got %d", len(config.Env))
 	}
 
-	// GlobalEnv는 계산되어야 함
+	// GlobalEnv should be computed
 	if len(config.GlobalEnv) < 2 {
 		t.Errorf("expected GlobalEnv to contain at least 2 entries, got %d", len(config.GlobalEnv))
 	}
@@ -118,7 +118,7 @@ func TestComputeGlobalEnv_Simple(t *testing.T) {
 		t.Errorf("expected 2 env vars, got %d", len(env))
 	}
 
-	// 정렬되어야 함
+	// Should be sorted
 	expected := []string{"APP=test", "TEST=value"}
 	for i, expectedVar := range expected {
 		if i >= len(env) || env[i] != expectedVar {
