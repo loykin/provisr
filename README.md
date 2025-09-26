@@ -10,28 +10,87 @@ A minimal supervisord-like process manager written in Go.
 
 ## Features
 
-- Start/stop/status for processes and multiple instances
-- Auto-restart, retry with interval, start duration window
-- Robust liveness via detectors (pidfile, pid, command) with PID reuse protection using process start time metadata
-- Unified slog-based structured logging with rotating file logs (lumberjack)
-- Cron-like scheduler (@every duration)
-- Process groups (start/stop/status together)
-- Config-driven reconciliation: recover running processes from PID files, start missing ones, and gracefully stop/remove programs no longer in config
-- Embeddable HTTP API (Gin-based) with configurable basePath and JSON I/O
-- Wildcard support for querying/stopping processes via REST (e.g., demo-*, *worker*)
-- Easy embedding into existing Gin and Echo apps (see examples)
+- **Process management**: Start/stop/status for processes and multiple instances
+- **Process registration**: Register/unregister processes in programs directory with config protection
+- **Auto-restart**: Retry with interval, start duration window
+- **Robust liveness**: Via detectors (pidfile, pid, command) with PID reuse protection using process start time metadata
+- **Structured logging**: Unified slog-based structured logging with rotating file logs (lumberjack)
+- **Cron scheduler**: Cron-like scheduler (@every duration)
+- **Process groups**: Start/stop/status together
+- **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully stop/remove programs no longer in config
+- **HTTP API**: Embeddable Gin-based API with configurable basePath and JSON I/O
+- **Wildcard support**: For querying/stopping processes via REST (e.g., demo-*, *worker*)
+- **Framework integration**: Easy embedding into existing Gin and Echo apps (see examples)
 
 ## CLI quickstart
 
 ```shell
+# Process management
 provisr start --name demo --cmd "sleep 10"
 provisr status --name demo
 provisr stop --name demo
+
+# Process registration (adds to programs directory)
+provisr register --name web --command "python app.py" --work-dir /app --auto-start
+provisr register-file --file ./my-process.json
+provisr unregister --name web
 
 # Using a config file
 provisr start --config config/config.toml
 provisr cron --config config/config.toml
 provisr group-start --config config/config.toml --group backend
+
+# Start daemon
+provisr serve --config config/config.toml
+```
+
+## Process Registration Commands
+
+Provisr includes commands to manage process definitions in the programs directory:
+
+### register
+Creates a new process definition file in the programs directory:
+
+```shell
+provisr register --name web --command "python app.py" --work-dir /app --auto-start
+provisr register --name api --command "./api-server" --log-dir /var/log/api
+```
+
+### register-file
+Registers an existing JSON process definition file:
+
+```shell
+provisr register-file --file ./my-process.json
+```
+
+JSON format example:
+```json
+{
+  "name": "web-server",
+  "command": "python app.py",
+  "work_dir": "/app",
+  "auto_restart": true,
+  "log": {
+    "file": {
+      "dir": "/var/log"
+    }
+  }
+}
+```
+
+### unregister
+Removes a process definition from the programs directory:
+
+```shell
+provisr unregister --name web
+```
+
+**Note**: Processes defined in `config.toml` cannot be unregistered and are protected from deletion.
+
+All registration commands support remote daemon operations via `--api-url`:
+
+```shell
+provisr register --name web --command "python app.py" --api-url http://remote:8080/api
 ```
 
 ## HTTP API (REST)

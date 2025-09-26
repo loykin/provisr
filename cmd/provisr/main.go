@@ -45,6 +45,31 @@ type ProcessFlags struct {
 	APITimeout time.Duration
 }
 
+// RegisterFlags holds flags for register command
+type RegisterFlags struct {
+	Name       string
+	Command    string
+	WorkDir    string
+	LogDir     string
+	AutoStart  bool
+	APIUrl     string
+	APITimeout time.Duration
+}
+
+// RegisterFileFlags holds flags for register-file command
+type RegisterFileFlags struct {
+	FilePath   string
+	APIUrl     string
+	APITimeout time.Duration
+}
+
+// UnregisterFlags holds flags for unregister command
+type UnregisterFlags struct {
+	Name       string
+	APIUrl     string
+	APITimeout time.Duration
+}
+
 // GroupCommandFlags holds group-related flags
 type GroupCommandFlags struct {
 	GroupName  string
@@ -56,6 +81,9 @@ type GroupCommandFlags struct {
 func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 	globalFlags := &GlobalFlags{}
 	processFlags := &ProcessFlags{}
+	registerFlags := &RegisterFlags{}
+	registerFileFlags := &RegisterFileFlags{}
+	unregisterFlags := &UnregisterFlags{}
 	groupFlags := &GroupCommandFlags{}
 	cronFlags := &CronFlags{}
 
@@ -65,6 +93,9 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 
 	// Add subcommands
 	root.AddCommand(
+		createRegisterCommand(provisrCommand, registerFlags),
+		createRegisterFileCommand(provisrCommand, registerFileFlags),
+		createUnregisterCommand(provisrCommand, unregisterFlags),
 		createStartCommand(provisrCommand, processFlags),
 		createStatusCommand(provisrCommand, processFlags),
 		createStopCommand(provisrCommand, processFlags),
@@ -99,6 +130,136 @@ Examples:
 	root.PersistentFlags().StringVar(&flags.ConfigPath, "config", "", "path to TOML config file (optional)")
 
 	return root
+}
+
+// createRegisterCommand creates the register subcommand
+func createRegisterCommand(provisrCommand command, registerFlags *RegisterFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "register",
+		Short: "Register a new process",
+		Long: `Register a new process by creating a program file in the programs directory.
+This allows the process to be managed by the provisr daemon.
+
+Examples:
+  provisr register --name=web --command="python app.py" --work-dir=/app
+  provisr register --name=api --command="./api-server" --log-dir=/var/log/api --auto-start`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.Register(RegisterFlags{
+				Name:       registerFlags.Name,
+				Command:    registerFlags.Command,
+				WorkDir:    registerFlags.WorkDir,
+				LogDir:     registerFlags.LogDir,
+				AutoStart:  registerFlags.AutoStart,
+				APIUrl:     registerFlags.APIUrl,
+				APITimeout: registerFlags.APITimeout,
+			})
+		},
+	}
+
+	// Add flags specific to register command
+	cmd.Flags().StringVar(&registerFlags.Name, "name", "", "process name (required)")
+	cmd.Flags().StringVar(&registerFlags.Command, "command", "", "command to run (required)")
+	cmd.Flags().StringVar(&registerFlags.WorkDir, "work-dir", "", "working directory")
+	cmd.Flags().StringVar(&registerFlags.LogDir, "log-dir", "", "log directory")
+	cmd.Flags().BoolVar(&registerFlags.AutoStart, "auto-start", false, "auto-start process when daemon starts")
+
+	// Remote daemon connection
+	cmd.Flags().StringVar(&registerFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&registerFlags.APITimeout, "api-timeout", 10*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("name"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("command"); err != nil {
+		panic(err)
+	}
+
+	return cmd
+}
+
+// createRegisterFileCommand creates the register-file subcommand
+func createRegisterFileCommand(provisrCommand command, registerFileFlags *RegisterFileFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "register-file",
+		Short: "Register a process from JSON file",
+		Long: `Register a process by copying an existing JSON file to the programs directory.
+The JSON file must contain valid process configuration.
+
+Examples:
+  provisr register-file --file=./my-process.json
+  provisr register-file --file=./web-server.json --api-url=http://remote:8080/api
+
+JSON file format example:
+{
+  "name": "web-server",
+  "command": "python app.py",
+  "work_dir": "/app",
+  "auto_restart": true,
+  "log": {
+    "file": {
+      "dir": "/var/log"
+    }
+  }
+}`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.RegisterFile(RegisterFileFlags{
+				FilePath:   registerFileFlags.FilePath,
+				APIUrl:     registerFileFlags.APIUrl,
+				APITimeout: registerFileFlags.APITimeout,
+			})
+		},
+	}
+
+	// Add flags specific to register-file command
+	cmd.Flags().StringVar(&registerFileFlags.FilePath, "file", "", "path to JSON file (required)")
+
+	// Remote daemon connection
+	cmd.Flags().StringVar(&registerFileFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&registerFileFlags.APITimeout, "api-timeout", 10*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("file"); err != nil {
+		panic(err)
+	}
+
+	return cmd
+}
+
+// createUnregisterCommand creates the unregister subcommand
+func createUnregisterCommand(provisrCommand command, unregisterFlags *UnregisterFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unregister",
+		Short: "Unregister a process",
+		Long: `Unregister a process by removing its program file from the programs directory.
+This prevents the process from being managed by the provisr daemon.
+Processes defined in config.toml cannot be unregistered.
+
+Examples:
+  provisr unregister --name=web
+  provisr unregister --name=api --api-url=http://remote:8080/api`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.Unregister(UnregisterFlags{
+				Name:       unregisterFlags.Name,
+				APIUrl:     unregisterFlags.APIUrl,
+				APITimeout: unregisterFlags.APITimeout,
+			})
+		},
+	}
+
+	// Add flags specific to unregister command
+	cmd.Flags().StringVar(&unregisterFlags.Name, "name", "", "process name (required)")
+
+	// Remote daemon connection
+	cmd.Flags().StringVar(&unregisterFlags.APIUrl, "api-url", "", "remote daemon URL (e.g. http://host:8080/api)")
+	cmd.Flags().DurationVar(&unregisterFlags.APITimeout, "api-timeout", 10*time.Second, "request timeout")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("name"); err != nil {
+		panic(err)
+	}
+
+	return cmd
 }
 
 // createStartCommand creates the start subcommand
