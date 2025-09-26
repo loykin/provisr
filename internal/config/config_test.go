@@ -491,6 +491,132 @@ func TestLoadEnvFile(t *testing.T) {
 	})
 }
 
+func TestLoadProgramEntries_Coverage(t *testing.T) {
+	// Test with non-existent directory
+	specs, jobs, err := loadProgramEntries("/nonexistent/directory")
+	if err != nil {
+		t.Errorf("expected no error for non-existent directory, got: %v", err)
+	}
+	if len(specs) != 0 || len(jobs) != 0 {
+		t.Error("expected empty results for non-existent directory")
+	}
+
+	// Test with empty directory
+	tmpDir := t.TempDir()
+	specs, jobs, err = loadProgramEntries(tmpDir)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(specs) != 0 || len(jobs) != 0 {
+		t.Error("expected empty results for empty directory")
+	}
+}
+
+func TestApplyGlobalLogDefaults_Coverage(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	cfg := &Config{
+		configPath: configPath,
+		Log: &LogConfig{
+			Dir:        "logs",
+			MaxSizeMB:  100,
+			MaxBackups: 5,
+			MaxAgeDays: 30,
+			Compress:   true,
+		},
+		Specs: []process.Spec{
+			{Name: "test1", Command: "echo test1"},
+			{Name: "test2", Command: "echo test2"},
+		},
+	}
+
+	err := applyGlobalLogDefaults(cfg)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Check that log defaults were applied
+	for _, spec := range cfg.Specs {
+		if spec.Log.File.MaxSizeMB != 100 {
+			t.Errorf("expected MaxSizeMB to be 100, got %d", spec.Log.File.MaxSizeMB)
+		}
+	}
+}
+
+func TestBuildGroups_Coverage(t *testing.T) {
+	specs := []process.Spec{
+		{Name: "proc1", Command: "echo 1"},
+		{Name: "proc2", Command: "echo 2"},
+	}
+
+	tests := []struct {
+		name        string
+		groups      []GroupConfig
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:      "empty groups",
+			groups:    []GroupConfig{},
+			expectErr: false,
+		},
+		{
+			name: "valid group",
+			groups: []GroupConfig{
+				{Name: "group1", Members: []string{"proc1", "proc2"}},
+			},
+			expectErr: false,
+		},
+		{
+			name: "group with empty name",
+			groups: []GroupConfig{
+				{Name: "", Members: []string{"proc1"}},
+			},
+			expectErr:   true,
+			errContains: "group requires name",
+		},
+		{
+			name: "group with empty members",
+			groups: []GroupConfig{
+				{Name: "group1", Members: []string{}},
+			},
+			expectErr:   true,
+			errContains: "requires members",
+		},
+		{
+			name: "group with unknown member",
+			groups: []GroupConfig{
+				{Name: "group1", Members: []string{"unknown"}},
+			},
+			expectErr:   true,
+			errContains: "unknown member",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groups, err := buildGroups(tt.groups, specs)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error to contain %q, got %v", tt.errContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(groups) != len(tt.groups) {
+					t.Errorf("expected %d groups, got %d", len(tt.groups), len(groups))
+				}
+			}
+		})
+	}
+}
+
 func TestConvertDetectorConfigs(t *testing.T) {
 	tests := []struct {
 		name         string
