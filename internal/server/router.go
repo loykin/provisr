@@ -45,6 +45,9 @@ func (r *Router) Handler() http.Handler {
 	group.POST("/stop", r.handleStop)
 	group.POST("/unregister", r.handleUnregister)
 	group.GET("/status", r.handleStatus)
+	group.GET("/group/status", r.handleGroupStatus)
+	group.POST("/group/start", r.handleGroupStart)
+	group.POST("/group/stop", r.handleGroupStop)
 	group.GET("/debug/processes", r.handleDebugProcesses)
 	return g
 }
@@ -402,6 +405,81 @@ func (r *Router) handleUnregister(c *gin.Context) {
 		err = r.mgr.UnregisterMatch(selector.wild, selector.wait)
 	}
 
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleGroupStatus(c *gin.Context) {
+	groupName := c.Query("group")
+	if groupName == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "group parameter required"})
+		return
+	}
+
+	// Validate group name to avoid path traversal
+	if !isSafeName(groupName) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid group name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+
+	groupStatus, err := r.mgr.GroupStatus(groupName)
+	if err != nil {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, groupStatus)
+}
+
+func (r *Router) handleGroupStart(c *gin.Context) {
+	groupName := c.Query("group")
+	if groupName == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "group parameter required"})
+		return
+	}
+
+	// Validate group name to avoid path traversal
+	if !isSafeName(groupName) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid group name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+
+	err := r.mgr.GroupStart(groupName)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleGroupStop(c *gin.Context) {
+	groupName := c.Query("group")
+	if groupName == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "group parameter required"})
+		return
+	}
+
+	// Validate group name to avoid path traversal
+	if !isSafeName(groupName) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid group name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+
+	// Parse wait parameter
+	waitStr := c.Query("wait")
+	wait := 3 * time.Second // default
+	if waitStr != "" {
+		if d, err := time.ParseDuration(waitStr); err == nil {
+			wait = d
+		}
+	}
+
+	err := r.mgr.GroupStop(groupName, wait)
 	if err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return

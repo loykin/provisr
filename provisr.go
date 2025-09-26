@@ -27,17 +27,20 @@ type Status = process.Status
 
 type Manager struct{ inner *manager.Manager }
 
+type ManagerGroupSpec = manager.GroupSpec
+
 type HistoryConfig = cfg.HistoryConfig
 
 type HistorySink = history.Sink
 
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
-func (m *Manager) SetGlobalEnv(kvs []string)      { m.inner.SetGlobalEnv(kvs) }
-func (m *Manager) Register(s Spec) error          { return m.inner.Register(s) }
-func (m *Manager) RegisterN(s Spec) error         { return m.inner.RegisterN(s) }
-func (m *Manager) Start(name string) error        { return m.inner.Start(name) }
-func (m *Manager) ApplyConfig(specs []Spec) error { return m.inner.ApplyConfig(specs) }
+func (m *Manager) SetGlobalEnv(kvs []string)           { m.inner.SetGlobalEnv(kvs) }
+func (m *Manager) SetGroups(groups []ManagerGroupSpec) { m.inner.SetGroups(groups) }
+func (m *Manager) Register(s Spec) error               { return m.inner.Register(s) }
+func (m *Manager) RegisterN(s Spec) error              { return m.inner.RegisterN(s) }
+func (m *Manager) Start(name string) error             { return m.inner.Start(name) }
+func (m *Manager) ApplyConfig(specs []Spec) error      { return m.inner.ApplyConfig(specs) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
 }
@@ -50,7 +53,16 @@ func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
 }
 func (m *Manager) Status(name string) (Status, error)      { return m.inner.Status(name) }
 func (m *Manager) StatusAll(base string) ([]Status, error) { return m.inner.StatusAll(base) }
-func (m *Manager) Count(base string) (int, error)          { return m.inner.Count(base) }
+func (m *Manager) GroupStatus(groupName string) (map[string][]Status, error) {
+	return m.inner.GroupStatus(groupName)
+}
+func (m *Manager) GroupStart(groupName string) error {
+	return m.inner.GroupStart(groupName)
+}
+func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
+	return m.inner.GroupStop(groupName, wait)
+}
+func (m *Manager) Count(base string) (int, error) { return m.inner.Count(base) }
 
 // Group facade
 type Group struct{ inner *pg.Group }
