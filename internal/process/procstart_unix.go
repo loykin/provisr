@@ -24,8 +24,8 @@ func getProcStartUnix(pid int) int64 {
 		return getProcStartUnixLinux(pid)
 	default:
 		// Best-effort for Darwin/BSD via gopsutil (uses sysctl under the hood)
-		// Ensure safe conversion from int (arch-dependent) to int32 to avoid truncation
-		if pid > (1<<31 - 1) {
+		// Validate PID is in reasonable range before conversion
+		if pid > 4194304 {
 			return 0
 		}
 		p, err := gopsproc.NewProcess(int32(pid))
@@ -42,6 +42,10 @@ func getProcStartUnix(pid int) int64 {
 
 // getProcStartUnixLinux reads /proc to compute a stable start time without spawning external processes.
 func getProcStartUnixLinux(pid int) int64 {
+	// Validate PID is in reasonable range
+	if pid <= 0 || pid > 4194304 {
+		return 0
+	}
 	// Read /proc/[pid]/stat and extract starttime (field 22, in clock ticks since boot)
 	statPath := "/proc/" + strconv.Itoa(pid) + "/stat"
 	b, err := os.ReadFile(statPath)

@@ -23,7 +23,7 @@ func main() {
 	mgr := provisr.New()
 	// Start a small process
 	spec := provisr.Spec{Name: "metrics-demo", Command: "sleep 2"}
-	if err := mgr.Start(spec); err != nil {
+	if err := mgr.Register(spec); err != nil {
 		panic(err)
 	}
 	fmt.Println("Started metrics-demo; scrape /metrics while it runs...")

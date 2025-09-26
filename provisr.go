@@ -27,23 +27,42 @@ type Status = process.Status
 
 type Manager struct{ inner *manager.Manager }
 
+type ManagerGroupSpec = manager.GroupSpec
+
 type HistoryConfig = cfg.HistoryConfig
 
 type HistorySink = history.Sink
 
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
-func (m *Manager) SetGlobalEnv(kvs []string)      { m.inner.SetGlobalEnv(kvs) }
-func (m *Manager) Start(s Spec) error             { return m.inner.Start(s) }
-func (m *Manager) StartN(s Spec) error            { return m.inner.StartN(s) }
-func (m *Manager) ApplyConfig(specs []Spec) error { return m.inner.ApplyConfig(specs) }
+func (m *Manager) SetGlobalEnv(kvs []string)           { m.inner.SetGlobalEnv(kvs) }
+func (m *Manager) SetGroups(groups []ManagerGroupSpec) { m.inner.SetGroups(groups) }
+func (m *Manager) Register(s Spec) error               { return m.inner.Register(s) }
+func (m *Manager) RegisterN(s Spec) error              { return m.inner.RegisterN(s) }
+func (m *Manager) Start(name string) error             { return m.inner.Start(name) }
+func (m *Manager) ApplyConfig(specs []Spec) error      { return m.inner.ApplyConfig(specs) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
 }
+func (m *Manager) Unregister(name string, wait time.Duration) error {
+	return m.inner.Unregister(name, wait)
+}
 func (m *Manager) StopAll(base string, wait time.Duration) error { return m.inner.StopAll(base, wait) }
-func (m *Manager) Status(name string) (Status, error)            { return m.inner.Status(name) }
-func (m *Manager) StatusAll(base string) ([]Status, error)       { return m.inner.StatusAll(base) }
-func (m *Manager) Count(base string) (int, error)                { return m.inner.Count(base) }
+func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
+	return m.inner.UnregisterAll(base, wait)
+}
+func (m *Manager) Status(name string) (Status, error)      { return m.inner.Status(name) }
+func (m *Manager) StatusAll(base string) ([]Status, error) { return m.inner.StatusAll(base) }
+func (m *Manager) GroupStatus(groupName string) (map[string][]Status, error) {
+	return m.inner.GroupStatus(groupName)
+}
+func (m *Manager) GroupStart(groupName string) error {
+	return m.inner.GroupStart(groupName)
+}
+func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
+	return m.inner.GroupStop(groupName, wait)
+}
+func (m *Manager) Count(base string) (int, error) { return m.inner.Count(base) }
 
 // Group facade
 type Group struct{ inner *pg.Group }
@@ -73,9 +92,16 @@ func (s *CronScheduler) Stop()                { s.inner.Stop() }
 
 func LoadConfig(path string) (*cfg.Config, error) {
 	return cfg.LoadConfig(path)
-} // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
+}
+
+// NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
 func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
 	return iapi.NewServer(addr, basePath, m.inner)
+}
+
+// NewTLSServer starts an HTTPS server with TLS configuration from server config
+func NewTLSServer(serverConfig cfg.ServerConfig, m *Manager) (*http.Server, error) {
+	return iapi.NewTLSServer(serverConfig, m.inner)
 }
 
 // Metrics helpers (public facade)

@@ -72,7 +72,7 @@ func TestManagerSetGlobalEnv(t *testing.T) {
 		Command: "echo $TEST_VAR",
 	}
 
-	if err := mgr.Start(spec); err != nil {
+	if err := mgr.Register(spec); err != nil {
 		t.Errorf("Failed to start process with env vars: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestManagerStartStop(t *testing.T) {
 	}
 
 	// Test start
-	err := mgr.Start(spec)
+	err := mgr.Register(spec)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestManagerStartN(t *testing.T) {
 	}
 
 	// Test starting multiple instances
-	err := mgr.StartN(spec)
+	err := mgr.RegisterN(spec)
 	if err != nil {
 		t.Fatalf("StartN failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestManagerStartN(t *testing.T) {
 		Instances: 1,
 	}
 
-	err = mgr.StartN(singleSpec)
+	err = mgr.RegisterN(singleSpec)
 	if err != nil {
 		t.Errorf("StartN with single instance failed: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestManagerPatternMatching(t *testing.T) {
 			Name:    name,
 			Command: "sleep 0.05",
 		}
-		_ = mgr.Start(spec)
+		_ = mgr.Register(spec)
 	}
 
 	// Test pattern matching
@@ -245,7 +245,7 @@ func TestManagerShutdown(t *testing.T) {
 			Name:    fmt.Sprintf("shutdown-test-%d", i),
 			Command: "sleep 0.1",
 		}
-		_ = mgr.Start(spec)
+		_ = mgr.Register(spec)
 	}
 
 	// Test shutdown
@@ -267,7 +267,7 @@ func TestManagerHelperMethods(t *testing.T) {
 		Name:    "alias-test",
 		Command: "sleep 0.05",
 	}
-	_ = mgr.Start(spec)
+	_ = mgr.Register(spec)
 
 	// Test StatusMatch
 	statuses, err := mgr.StatusMatch("alias*")
@@ -339,7 +339,7 @@ func TestManagerMultiProcessAutoRestart(t *testing.T) {
 			AutoRestart: p.autoRestart,
 		}
 
-		err := manager.Start(spec)
+		err := manager.Register(spec)
 		require.NoError(t, err, "Failed to start process %s", p.name)
 
 		// Wait for process to be ready
@@ -448,7 +448,7 @@ func TestConcurrentProcessManagement(t *testing.T) {
 			wg.Add(1)
 			go func(spec process.Spec) {
 				defer wg.Done()
-				if err := mgr.Start(spec); err != nil {
+				if err := mgr.Register(spec); err != nil {
 					errors <- err
 				}
 			}(specs[i])
@@ -522,7 +522,7 @@ func TestConcurrentProcessManagement(t *testing.T) {
 				}
 
 				// Start
-				if err := mgr.Start(spec); err != nil {
+				if err := mgr.Register(spec); err != nil {
 					t.Logf("Start failed for %s: %v", spec.Name, err)
 				}
 
@@ -559,7 +559,7 @@ func TestProcessRecoveryAndMonitoring(t *testing.T) {
 		}
 
 		// Start process
-		if err := mgr.Start(spec); err != nil {
+		if err := mgr.Register(spec); err != nil {
 			t.Fatalf("Failed to start process: %v", err)
 		}
 
@@ -594,7 +594,7 @@ func TestProcessRecoveryAndMonitoring(t *testing.T) {
 		}
 
 		// Start multiple instances
-		if err := mgr.StartN(spec); err != nil {
+		if err := mgr.RegisterN(spec); err != nil {
 			t.Fatalf("Failed to start multiple instances: %v", err)
 		}
 
@@ -642,7 +642,7 @@ func BenchmarkConcurrentOperations(b *testing.B) {
 					Command: "true", // Very quick command
 				}
 
-				if err := mgr.Start(spec); err != nil {
+				if err := mgr.Register(spec); err != nil {
 					b.Errorf("Start failed: %v", err)
 				}
 
@@ -673,7 +673,7 @@ func TestManagerReconcilerAutoRestart(t *testing.T) {
 		AutoRestart: true,
 	}
 
-	err := manager.Start(spec)
+	err := manager.Register(spec)
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -731,7 +731,7 @@ func TestManagerProcessCoordination(t *testing.T) {
 			AutoRestart: true,
 		}
 
-		err := manager.Start(spec)
+		err := manager.Register(spec)
 		require.NoError(t, err)
 		time.Sleep(50 * time.Millisecond) // Stagger starts slightly
 	}
@@ -837,7 +837,7 @@ func TestManagerRestartOnly(t *testing.T) {
 		Command:     "sleep 60", // Use sleep command which exists on macOS
 		AutoRestart: true,
 	} // Start process through Manager
-	err := manager.Start(spec)
+	err := manager.Register(spec)
 	require.NoError(t, err)
 	t.Log("✓ Process started through Manager")
 
@@ -1068,7 +1068,7 @@ func TestApplyConfig_RecoversFromPIDFile(t *testing.T) {
 	defer func() { _ = mgr1.Shutdown() }()
 
 	spec := process.Spec{Name: "demo", Command: "sleep 2", PIDFile: pidfile}
-	if err := mgr1.Start(spec); err != nil {
+	if err := mgr1.Register(spec); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 

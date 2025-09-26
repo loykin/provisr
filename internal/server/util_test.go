@@ -29,7 +29,7 @@ func TestSanitizeBase(t *testing.T) {
 
 func TestIsSafeName(t *testing.T) {
 	valid := []string{"a", "A1._-", "name.1-2_3"}
-	invalid := []string{"", "..", "a..b", "a/b", `a\\b`, "hello*", "한글"}
+	invalid := []string{"", "..", "a..b", "a/b", `a\\b`, "hello*", "unicode한글"}
 	for _, s := range valid {
 		if !isSafeName(s) {
 			t.Fatalf("expected valid name %q", s)

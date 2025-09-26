@@ -33,7 +33,7 @@ func main() {
 	// so we can assign fields on it in place.
 	spec.Log.File.Dir = logDir
 
-	if err := mgr.Start(spec); err != nil {
+	if err := mgr.Register(spec); err != nil {
 		panic(err)
 	}
 	// Give the process time to write logs and finish

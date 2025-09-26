@@ -65,24 +65,24 @@ func main() {
 
 	slog.Info("Connected to provisr daemon successfully")
 
-	// Start a process
-	startReq := client.StartRequest{
+	// Register a process
+	registerReq := client.RegisterRequest{
 		Name:      "my-worker",
 		Command:   "sleep 5", // Shorter duration for CI
 		Instances: 1,         // Fewer instances for CI
 	}
 
-	slog.Info("Starting process",
-		slog.String("name", startReq.Name),
-		slog.String("command", startReq.Command),
+	slog.Info("Registering process",
+		slog.String("name", registerReq.Name),
+		slog.String("command", registerReq.Command),
 	)
 
-	if err := provisrClient.StartProcess(ctx, startReq); err != nil {
-		slog.Error("Start failed", slog.Any("error", err))
+	if err := provisrClient.RegisterProcess(ctx, registerReq); err != nil {
+		slog.Error("Registration failed", slog.Any("error", err))
 		os.Exit(1)
 	}
 
-	slog.Info("Process started successfully", slog.String("name", startReq.Name))
+	slog.Info("Process registered successfully", slog.String("name", registerReq.Name))
 
 	// In CI, give some time for process to run then exit
 	if os.Getenv("CI") == "true" {

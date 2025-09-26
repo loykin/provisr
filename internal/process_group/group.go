@@ -32,9 +32,9 @@ func (g *Group) Start(gs GroupSpec) error {
 	for _, m := range gs.Members {
 		var err error
 		if m.Instances > 1 {
-			err = g.mgr.StartN(m)
+			err = g.mgr.RegisterN(m)
 		} else {
-			err = g.mgr.Start(m)
+			err = g.mgr.Register(m)
 		}
 		if err != nil {
 			// rollback: stop previously started members

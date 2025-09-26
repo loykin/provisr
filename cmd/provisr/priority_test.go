@@ -209,7 +209,7 @@ func TestStatusesByBase_WithPrioritySpecs(t *testing.T) {
 		AutoRestart: false,
 	}
 
-	if err := mgr.Start(spec); err != nil {
+	if err := mgr.Register(spec); err != nil {
 		t.Fatalf("failed to start test spec: %v", err)
 	}
 
