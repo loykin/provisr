@@ -33,6 +33,12 @@ type HistoryConfig = cfg.HistoryConfig
 
 type HistorySink = history.Sink
 
+type ProcessMetrics = metrics.ProcessMetrics
+
+type ProcessMetricsCollector = metrics.ProcessMetricsCollector
+
+type ProcessMetricsConfig = metrics.ProcessMetricsConfig
+
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
 func (m *Manager) SetGlobalEnv(kvs []string)           { m.inner.SetGlobalEnv(kvs) }
@@ -63,6 +69,23 @@ func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
 	return m.inner.GroupStop(groupName, wait)
 }
 func (m *Manager) Count(base string) (int, error) { return m.inner.Count(base) }
+
+// Process Metrics methods
+func (m *Manager) GetProcessMetrics(name string) (metrics.ProcessMetrics, bool) {
+	return m.inner.GetProcessMetrics(name)
+}
+func (m *Manager) GetProcessMetricsHistory(name string) ([]metrics.ProcessMetrics, bool) {
+	return m.inner.GetProcessMetricsHistory(name)
+}
+func (m *Manager) GetAllProcessMetrics() map[string]metrics.ProcessMetrics {
+	return m.inner.GetAllProcessMetrics()
+}
+func (m *Manager) IsProcessMetricsEnabled() bool {
+	return m.inner.IsProcessMetricsEnabled()
+}
+func (m *Manager) SetProcessMetricsCollector(collector *metrics.ProcessMetricsCollector) error {
+	return m.inner.SetProcessMetricsCollector(collector)
+}
 
 // Group facade
 type Group struct{ inner *pg.Group }
@@ -108,6 +131,14 @@ func NewTLSServer(serverConfig cfg.ServerConfig, m *Manager) (*http.Server, erro
 
 func RegisterMetrics(r prometheus.Registerer) error { return metrics.Register(r) }
 func RegisterMetricsDefault() error                 { return metrics.Register(prometheus.DefaultRegisterer) }
+
+func RegisterMetricsWithProcessMetricsDefault(processMetricsConfig ProcessMetricsConfig) error {
+	return metrics.RegisterWithProcessMetrics(prometheus.DefaultRegisterer, processMetricsConfig)
+}
+
+func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsCollector {
+	return metrics.NewProcessMetricsCollector(config)
+}
 
 // ServeMetrics starts an HTTP server on addr exposing /metrics using the default registry.
 // It returns any immediate listen error; otherwise it runs the server in the caller goroutine.

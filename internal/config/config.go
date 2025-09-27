@@ -57,8 +57,16 @@ type HistoryConfig struct {
 }
 
 type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Listen  string `mapstructure:"listen"`
+	Enabled        bool                  `mapstructure:"enabled"`
+	Listen         string                `mapstructure:"listen"`
+	ProcessMetrics *ProcessMetricsConfig `mapstructure:"process_metrics"`
+}
+
+type ProcessMetricsConfig struct {
+	Enabled     bool          `mapstructure:"enabled"`
+	Interval    time.Duration `mapstructure:"interval"`
+	MaxHistory  int           `mapstructure:"max_history"`
+	HistorySize int           `mapstructure:"history_size"` // alias for MaxHistory
 }
 
 type LogConfig struct {

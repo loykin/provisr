@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -62,6 +63,9 @@ func (r *Router) Handler() http.Handler {
 	group.POST("/group/start", r.handleGroupStart)
 	group.POST("/group/stop", r.handleGroupStop)
 	group.GET("/debug/processes", r.handleDebugProcesses)
+	group.GET("/metrics", r.handleProcessMetrics)
+	group.GET("/metrics/history", r.handleProcessMetricsHistory)
+	group.GET("/metrics/group", r.handleProcessMetricsGroup)
 	return g
 }
 
@@ -210,6 +214,24 @@ func (e *APIEndpoints) DebugProcessesHandler() gin.HandlerFunc {
 	return r.handleDebugProcesses
 }
 
+// ProcessMetricsHandler returns the gin.HandlerFunc for getting process metrics
+func (e *APIEndpoints) ProcessMetricsHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleProcessMetrics
+}
+
+// ProcessMetricsHistoryHandler returns the gin.HandlerFunc for getting process metrics history
+func (e *APIEndpoints) ProcessMetricsHistoryHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleProcessMetricsHistory
+}
+
+// ProcessMetricsGroupHandler returns the gin.HandlerFunc for getting group metrics
+func (e *APIEndpoints) ProcessMetricsGroupHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleProcessMetricsGroup
+}
+
 // RegisterAll registers all API endpoints to the provided gin router group
 // This is equivalent to using the Router.Handler() but allows for custom middleware
 func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) {
@@ -222,6 +244,9 @@ func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) {
 	group.POST("/group/start", e.GroupStartHandler())
 	group.POST("/group/stop", e.GroupStopHandler())
 	group.GET("/debug/processes", e.DebugProcessesHandler())
+	group.GET("/metrics", e.ProcessMetricsHandler())
+	group.GET("/metrics/history", e.ProcessMetricsHistoryHandler())
+	group.GET("/metrics/group", e.ProcessMetricsGroupHandler())
 }
 
 // --- Handlers ---
@@ -570,4 +595,116 @@ func (r *Router) handleGroupStop(c *gin.Context) {
 	}
 
 	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleProcessMetrics(c *gin.Context) {
+	name := c.Query("name")
+
+	if name != "" {
+		// Get metrics for a specific process
+		if !isSafeName(name) {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+			return
+		}
+
+		metrics, found := r.mgr.GetProcessMetrics(name)
+		if !found {
+			writeJSON(c, http.StatusNotFound, errorResp{Error: "process not found or metrics not available"})
+			return
+		}
+
+		writeJSON(c, http.StatusOK, metrics)
+	} else {
+		// Get metrics for all processes
+		allMetrics := r.mgr.GetAllProcessMetrics()
+		if !r.mgr.IsProcessMetricsEnabled() {
+			writeJSON(c, http.StatusServiceUnavailable, errorResp{Error: "process metrics collection is disabled"})
+			return
+		}
+
+		writeJSON(c, http.StatusOK, allMetrics)
+	}
+}
+
+func (r *Router) handleProcessMetricsHistory(c *gin.Context) {
+	name := c.Query("name")
+	if name == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "name parameter required"})
+		return
+	}
+
+	// Validate process name to avoid path traversal
+	if !isSafeName(name) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+
+	if !r.mgr.IsProcessMetricsEnabled() {
+		writeJSON(c, http.StatusServiceUnavailable, errorResp{Error: "process metrics collection is disabled"})
+		return
+	}
+
+	history, found := r.mgr.GetProcessMetricsHistory(name)
+	if !found {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: "process not found or metrics history not available"})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, map[string]interface{}{
+		"process": name,
+		"history": history,
+	})
+}
+
+func (r *Router) handleProcessMetricsGroup(c *gin.Context) {
+	base := c.Query("base")
+	if base == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "base parameter required"})
+		return
+	}
+
+	// Validate base name to avoid path traversal
+	if !isSafeName(base) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid base: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return
+	}
+
+	if !r.mgr.IsProcessMetricsEnabled() {
+		writeJSON(c, http.StatusServiceUnavailable, errorResp{Error: "process metrics collection is disabled"})
+		return
+	}
+
+	allMetrics := r.mgr.GetAllProcessMetrics()
+	groupMetrics := make(map[string]interface{})
+	var totalCPU float64
+	var totalMemory float64
+	var processCount int
+
+	// Filter metrics for processes matching the base pattern
+	for name, metrics := range allMetrics {
+		// Check if this process belongs to the base group (e.g., demo-app-1, demo-app-2 belong to demo-app)
+		if strings.HasPrefix(name, base+"-") || name == base {
+			groupMetrics[name] = metrics
+			totalCPU += metrics.CPUPercent
+			totalMemory += metrics.MemoryMB
+			processCount++
+		}
+	}
+
+	if processCount == 0 {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: "no processes found for base pattern"})
+		return
+	}
+
+	result := map[string]interface{}{
+		"base":          base,
+		"process_count": processCount,
+		"total_cpu":     totalCPU,
+		"total_memory":  totalMemory,
+		"avg_cpu":       totalCPU / float64(processCount),
+		"avg_memory":    totalMemory / float64(processCount),
+		"processes":     groupMetrics,
+	}
+
+	writeJSON(c, http.StatusOK, result)
 }

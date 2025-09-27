@@ -74,6 +74,9 @@ var (
 	)
 )
 
+// processMetricsCollector is a global instance for process metrics collection
+var processMetricsCollector *ProcessMetricsCollector
+
 // Register registers all metrics with the provided registerer.
 // It is safe to call multiple times; subsequent calls after success are no-ops.
 func Register(r prometheus.Registerer) error {
@@ -94,6 +97,26 @@ func Register(r prometheus.Registerer) error {
 	}
 	regOK.Store(true)
 	return nil
+}
+
+// RegisterWithProcessMetrics registers all metrics including process monitoring metrics
+func RegisterWithProcessMetrics(r prometheus.Registerer, processMetricsConfig ProcessMetricsConfig) error {
+	// Register standard metrics first
+	if err := Register(r); err != nil {
+		return err
+	}
+
+	// Create and register process metrics collector
+	if processMetricsCollector == nil {
+		processMetricsCollector = NewProcessMetricsCollector(processMetricsConfig)
+	}
+
+	return processMetricsCollector.RegisterMetrics(r)
+}
+
+// GetProcessMetricsCollector returns the global process metrics collector
+func GetProcessMetricsCollector() *ProcessMetricsCollector {
+	return processMetricsCollector
 }
 
 // Handler returns an http.Handler that serves Prometheus metrics for the DefaultGatherer.

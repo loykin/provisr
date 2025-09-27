@@ -570,6 +570,36 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {
+		// Configure process metrics if enabled
+		if cfg.Metrics.ProcessMetrics != nil && cfg.Metrics.ProcessMetrics.Enabled {
+			processMetricsConfig := provisr.ProcessMetricsConfig{
+				Enabled:     cfg.Metrics.ProcessMetrics.Enabled,
+				Interval:    cfg.Metrics.ProcessMetrics.Interval,
+				MaxHistory:  cfg.Metrics.ProcessMetrics.MaxHistory,
+				HistorySize: cfg.Metrics.ProcessMetrics.HistorySize,
+			}
+
+			// Register metrics with process metrics support
+			if err := provisr.RegisterMetricsWithProcessMetricsDefault(processMetricsConfig); err != nil {
+				fmt.Printf("Warning: failed to register process metrics: %v\n", err)
+			}
+
+			// Create and configure process metrics collector
+			collector := provisr.NewProcessMetricsCollector(processMetricsConfig)
+			if err := mgr.SetProcessMetricsCollector(collector); err != nil {
+				fmt.Printf("Warning: failed to setup process metrics collector: %v\n", err)
+			} else {
+				fmt.Printf("Started process metrics collection (interval: %v, history: %d)\n",
+					processMetricsConfig.Interval,
+					processMetricsConfig.MaxHistory)
+			}
+		} else {
+			// Register standard metrics only
+			if err := provisr.RegisterMetricsDefault(); err != nil {
+				fmt.Printf("Warning: failed to register metrics: %v\n", err)
+			}
+		}
+
 		if cfg.Metrics.Listen != "" {
 			go func() {
 				if err := provisr.ServeMetrics(cfg.Metrics.Listen); err != nil {
