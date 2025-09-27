@@ -1,0 +1,34 @@
+# Demo configuration for process metrics monitoring
+
+# Global environment variables (optional)
+use_os_env = true
+pid_dir = "pids"
+
+# Process definitions - multiple instances to test metrics collection
+[[processes]]
+type = "process"
+spec.name = "demo-app"
+spec.command = "sh -c 'while true; do echo demo app running; sleep 2; done'"
+spec.work_dir = "."
+spec.auto_restart = true
+spec.instances = 3
+
+# Server configuration for HTTP API
+[server]
+listen = ":8080"
+base_path = "/api"
+
+# Metrics configuration with process monitoring enabled
+[metrics]
+enabled = true
+listen = ":9090"
+
+# Process metrics monitoring configuration
+[metrics.process_metrics]
+enabled = true
+interval = "3s"
+max_history = 50
+
+# Optional: History storage (disabled for demo)
+[history]
+enabled = false

@@ -100,5 +100,14 @@ valid_days = 365
 [metrics]
 # Enable the metrics server (set to true to serve Prometheus metrics)
 enabled = false
-# Listen address for metrics server, e.g. ":9090" or "127.0.0.1:9090"  
+# Listen address for metrics server, e.g. ":9090" or "127.0.0.1:9090"
 listen = ":9090"
+
+# Process monitoring configuration
+[metrics.process_metrics]
+# Enable CPU and memory monitoring for managed processes
+enabled = false
+# Collection interval for process metrics
+interval = "5s"
+# Maximum number of historical metrics to keep per process
+max_history = 100

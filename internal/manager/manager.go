@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/loykin/provisr/internal/env"
 	"github.com/loykin/provisr/internal/history"
+	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
 )
 
@@ -27,16 +29,22 @@ type Manager struct {
 	groups    map[string]GroupSpec
 
 	// Shared resources
-	envManager *env.Env
-	histSinks  []history.Sink
+	envManager       *env.Env
+	histSinks        []history.Sink
+	metricsCollector *metrics.ProcessMetricsCollector
+	metricsCtx       context.Context
+	metricsCancel    context.CancelFunc
 }
 
 // NewManager creates a new manager
 func NewManager() *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		processes:  make(map[string]*ManagedProcess),
-		groups:     make(map[string]GroupSpec),
-		envManager: env.New(),
+		processes:     make(map[string]*ManagedProcess),
+		groups:        make(map[string]GroupSpec),
+		envManager:    env.New(),
+		metricsCtx:    ctx,
+		metricsCancel: cancel,
 	}
 }
 
@@ -65,6 +73,33 @@ func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
 	m.mu.Lock()
 	m.histSinks = append([]history.Sink(nil), sinks...)
 	m.mu.Unlock()
+}
+
+// SetProcessMetricsCollector configures the process metrics collector
+func (m *Manager) SetProcessMetricsCollector(collector *metrics.ProcessMetricsCollector) error {
+	m.mu.Lock()
+	m.metricsCollector = collector
+	m.mu.Unlock()
+
+	if collector != nil && collector.IsEnabled() {
+		return collector.Start(m.metricsCtx, m.getProcessPIDs)
+	}
+	return nil
+}
+
+// getProcessPIDs returns a map of process names to PIDs for metrics collection
+func (m *Manager) getProcessPIDs() map[string]int32 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[string]int32)
+	for name, mp := range m.processes {
+		status := mp.Status()
+		if status.Running && status.PID > 0 {
+			result[name] = int32(status.PID)
+		}
+	}
+	return result
 }
 
 // Register registers and starts a new process
@@ -269,6 +304,19 @@ func (m *Manager) Count(base string) (int, error) {
 
 // Shutdown gracefully shuts down all processes
 func (m *Manager) Shutdown() error {
+	// Stop metrics collection first
+	if m.metricsCancel != nil {
+		m.metricsCancel()
+	}
+
+	m.mu.RLock()
+	collector := m.metricsCollector
+	m.mu.RUnlock()
+
+	if collector != nil {
+		collector.Stop()
+	}
+
 	// Shut down all processes
 	m.mu.RLock()
 	processes := make([]*ManagedProcess, 0, len(m.processes))
@@ -534,4 +582,52 @@ func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
 	}
 
 	return firstError
+}
+
+// GetProcessMetrics returns the latest metrics for a specific process
+func (m *Manager) GetProcessMetrics(name string) (metrics.ProcessMetrics, bool) {
+	m.mu.RLock()
+	collector := m.metricsCollector
+	m.mu.RUnlock()
+
+	if collector == nil {
+		return metrics.ProcessMetrics{}, false
+	}
+
+	return collector.GetMetrics(name)
+}
+
+// GetProcessMetricsHistory returns the historical metrics for a specific process
+func (m *Manager) GetProcessMetricsHistory(name string) ([]metrics.ProcessMetrics, bool) {
+	m.mu.RLock()
+	collector := m.metricsCollector
+	m.mu.RUnlock()
+
+	if collector == nil {
+		return nil, false
+	}
+
+	return collector.GetHistory(name)
+}
+
+// GetAllProcessMetrics returns the latest metrics for all processes
+func (m *Manager) GetAllProcessMetrics() map[string]metrics.ProcessMetrics {
+	m.mu.RLock()
+	collector := m.metricsCollector
+	m.mu.RUnlock()
+
+	if collector == nil {
+		return make(map[string]metrics.ProcessMetrics)
+	}
+
+	return collector.GetAllMetrics()
+}
+
+// IsProcessMetricsEnabled returns whether process metrics collection is enabled
+func (m *Manager) IsProcessMetricsEnabled() bool {
+	m.mu.RLock()
+	collector := m.metricsCollector
+	m.mu.RUnlock()
+
+	return collector != nil && collector.IsEnabled()
 }
