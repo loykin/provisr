@@ -5,20 +5,22 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/internal/job"
+	"github.com/loykin/provisr/internal/process"
 	"github.com/robfig/cron/v3"
 )
 
 // CronJobSpec defines a recurring job execution (similar to k8s CronJob)
 type CronJobSpec struct {
-	Name                       string   `json:"name" mapstructure:"name"`
-	Schedule                   string   `json:"schedule" mapstructure:"schedule"`                                           // Cron expression
-	JobTemplate                job.Spec `json:"job_template" mapstructure:"job_template"`                                   // Template for created jobs
-	ConcurrencyPolicy          string   `json:"concurrency_policy" mapstructure:"concurrency_policy"`                       // "Allow", "Forbid", "Replace"
-	Suspend                    *bool    `json:"suspend" mapstructure:"suspend"`                                             // Pause scheduling
-	SuccessfulJobsHistoryLimit *int32   `json:"successful_jobs_history_limit" mapstructure:"successful_jobs_history_limit"` // Keep successful jobs (default 3)
-	FailedJobsHistoryLimit     *int32   `json:"failed_jobs_history_limit" mapstructure:"failed_jobs_history_limit"`         // Keep failed jobs (default 1)
-	StartingDeadlineSeconds    *int64   `json:"starting_deadline_seconds" mapstructure:"starting_deadline_seconds"`         // Deadline for starting job if missed
-	TimeZone                   *string  `json:"time_zone" mapstructure:"time_zone"`                                         // Time zone for cron
+	Name                       string                 `json:"name" mapstructure:"name"`
+	Schedule                   string                 `json:"schedule" mapstructure:"schedule"`                                           // Cron expression
+	JobTemplate                job.Spec               `json:"job_template" mapstructure:"job_template"`                                   // Template for created jobs
+	ConcurrencyPolicy          string                 `json:"concurrency_policy" mapstructure:"concurrency_policy"`                       // "Allow", "Forbid", "Replace"
+	Suspend                    *bool                  `json:"suspend" mapstructure:"suspend"`                                             // Pause scheduling
+	SuccessfulJobsHistoryLimit *int32                 `json:"successful_jobs_history_limit" mapstructure:"successful_jobs_history_limit"` // Keep successful jobs (default 3)
+	FailedJobsHistoryLimit     *int32                 `json:"failed_jobs_history_limit" mapstructure:"failed_jobs_history_limit"`         // Keep failed jobs (default 1)
+	StartingDeadlineSeconds    *int64                 `json:"starting_deadline_seconds" mapstructure:"starting_deadline_seconds"`         // Deadline for starting job if missed
+	TimeZone                   *string                `json:"time_zone" mapstructure:"time_zone"`                                         // Time zone for cron
+	Lifecycle                  process.LifecycleHooks `json:"lifecycle" mapstructure:"lifecycle"`                                         // CronJob-level lifecycle hooks (applied to each scheduled job)
 }
 
 // ConcurrencyPolicy defines how to handle concurrent executions
@@ -87,5 +89,41 @@ func (s *CronJobSpec) Validate() error {
 		return fmt.Errorf("invalid job template: %w", err)
 	}
 
+	// Validate cronjob-level lifecycle hooks
+	if err := s.Lifecycle.Validate(); err != nil {
+		return fmt.Errorf("cronjob %q: lifecycle validation failed: %w", s.Name, err)
+	}
+
 	return nil
+}
+
+// CreateJobFromTemplate creates a job.Spec from the CronJob template, merging lifecycle hooks
+func (s *CronJobSpec) CreateJobFromTemplate(jobName string) job.Spec {
+	// Copy the job template
+	jobSpec := s.JobTemplate
+	jobSpec.Name = jobName
+
+	// Merge lifecycle hooks: CronJob hooks take precedence over JobTemplate hooks
+	if s.Lifecycle.HasAnyHooks() {
+		// Start with JobTemplate lifecycle hooks
+		mergedLifecycle := jobSpec.Lifecycle.DeepCopy()
+
+		// Merge CronJob-level hooks (CronJob hooks take precedence)
+		if len(s.Lifecycle.PreStart) > 0 {
+			mergedLifecycle.PreStart = append(s.Lifecycle.PreStart, mergedLifecycle.PreStart...)
+		}
+		if len(s.Lifecycle.PostStart) > 0 {
+			mergedLifecycle.PostStart = append(mergedLifecycle.PostStart, s.Lifecycle.PostStart...)
+		}
+		if len(s.Lifecycle.PreStop) > 0 {
+			mergedLifecycle.PreStop = append(s.Lifecycle.PreStop, mergedLifecycle.PreStop...)
+		}
+		if len(s.Lifecycle.PostStop) > 0 {
+			mergedLifecycle.PostStop = append(mergedLifecycle.PostStop, s.Lifecycle.PostStop...)
+		}
+
+		jobSpec.Lifecycle = mergedLifecycle
+	}
+
+	return jobSpec
 }

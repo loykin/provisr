@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -305,6 +307,12 @@ func (up *ManagedProcess) handleStart(newSpec process.Spec) error {
 func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 	up.setState(StateStarting)
 
+	// Execute PreStart hooks
+	if err := up.executeLifecycleHooks(newSpec, process.PhasePreStart); err != nil {
+		up.setState(StateStopped)
+		return fmt.Errorf("pre_start hooks failed: %w", err)
+	}
+
 	// Update spec and process
 	up.mu.Lock()
 	//up.spec = newSpec
@@ -332,6 +340,13 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 
 	// Successfully started
 	up.setState(StateRunning)
+
+	// Execute PostStart hooks (after process is confirmed running)
+	if err := up.executeLifecycleHooks(newSpec, process.PhasePostStart); err != nil {
+		slog.Warn("post_start hooks failed, but process is running", "process", newSpec.Name, "error", err)
+		// Note: We don't stop the process here because it's already running successfully
+		// PostStart hook failures are typically non-critical (like notifications, setup, etc.)
+	}
 
 	// Record metrics and persist
 	metrics.IncStart(newSpec.Name)
@@ -365,6 +380,20 @@ func (up *ManagedProcess) handleStop(wait time.Duration) error {
 func (up *ManagedProcess) doStop(wait time.Duration) error {
 	up.setState(StateStopping)
 
+	// Get current spec for hook execution
+	up.mu.RLock()
+	spec := up.proc.GetSpec()
+	up.mu.RUnlock()
+
+	// Execute PreStop hooks
+	if spec != nil {
+		if err := up.executeLifecycleHooks(*spec, process.PhasePreStop); err != nil {
+			slog.Warn("pre_stop hooks failed, continuing with process stop", "process", spec.Name, "error", err)
+			// Note: We continue with stopping the process even if PreStop hooks fail
+			// PreStop hooks are meant for cleanup/preparation, not to block stopping
+		}
+	}
+
 	up.proc.SetStopRequested(true)
 
 	if err := up.proc.Stop(wait); err != nil {
@@ -375,6 +404,15 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 
 	up.setState(StateStopped)
 	up.persistStop()
+
+	// Execute PostStop hooks after process has stopped
+	if spec != nil {
+		if err := up.executeLifecycleHooks(*spec, process.PhasePostStop); err != nil {
+			slog.Warn("post_stop hooks failed", "process", spec.Name, "error", err)
+			// Note: PostStop hook failures don't affect the stop operation result
+			// The process is already stopped at this point
+		}
+	}
 
 	// Record metrics
 	metrics.IncStop(up.proc.GetName())
@@ -505,5 +543,99 @@ func (up *ManagedProcess) persistStop() {
 		for _, h := range sinks {
 			_ = h.Send(ctx, evt)
 		}
+	}
+}
+
+// executeLifecycleHooks executes hooks for a specific lifecycle phase
+func (up *ManagedProcess) executeLifecycleHooks(spec process.Spec, phase process.LifecyclePhase) error {
+	hooks := spec.Lifecycle.GetHooksForPhase(phase)
+	if len(hooks) == 0 {
+		return nil
+	}
+
+	slog.Info("Executing lifecycle hooks", "process", spec.Name, "phase", phase.String(), "hook_count", len(hooks))
+
+	for i, hook := range hooks {
+		// Apply defaults to hook
+		hook.GetDefaults()
+
+		slog.Debug("Executing hook", "process", spec.Name, "phase", phase.String(), "hook", hook.Name, "index", i)
+
+		if err := up.executeHook(spec, hook, phase); err != nil {
+			switch hook.FailureMode {
+			case process.FailureModeIgnore:
+				slog.Warn("Hook failed but continuing due to failure_mode=ignore",
+					"process", spec.Name, "phase", phase.String(), "hook", hook.Name, "error", err)
+				continue
+			case process.FailureModeRetry:
+				// Simple retry logic - retry once after 1 second
+				slog.Warn("Hook failed, retrying once",
+					"process", spec.Name, "phase", phase.String(), "hook", hook.Name, "error", err)
+				time.Sleep(1 * time.Second)
+				if retryErr := up.executeHook(spec, hook, phase); retryErr != nil {
+					return fmt.Errorf("hook %q failed after retry: %w", hook.Name, retryErr)
+				}
+			case process.FailureModeFail:
+				fallthrough
+			default:
+				return fmt.Errorf("hook %q failed: %w", hook.Name, err)
+			}
+		} else {
+			slog.Debug("Hook completed successfully", "process", spec.Name, "phase", phase.String(), "hook", hook.Name)
+		}
+	}
+
+	slog.Info("All lifecycle hooks completed", "process", spec.Name, "phase", phase.String())
+	return nil
+}
+
+// executeHook executes a single lifecycle hook
+func (up *ManagedProcess) executeHook(spec process.Spec, hook process.Hook, phase process.LifecyclePhase) error {
+	ctx := context.Background()
+	if hook.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, hook.Timeout)
+		defer cancel()
+	}
+
+	// Build command
+	cmd := exec.CommandContext(ctx, "sh", "-c", hook.Command)
+
+	// Set working directory
+	if hook.WorkDir != "" {
+		cmd.Dir = hook.WorkDir
+	} else if spec.WorkDir != "" {
+		cmd.Dir = spec.WorkDir
+	}
+
+	// Set environment - merge process env with hook env
+	env := append([]string(nil), spec.Env...)
+	env = append(env, hook.Env...)
+
+	// Add hook-specific environment variables
+	env = append(env,
+		fmt.Sprintf("PROVISR_PROCESS_NAME=%s", spec.Name),
+		fmt.Sprintf("PROVISR_HOOK_NAME=%s", hook.Name),
+		fmt.Sprintf("PROVISR_HOOK_PHASE=%s", phase.String()),
+	)
+	cmd.Env = env
+
+	start := time.Now()
+
+	// Execute based on run mode
+	if hook.RunMode == process.RunModeAsync {
+		// Async execution - start and don't wait
+		slog.Debug("Starting hook in async mode", "process", spec.Name, "hook", hook.Name)
+		return cmd.Start()
+	} else {
+		// Blocking execution - wait for completion
+		if err := cmd.Run(); err != nil {
+			duration := time.Since(start)
+			return fmt.Errorf("hook command failed after %v: %w", duration, err)
+		}
+
+		duration := time.Since(start)
+		slog.Debug("Hook completed", "process", spec.Name, "hook", hook.Name, "duration", duration)
+		return nil
 	}
 }
