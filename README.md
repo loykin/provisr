@@ -11,168 +11,100 @@ A minimal supervisord-like process manager written in Go.
 ## Features
 
 - **Process management**: Start/stop/status for processes and multiple instances
-- **Process registration**: Register/unregister processes in programs directory with config protection
-- **Auto-restart**: Retry with interval, start duration window
-- **Robust liveness**: Via detectors (pidfile, pid, command) with PID reuse protection using process start time metadata
-- **Lifecycle hooks**: Kubernetes-style init-container and lifecycle hooks (pre_start, post_start, pre_stop, post_stop) with failure modes and async execution
-- **Structured logging**: Unified slog-based structured logging with rotating file logs (lumberjack)
-- **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism, completions, and retry logic
-- **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks with flexible scheduling
-- **Process groups**: Start/stop/status together with instance scaling
-- **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully
-  stop/remove programs no longer in config
-- **HTTP API**: Embeddable Gin-based API with configurable basePath and JSON I/O
-- **Metrics**: Prometheus metrics for processes, jobs, and cronjobs with unified collection
-- **Wildcard support**: For querying/stopping processes via REST (e.g., demo-*, *worker*)
-- **Framework integration**: Easy embedding into existing Gin and Echo apps (see examples)
+- **Auto-restart**: Configurable retry logic with intervals and failure detection
+- **Lifecycle hooks**: Kubernetes-style hooks (pre_start, post_start, pre_stop, post_stop) with failure modes
+- **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism and retry logic
+- **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks
+- **Process groups**: Manage related processes together with scaling support
+- **HTTP API**: RESTful API with JSON I/O, embeddable in Gin/Echo applications
+- **Metrics**: Prometheus metrics for monitoring processes, jobs, and cronjobs
+- **Configuration**: TOML/YAML/JSON config with hot reload and reconciliation
+- **Security**: TLS support, input validation, and secure PID management
 
-## CLI quickstart
+## Quick Start
+
+### Basic Process Management
 
 ```shell
-# Quick process management workflow
-provisr register --name demo --command "sleep 10"  # Register process
-provisr start --name demo                          # Start process
-provisr status --name demo                         # Check status
-provisr stop --name demo                           # Stop process
-
-# Config-driven workflow
-provisr serve --config config/config.toml          # Start daemon with config
-provisr cron --config config/config.toml           # Verify cron jobs
-provisr group-start --group backend                # Start process group
+# Register and manage a simple process
+provisr register --name demo --command "sleep 10"
+provisr start --name demo
+provisr status --name demo
+provisr stop --name demo
 ```
 
-## Process Registration Commands
-
-Provisr includes commands to manage process definitions in the programs directory:
-
-### register
-
-Creates a new process definition file in the programs directory:
+### Config-driven Workflow
 
 ```shell
-provisr register --name web --command "python app.py" --work-dir /app --auto-start
-provisr register --name api --command "./api-server" --log-dir /var/log/api
+# Start daemon with configuration file
+provisr serve --config config/config.toml
+
+# Manage process groups
+provisr group-start --group backend
+provisr group-stop --group backend
 ```
 
-### register-file
-
-Registers an existing JSON process definition file:
+### Process Registration
 
 ```shell
-provisr register-file --file ./my-process.json
-```
+# Register processes
+provisr register --name web --command "python app.py" --work-dir /app
+provisr register-file --file ./process-config.json
 
-JSON format example:
+# Remote registration
+provisr register --name api --command "./server" --api-url http://remote:8080/api
 
-```json
-{
-  "name": "web-server",
-  "command": "python app.py",
-  "work_dir": "/app",
-  "auto_restart": true,
-  "log": {
-    "file": {
-      "dir": "/var/log"
-    }
-  }
-}
-```
-
-### unregister
-
-Removes a process definition from the programs directory:
-
-```shell
+# Remove processes
 provisr unregister --name web
 ```
 
-**Note**: Processes defined in `config.toml` cannot be unregistered and are protected from deletion.
+## HTTP API
 
-All registration commands support remote daemon operations via `--api-url`:
+### Endpoints
 
-```shell
-provisr register --name web --command "python app.py" --api-url http://remote:8080/api
-```
+- `POST /api/start` - Start processes (JSON body with process spec)
+- `GET /api/status` - Get process status (query: name, base, or wildcard)
+- `POST /api/stop` - Stop processes (query: name, base, or wildcard)
 
-## HTTP API (REST)
-
-- Base path is configurable; default used in examples is /api.
-- Endpoints:
-    - POST {base}/start — body is JSON Spec
-    - POST {base}/stop — query: name= or base= or wildcard= (exactly one), optional wait=duration
-    - GET {base}/status — query: name= or base= or wildcard= (exactly one)
-- JSON fields are explicitly tagged (e.g., status fields like running, pid, started_at).
-- Input validation: the server validates spec inputs to avoid unsafe filesystem path usage.
-    - name: must match [A-Za-z0-9._-], must not contain ".." or path separators.
-    - work_dir, pid_file, log.dir, log.stdoutPath, log.stderrPath: if provided, must be absolute paths
-      without traversal (cleaned form only, e.g., no "..").
-
-Examples (assuming server running on localhost:8080 and base /api):
-
-Start N instances:
+### Examples
 
 ```shell
-curl -s -X POST localhost:8080/api/start \
+# Start multiple instances
+curl -X POST localhost:8080/api/start \
   -H 'Content-Type: application/json' \
-  -d '{"name":"demo","command":"/bin/sh -c \"while true; do echo demo; sleep 5; done\"","instances":2}'
+  -d '{"name":"demo","command":"echo hello","instances":2}'
+
+# Check status
+curl 'localhost:8080/api/status?base=demo'
+
+# Stop with wildcard
+curl -X POST 'localhost:8080/api/stop?wildcard=demo-*'
 ```
 
-Get status by base:
-
-```shell
-curl -s 'localhost:8080/api/status?base=demo' | jq .
-```
-
-Get status by wildcard:
-
-```shell
-curl -s 'localhost:8080/api/status?wildcard=demo-*' | jq .
-```
-
-Stop by wildcard:
-
-```shell
-curl -s -X POST 'localhost:8080/api/stop?wildcard=demo-*' | jq .
-```
-
-## Starting the HTTP API server (CLI)
-
-You can run a standalone REST server with the built-in command:
-
-```shell
-provisr serve --config config/config.toml
-```
-
-Notes:
-
-- The server requires a config file and reads the [server] section from it.
-- At startup, the manager applies the config once: it recovers processes from PID files (when configured), starts
-  missing ones, and gracefully stops/removes programs not present in the config.
-- Demonization is supported: use `--daemonize`. The daemon PID file path is configured via `[server].pidfile` in the
-  config. For logs, use `--logfile` or set `[server].logfile` in the config.
-
-Example TOML snippet (also present in config/config.toml):
+### Server Configuration
 
 ```toml
 [server]
 enabled = true
 listen = ":8080"
 base_path = "/api"
+pidfile = "/var/run/provisr.pid"  # For daemonization
+logfile = "/var/log/provisr.log"   # Optional
 ```
 
-Once running, use the endpoints described below.
+```shell
+# Start server
+provisr serve --config config/config.toml
 
-## Configuration model (unified)
+# Start as daemon
+provisr serve --config config/config.toml --daemonize
+```
 
-Provisr uses a single, unified schema for process definitions in both the main config and the programs directory.
+## Configuration
 
-- Discriminated union entries: each entry has `type` and `spec`.
-    - `type = "process"` | `"job"` | `"cronjob"`
-    - `spec` contains the fields for the respective type.
-- Inline definitions live under `[[processes]]` blocks in the main config.
-- The programs directory (set via `programs_directory = "programs"`) contains per-program files in the same schema.
-  Supported extensions: .toml, .yaml/.yml, .json.
-- Legacy plain per-file process specs are not supported.
+Provisr supports three entity types: `process`, `job`, and `cronjob`. Each can be defined in:
+- Main config file under `[[processes]]` sections
+- Individual files in the programs directory (TOML/YAML/JSON)
 
 ### Process Example
 
@@ -726,198 +658,74 @@ c := client.New(config)
 - **File Permissions**: Ensure private keys have restrictive permissions (0600)
 - **TLS Versions**: Supports TLS 1.2 and 1.3 (1.3 is default)
 
-## Embedding the API
+## Embedding
 
-### Standard Integration (All endpoints at once)
-
-- Gin example: examples/embedded_http_gin
-- Echo example: examples/embedded_http_echo
-
-Each example mounts the REST API and automatically starts a small demo process so you can immediately query /status.
-
-To run the Gin example:
-
-```shell
-cd examples/embedded_http_gin
-API_BASE=/api go run .
-```
-
-To run the Echo example:
-
-```shell
-cd examples/embedded_http_echo
-API_BASE=/api go run .
-```
-
-### Individual Endpoint Registration (Custom middleware per endpoint)
-
-For advanced use cases where you need different middleware for different endpoints:
-
-- Gin individual example: examples/embedded_http_gin_individual
-- Echo individual example: examples/embedded_http_echo_individual
-
-These examples demonstrate:
-
-- Registering each API endpoint separately
-- Applying custom middleware to specific endpoints
-- Authentication only on protected endpoints
-- Rate limiting on specific operations
-- Custom logging and monitoring per endpoint
-
-To run the individual Gin example:
-
-```shell
-cd examples/embedded_http_gin_individual
-API_BASE=/api go run .
-```
-
-To run the individual Echo example:
-
-```shell
-cd examples/embedded_http_echo_individual
-API_BASE=/api go run .
-```
-
-#### Individual API Usage
+Embed provisr into existing Gin or Echo applications:
 
 ```go
-// Create API endpoints for custom registration
+// Basic integration - register all endpoints
 endpoints := server.NewAPIEndpoints(mgr, "/api")
+endpoints.RegisterAll(r.Group("/api"))
+
+// Individual endpoints with custom middleware
 apiGroup := r.Group("/api")
-
-// Register endpoints individually with custom middleware
 apiGroup.GET("/status", loggingMiddleware(), endpoints.StatusHandler())
-apiGroup.POST("/start", loggingMiddleware(), authMiddleware(), endpoints.StartHandler())
-apiGroup.POST("/stop", loggingMiddleware(), authMiddleware(), endpoints.StopHandler())
-
-// Or register all at once with common middleware
-commonGroup := r.Group("/api")
-commonGroup.Use(loggingMiddleware())
-endpoints.RegisterAll(commonGroup)
+apiGroup.POST("/start", authMiddleware(), endpoints.StartHandler())
 ```
+
+See `examples/embedded_http_gin` and `examples/embedded_http_echo` for complete examples.
 
 ## Metrics
 
-provisr provides comprehensive Prometheus metrics for processes, jobs, and cronjobs:
-
-### Process Metrics
-
-- `provisr_process_starts_total` - Number of process starts
-- `provisr_process_restarts_total` - Number of auto restarts
-- `provisr_process_stops_total` - Number of stops
-- `provisr_process_running_instances` - Current running instances per process
-
-### Job Metrics
-
-- `provisr_job_total` - Total number of jobs started
-- `provisr_job_active` - Number of currently active jobs
-- `provisr_job_duration_seconds` - Job execution duration
-- `provisr_job_completions_total` - Job completion counts
-
-### CronJob Metrics
-
-- `provisr_cronjob_total` - Total cronjob executions
-- `provisr_cronjob_active` - Currently active cronjobs
-- `provisr_cronjob_duration_seconds` - CronJob execution duration
-- `provisr_cronjob_last_schedule_time` - Last scheduled time
-- `provisr_cronjob_next_schedule_time` - Next scheduled time
+Prometheus metrics for processes, jobs, and cronjobs:
 
 ```go
 // Enable metrics
 provisr.RegisterMetricsDefault()
 
-// Serve metrics on /metrics endpoint
+// Serve metrics endpoint
 go provisr.ServeMetrics(":9090")
 ```
 
-See `examples/embedded_metrics` and `examples/embedded_metrics_add` for complete examples.
+Available metrics: process starts/stops/restarts, job completions, cronjob schedules. See `examples/embedded_metrics` for details.
 
-## More examples
+## Examples
 
-- examples/embedded — minimal embedding
-- examples/embedded_client — client/daemon interaction demo (uses examples/embedded_client/daemon-config.toml)
-- examples/embedded_http_gin — embed the HTTP API into a Gin app
-- examples/embedded_http_echo — embed the HTTP API into an Echo app
-- examples/embedded_process_group — process group management
-- examples/embedded_logger — logging integration
-- examples/embedded_metrics — Prometheus metrics
-- examples/embedded_metrics_add — custom metrics
-- examples/embedded_config_file — config-driven
-- examples/embedded_manager — manager-driven config apply (uses Manager.ApplyConfig)
-- examples/embedded_config_structure — struct-driven configuration
-- examples/embedded_lifecycle_hooks — basic programmatic lifecycle hooks
-- examples/embedded_lifecycle_config — configuration-driven lifecycle hooks
-- examples/embedded_lifecycle_failure_modes — different failure modes and behaviors
-- examples/embedded_job_lifecycle — job-specific lifecycle hooks
-- examples/job_basic — config-based job execution example
-- examples/job_advanced — programmatic job management with monitoring
-- examples/cronjob_basic — scheduled job execution
-- examples/job_config — job and cronjob configuration examples
-- examples/programs_directory — directory-based programs loading with groups and priorities
-- examples/programs_detach — demonstrate detached worker managed via programs config
+### Framework Integration
+- `embedded_http_gin` / `embedded_http_echo` - Embed API into web frameworks
+- `embedded_client` - Client/daemon interaction patterns
 
-## Files and Paths
+### Process Management
+- `embedded` - Basic embedding and process management
+- `embedded_process_group` - Process group operations
+- `programs_directory` - Directory-based configuration
 
-This project reads/writes a few files at well-defined locations. The defaults and rules are:
+### Jobs and Scheduling
+- `job_basic` / `job_advanced` - One-time job execution
+- `cronjob_basic` - Scheduled recurring jobs
+- `job_config` - Job configuration examples
 
-- Working directory (spec.work_dir)
-    - If provided, the started process runs with this as its cwd.
-    - Must be an absolute path without traversal (e.g., /var/apps/demo). Relative paths are rejected by the HTTP API.
+### Advanced Features
+- `embedded_lifecycle_hooks` - Lifecycle hook patterns
+- `embedded_metrics` - Prometheus metrics integration
+- `embedded_logger` - Custom logging setup
 
-- PID file (spec.pid_file)
-    - If provided, the manager writes the child PID to this file immediately after a successful start.
-    - You can also configure a default directory for PID files via `pid_dir` in the main config. When set, any process
-      spec without an explicit `pid_file` will default to `<pid_dir>/<name>.pid` (resolved relative to the config file
-      if not absolute).
-    - Extended format for safety and recovery:
-        1) First line: PID
-        2) Second line: JSON-encoded Spec snapshot (optional; used to recover process details on restart)
-        3) Third line: JSON-encoded meta with `{ "start_unix": <seconds> }` (optional; used to verify PID identity)
-    - Older single-line and two-line formats remain supported for backward compatibility.
-    - The PIDFile detector validates that the PID refers to the same process by comparing the recorded start time with
-      the current process start time, preventing PID reuse mistakes.
-    - The parent directory is created if missing (mode 0750).
-    - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid) when submitted via HTTP API; the CLI/config
-      can use relative paths which are resolved against the config file directory.
+See the `examples/` directory for complete implementations.
 
-- Logs (spec.log)
-    - If log.stdoutPath or log.stderrPath are set, logs are written exactly to those files.
-    - Otherwise, if log.dir is set, files are created as:
-        - <log.dir>/<name>.stdout.log
-        - <log.dir>/<name>.stderr.log
-    - The directory log.dir is created if needed (mode 0750).
-    - Rotation is handled by lumberjack (MaxSizeMB, MaxBackups, MaxAgeDays, Compress).
-    - Example: with name "web-1" and log.dir "/var/log/provisr", stdout goes to /var/log/provisr/web-1.stdout.log.
+## File Locations
 
-- Config file
-    - Example configuration is in config/config.toml. CLI examples use:
-        - provisr start --config config/config.toml
-    - You can keep your own TOML anywhere and pass the path via --config.
+- **PID files**: Written to track running processes. Defaults to `<pid_dir>/<name>.pid`
+- **Logs**: Written to `<log.dir>/<name>.stdout.log` and `<log.dir>/<name>.stderr.log`
+- **Config**: Main config typically `config/config.toml`, programs directory for individual process files
 
-- Examples
-    - See the examples/ directory for runnable samples. Some include their own config directories, e.g.,
-      examples/embedded_config_file/config/config.toml.
+Paths must be absolute when using HTTP API. File rotation is handled automatically with configurable limits.
 
-- Naming and path rules (validated by the HTTP API)
-    - name: allowed characters [A-Za-z0-9._-]; must not contain ".." or path separators.
-    - work_dir, pid_file, log.dir, log.stdoutPath, log.stderrPath: if provided, must be absolute paths without
-      traversal (cleaned form; no "..").
+## Security
 
-## Security notes
+- Input validation prevents path traversal attacks
+- PID reuse protection using process start time verification
+- Run with least privileges and restrict file system access
 
-- The HTTP API performs input validation for process specs to mitigate uncontrolled path usage (CodeQL: "Uncontrolled
-  data used in path expression").
-- PID reuse protection: PID file meta includes the process start time and is validated against the live process using
-  platform-native methods (procfs on Linux, sysctl on Darwin/BSD via gopsutil, WinAPI on Windows). No external `ps`
-  calls are used.
-- Even with validation, run the server with least privileges and restrict log directories and pid file locations to
-  trusted paths.
+## License
 
-## Notes and breaking changes
-
-- Persistence store removed: internal/store has been deleted. The manager now operates purely via in-memory state and
-  PID files for recovery.
-- Serve flags simplified: `provisr serve` requires a config file. Daemonization uses `--daemonize`; the daemon PID file
-  is configured via `[server].pidfile`. API listen/base are configured via the TOML `[server]` section.
-- Config-driven reconciliation: at startup, processes are recovered from PID files when available; processes not present
-  in the config are gracefully shut down and cleaned up.
+MIT
