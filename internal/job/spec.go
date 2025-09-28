@@ -10,17 +10,18 @@ import (
 
 // Spec defines a one-time job execution (similar to k8s Job)
 type Spec struct {
-	Name                    string   `json:"name" mapstructure:"name"`
-	Command                 string   `json:"command" mapstructure:"command"`
-	WorkDir                 string   `json:"work_dir" mapstructure:"work_dir"`
-	Env                     []string `json:"env" mapstructure:"env"`
-	TTLSecondsAfterFinished *int32   `json:"ttl_seconds_after_finished" mapstructure:"ttl_seconds_after_finished"` // Delete job after completion
-	ActiveDeadlineSeconds   *int64   `json:"active_deadline_seconds" mapstructure:"active_deadline_seconds"`       // Job timeout
-	BackoffLimit            *int32   `json:"backoff_limit" mapstructure:"backoff_limit"`                           // Retry attempts (default 6)
-	Parallelism             *int32   `json:"parallelism" mapstructure:"parallelism"`                               // Number of parallel pods (default 1)
-	Completions             *int32   `json:"completions" mapstructure:"completions"`                               // Required successful completions (default 1)
-	CompletionMode          string   `json:"completion_mode" mapstructure:"completion_mode"`                       // "NonIndexed" or "Indexed"
-	RestartPolicy           string   `json:"restart_policy" mapstructure:"restart_policy"`                         // "Never", "OnFailure"
+	Name                    string                 `json:"name" mapstructure:"name"`
+	Command                 string                 `json:"command" mapstructure:"command"`
+	WorkDir                 string                 `json:"work_dir" mapstructure:"work_dir"`
+	Env                     []string               `json:"env" mapstructure:"env"`
+	TTLSecondsAfterFinished *int32                 `json:"ttl_seconds_after_finished" mapstructure:"ttl_seconds_after_finished"` // Delete job after completion
+	ActiveDeadlineSeconds   *int64                 `json:"active_deadline_seconds" mapstructure:"active_deadline_seconds"`       // Job timeout
+	BackoffLimit            *int32                 `json:"backoff_limit" mapstructure:"backoff_limit"`                           // Retry attempts (default 6)
+	Parallelism             *int32                 `json:"parallelism" mapstructure:"parallelism"`                               // Number of parallel pods (default 1)
+	Completions             *int32                 `json:"completions" mapstructure:"completions"`                               // Required successful completions (default 1)
+	CompletionMode          string                 `json:"completion_mode" mapstructure:"completion_mode"`                       // "NonIndexed" or "Indexed"
+	RestartPolicy           string                 `json:"restart_policy" mapstructure:"restart_policy"`                         // "Never", "OnFailure"
+	Lifecycle               process.LifecycleHooks `json:"lifecycle" mapstructure:"lifecycle"`                                   // Lifecycle hooks for job execution
 }
 
 // JobStatus represents the current status of a job
@@ -127,6 +128,11 @@ func (j *Spec) Validate() error {
 		return fmt.Errorf("job %q: ttl_seconds_after_finished cannot be negative", j.Name)
 	}
 
+	// Validate lifecycle hooks
+	if err := j.Lifecycle.Validate(); err != nil {
+		return fmt.Errorf("job %q: lifecycle validation failed: %w", j.Name, err)
+	}
+
 	return nil
 }
 
@@ -138,6 +144,7 @@ func (j *Spec) ToProcessSpec() *process.Spec {
 		WorkDir:     j.WorkDir,
 		Env:         append([]string(nil), j.Env...), // Copy slice
 		AutoRestart: false,                           // Jobs don't auto-restart by default
+		Lifecycle:   j.Lifecycle.DeepCopy(),          // Copy lifecycle hooks
 	}
 
 	// Configure restart policy

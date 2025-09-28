@@ -1,0 +1,141 @@
+# Provisr configuration with lifecycle hooks examples
+
+processes:
+  # Web application with comprehensive lifecycle hooks
+  - type: process
+    spec:
+      name: web-app
+      command: "python -m http.server 8080"
+      work_dir: "/tmp"
+      instances: 2
+      auto_restart: true
+      lifecycle:
+        pre_start:
+          - name: setup-env
+            command: "echo 'Setting up environment variables'"
+            failure_mode: fail
+            run_mode: blocking
+            timeout: 30s
+          - name: check-port
+            command: "echo 'Checking if port 8080 is available'"
+            failure_mode: fail
+            run_mode: blocking
+          - name: prepare-assets
+            command: "echo 'Preparing static assets'"
+            failure_mode: fail
+            run_mode: blocking
+        post_start:
+          - name: warmup
+            command: "echo 'Warming up application cache'"
+            failure_mode: ignore
+            run_mode: async
+          - name: health-check
+            command: "curl -f http://localhost:8080 || echo 'Health check endpoint not ready yet'"
+            failure_mode: ignore
+            run_mode: blocking
+            timeout: 60s
+        pre_stop:
+          - name: graceful-shutdown
+            command: "echo 'Sending graceful shutdown signal'"
+            failure_mode: ignore
+            run_mode: blocking
+            timeout: 30s
+        post_stop:
+          - name: cleanup-logs
+            command: "echo 'Cleaning up log files'"
+            failure_mode: ignore
+            run_mode: blocking
+          - name: backup-data
+            command: "echo 'Backing up application data'"
+            failure_mode: ignore
+            run_mode: blocking
+
+  # Background worker with retry mechanisms
+  - type: process
+    spec:
+      name: background-worker
+      command: "sh -c 'echo Worker started; sleep 10; echo Worker finished'"
+      auto_restart: false
+      lifecycle:
+        pre_start:
+          - name: connect-queue
+            command: "echo 'Connecting to message queue'"
+            failure_mode: retry
+            run_mode: blocking
+            timeout: 10s
+        post_stop:
+          - name: flush-queue
+            command: "echo 'Flushing remaining messages'"
+            failure_mode: ignore
+            run_mode: blocking
+
+  # Scheduled backup job
+  - type: cronjob
+    spec:
+      name: daily-backup
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      concurrency_policy: Forbid
+      job_template:
+        name: backup-job
+        command: "echo 'Performing database backup'"
+        lifecycle:
+          pre_start:
+            - name: check-disk-space
+              command: "echo 'Checking available disk space'"
+              failure_mode: fail
+              run_mode: blocking
+            - name: lock-database
+              command: "echo 'Acquiring database lock'"
+              failure_mode: fail
+              run_mode: blocking
+          post_start:
+            - name: notify-start
+              command: "echo 'Backup started notification sent'"
+              failure_mode: ignore
+              run_mode: async
+          post_stop:
+            - name: verify-backup
+              command: "echo 'Verifying backup integrity'"
+              failure_mode: retry
+              run_mode: blocking
+            - name: cleanup-temp
+              command: "echo 'Cleaning up temporary files'"
+              failure_mode: ignore
+              run_mode: blocking
+            - name: notify-completion
+              command: "echo 'Backup completion notification sent'"
+              failure_mode: ignore
+              run_mode: async
+      lifecycle:
+        # CronJob-level hooks (applied to each scheduled job)
+        pre_start:
+          - name: check-maintenance-mode
+            command: "echo 'Checking if system is in maintenance mode'"
+            failure_mode: fail
+            run_mode: blocking
+        post_stop:
+          - name: update-metrics
+            command: "echo 'Updating backup metrics'"
+            failure_mode: ignore
+            run_mode: async
+
+# Instance groups for scaling
+groups:
+  - name: web-tier
+    members:
+      - web-app
+  - name: workers
+    members:
+      - background-worker
+
+# Global environment
+env:
+  - "ENVIRONMENT=production"
+  - "LOG_LEVEL=info"
+
+# Logging configuration
+log:
+  dir: "/var/log/provisr"
+  max_size_mb: 100
+  max_backups: 5
+  compress: true

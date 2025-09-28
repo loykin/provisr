@@ -14,10 +14,11 @@ A minimal supervisord-like process manager written in Go.
 - **Process registration**: Register/unregister processes in programs directory with config protection
 - **Auto-restart**: Retry with interval, start duration window
 - **Robust liveness**: Via detectors (pidfile, pid, command) with PID reuse protection using process start time metadata
+- **Lifecycle hooks**: Kubernetes-style init-container and lifecycle hooks (pre_start, post_start, pre_stop, post_stop) with failure modes and async execution
 - **Structured logging**: Unified slog-based structured logging with rotating file logs (lumberjack)
 - **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism, completions, and retry logic
 - **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks with flexible scheduling
-- **Process groups**: Start/stop/status together
+- **Process groups**: Start/stop/status together with instance scaling
 - **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully
   stop/remove programs no longer in config
 - **HTTP API**: Embeddable Gin-based API with configurable basePath and JSON I/O
@@ -147,7 +148,7 @@ Notes:
 - The server requires a config file and reads the [server] section from it.
 - At startup, the manager applies the config once: it recovers processes from PID files (when configured), starts
   missing ones, and gracefully stops/removes programs not present in the config.
-- Daemonization is supported: use `--daemonize`. The daemon PID file path is configured via `[server].pidfile` in the
+- Demonization is supported: use `--daemonize`. The daemon PID file path is configured via `[server].pidfile` in the
   config. For logs, use `--logfile` or set `[server].logfile` in the config.
 
 Example TOML snippet (also present in config/config.toml):
@@ -366,6 +367,278 @@ func int32Ptr(i int32) *int32 { return &i }
 
 See the `examples/` directory for complete working examples of Jobs and CronJobs.
 
+## Lifecycle Hooks
+
+Provisr supports Kubernetes-style lifecycle hooks that allow you to run commands at specific points in a process, job, or cronjob lifecycle. This is similar to init-containers and lifecycle hooks in Kubernetes.
+
+### Hook Phases
+
+Lifecycle hooks can be configured for four phases:
+
+- **PreStart**: Run before the main process starts (blocking by default)
+- **PostStart**: Run after the main process starts (can be async)
+- **PreStop**: Run before stopping the main process (blocking by default)
+- **PostStop**: Run after the main process stops (blocking by default)
+
+### Hook Configuration
+
+Each hook supports the following configuration:
+
+| Field         | Type   | Description                                    | Default   |
+|---------------|--------|------------------------------------------------|-----------|
+| `name`        | string | Hook name (required)                           | -         |
+| `command`     | string | Command to execute (required)                  | -         |
+| `failure_mode`| string | "fail", "ignore", or "retry"                   | "fail"    |
+| `run_mode`    | string | "blocking" or "async"                          | "blocking"|
+| `timeout`     | string | Hook execution timeout (e.g., "30s", "5m")    | "30s"     |
+
+#### Failure Modes
+
+- **fail**: Stop the operation if hook fails (default)
+- **ignore**: Continue despite hook failure
+- **retry**: Retry the hook once, then fail if still failing
+
+#### Run Modes
+
+- **blocking**: Wait for hook to complete before continuing (default)
+- **async**: Start hook and continue immediately (useful for notifications)
+
+### Process Lifecycle Hooks
+
+Add lifecycle hooks to process specifications:
+
+```toml
+# Process with lifecycle hooks
+type = "process"
+[spec]
+name = "web-app"
+command = "python app.py"
+auto_restart = true
+
+[spec.lifecycle]
+# Pre-start hooks (setup phase)
+[[spec.lifecycle.pre_start]]
+name = "check-dependencies"
+command = "curl -f http://database:5432/health"
+failure_mode = "fail"
+run_mode = "blocking"
+timeout = "30s"
+
+[[spec.lifecycle.pre_start]]
+name = "migrate-database"
+command = "python manage.py migrate"
+failure_mode = "fail"
+run_mode = "blocking"
+
+# Post-start hooks (after process starts)
+[[spec.lifecycle.post_start]]
+name = "warmup-cache"
+command = "curl -X POST http://localhost:8080/api/warmup"
+failure_mode = "ignore"
+run_mode = "async"
+
+[[spec.lifecycle.post_start]]
+name = "health-check"
+command = "curl -f http://localhost:8080/health"
+failure_mode = "ignore"
+run_mode = "blocking"
+timeout = "60s"
+
+# Pre-stop hooks (graceful shutdown)
+[[spec.lifecycle.pre_stop]]
+name = "drain-connections"
+command = "curl -X POST http://localhost:8080/api/drain"
+failure_mode = "ignore"
+run_mode = "blocking"
+timeout = "30s"
+
+# Post-stop hooks (cleanup)
+[[spec.lifecycle.post_stop]]
+name = "cleanup-temp-files"
+command = "rm -rf /tmp/app-*"
+failure_mode = "ignore"
+run_mode = "blocking"
+
+[[spec.lifecycle.post_stop]]
+name = "backup-logs"
+command = "tar -czf /backups/app-logs-$(date +%Y%m%d).tar.gz /var/log/app/"
+failure_mode = "ignore"
+run_mode = "async"
+```
+
+### Job Lifecycle Hooks
+
+Jobs inherit the same lifecycle hook system:
+
+```toml
+type = "job"
+[spec]
+name = "data-processor"
+command = "python process_data.py"
+parallelism = 2
+completions = 5
+
+[spec.lifecycle]
+# Setup hooks
+[[spec.lifecycle.pre_start]]
+name = "download-data"
+command = "aws s3 sync s3://data-bucket /tmp/input/"
+failure_mode = "fail"
+run_mode = "blocking"
+
+[[spec.lifecycle.pre_start]]
+name = "validate-input"
+command = "python validate_data.py /tmp/input/"
+failure_mode = "fail"
+run_mode = "blocking"
+
+# Cleanup hooks
+[[spec.lifecycle.post_stop]]
+name = "upload-results"
+command = "aws s3 sync /tmp/output/ s3://results-bucket/"
+failure_mode = "retry"
+run_mode = "blocking"
+
+[[spec.lifecycle.post_stop]]
+name = "cleanup-workspace"
+command = "rm -rf /tmp/input /tmp/output"
+failure_mode = "ignore"
+run_mode = "blocking"
+```
+
+### CronJob Lifecycle Hooks
+
+CronJobs support two levels of lifecycle hooks:
+
+1. **CronJob-level hooks**: Applied to every scheduled job execution
+2. **JobTemplate hooks**: Defined in the job template
+
+Hooks are merged when a job is created, with CronJob-level hooks taking precedence.
+
+```toml
+type = "cronjob"
+[spec]
+name = "daily-backup"
+schedule = "0 2 * * *"
+concurrency_policy = "Forbid"
+
+# CronJob-level hooks (applied to every execution)
+[spec.lifecycle]
+[[spec.lifecycle.pre_start]]
+name = "check-maintenance-mode"
+command = "curl -f http://maintenance-api/status"
+failure_mode = "fail"
+run_mode = "blocking"
+
+[[spec.lifecycle.post_stop]]
+name = "update-metrics"
+command = "curl -X POST http://metrics-api/backup-completed"
+failure_mode = "ignore"
+run_mode = "async"
+
+# Job template with its own hooks
+[spec.job_template]
+name = "backup-job"
+command = "bash /scripts/backup.sh"
+
+[spec.job_template.lifecycle]
+[[spec.job_template.lifecycle.pre_start]]
+name = "check-disk-space"
+command = "df -h | grep '/backup' | awk '{print $4}' | sed 's/%//' | awk '$1 < 90'"
+failure_mode = "fail"
+run_mode = "blocking"
+
+[[spec.job_template.lifecycle.post_stop]]
+name = "verify-backup"
+command = "bash /scripts/verify-backup.sh"
+failure_mode = "retry"
+run_mode = "blocking"
+```
+
+### Programmatic Hook Configuration
+
+Configure lifecycle hooks programmatically:
+
+```go
+package main
+
+import (
+    "time"
+    "github.com/loykin/provisr"
+    "github.com/loykin/provisr/internal/process"
+)
+
+func main() {
+    mgr := provisr.New()
+
+    spec := provisr.Spec{
+        Name:    "web-app",
+        Command: "python app.py",
+        Lifecycle: process.LifecycleHooks{
+            PreStart: []process.Hook{
+                {
+                    Name:        "setup-env",
+                    Command:     "source /app/setup.sh",
+                    FailureMode: process.FailureModeFail,
+                    RunMode:     process.RunModeBlocking,
+                    Timeout:     30 * time.Second,
+                },
+            },
+            PostStart: []process.Hook{
+                {
+                    Name:        "notify-started",
+                    Command:     "curl -X POST http://notifications/app-started",
+                    FailureMode: process.FailureModeIgnore,
+                    RunMode:     process.RunModeAsync,
+                },
+            },
+            PreStop: []process.Hook{
+                {
+                    Name:        "graceful-shutdown",
+                    Command:     "curl -X POST http://localhost:8080/shutdown",
+                    FailureMode: process.FailureModeIgnore,
+                    RunMode:     process.RunModeBlocking,
+                    Timeout:     15 * time.Second,
+                },
+            },
+            PostStop: []process.Hook{
+                {
+                    Name:        "cleanup",
+                    Command:     "rm -rf /tmp/app-cache",
+                    FailureMode: process.FailureModeIgnore,
+                    RunMode:     process.RunModeBlocking,
+                },
+            },
+        },
+    }
+
+    if err := mgr.Register(spec); err != nil {
+        panic(err)
+    }
+
+    if err := mgr.Start("web-app"); err != nil {
+        panic(err)
+    }
+}
+```
+
+### Examples
+
+See the `examples/` directory for complete lifecycle hook examples:
+
+- `examples/embedded_lifecycle_hooks/` - Basic programmatic lifecycle hooks
+- `examples/embedded_lifecycle_config/` - Configuration-driven lifecycle hooks
+- `examples/embedded_lifecycle_failure_modes/` - Different failure modes and behaviors
+- `examples/embedded_job_lifecycle/` - Job-specific lifecycle hooks
+
+### Security Considerations
+
+- **Command validation**: Hook commands are validated to prevent path traversal attacks
+- **Environment isolation**: Hooks run with the same environment as the main process
+- **Timeout enforcement**: All hooks have configurable timeouts to prevent hanging
+- **Failure isolation**: Hook failures don't affect other hooks (except in fail mode)
+- **Logging**: All hook executions are logged with detailed status information
+
 ## TLS Configuration
 
 Provisr supports HTTPS with flexible TLS configuration options for secure communication.
@@ -572,6 +845,10 @@ See `examples/embedded_metrics` and `examples/embedded_metrics_add` for complete
 - examples/embedded_config_file — config-driven
 - examples/embedded_manager — manager-driven config apply (uses Manager.ApplyConfig)
 - examples/embedded_config_structure — struct-driven configuration
+- examples/embedded_lifecycle_hooks — basic programmatic lifecycle hooks
+- examples/embedded_lifecycle_config — configuration-driven lifecycle hooks
+- examples/embedded_lifecycle_failure_modes — different failure modes and behaviors
+- examples/embedded_job_lifecycle — job-specific lifecycle hooks
 - examples/job_basic — config-based job execution example
 - examples/job_advanced — programmatic job management with monitoring
 - examples/cronjob_basic — scheduled job execution

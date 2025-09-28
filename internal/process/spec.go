@@ -36,6 +36,7 @@ type Spec struct {
 	Detectors       []detector.Detector `json:"-" mapstructure:"-"`                               // excluded from mapstructure
 	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"`               // for config parsing
 	Log             logger.Config       `json:"log" mapstructure:"log"`                           // unified slog-based logging configuration
+	Lifecycle       LifecycleHooks      `json:"lifecycle" mapstructure:"lifecycle"`               // lifecycle hooks for pre/post operations
 }
 
 // Validate enforces Spec invariants.
@@ -54,6 +55,12 @@ func (s *Spec) Validate() error {
 			return fmt.Errorf("process %q: detached=true cannot be combined with log outputs; remove log config for detached processes", s.Name)
 		}
 	}
+
+	// Validate lifecycle hooks
+	if err := s.Lifecycle.Validate(); err != nil {
+		return fmt.Errorf("process %q: lifecycle validation failed: %w", s.Name, err)
+	}
+
 	return nil
 }
 
@@ -72,6 +79,9 @@ func (s *Spec) DeepCopy() *Spec {
 	if s.DetectorConfigs != nil {
 		copySpec.DetectorConfigs = append([]DetectorConfig(nil), s.DetectorConfigs...)
 	}
+
+	// Copy lifecycle hooks
+	copySpec.Lifecycle = s.Lifecycle.DeepCopy()
 
 	copySpec.Log = *s.Log.DeepCopy()
 
