@@ -290,8 +290,6 @@ func TestManagedProcess_HookFailureInPreStart(t *testing.T) {
 
 	if err != nil && !strings.Contains(err.Error(), "pre_start hooks failed") {
 		t.Errorf("Error should mention pre_start hooks failure, got: %v", err)
-	} else if err != nil {
-		t.Errorf("Error should mention pre_start hooks failure, got: %v", err)
 	}
 
 	// Process should be stopped
