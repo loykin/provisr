@@ -26,7 +26,7 @@ type Manager struct {
 	// Manager-level state (protected by mu)
 	mu        sync.RWMutex
 	processes map[string]*ManagedProcess
-	groups    map[string]GroupSpec
+	groups    map[string]InstanceGroup
 
 	// Shared resources
 	envManager       *env.Env
@@ -41,7 +41,7 @@ func NewManager() *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		processes:     make(map[string]*ManagedProcess),
-		groups:        make(map[string]GroupSpec),
+		groups:        make(map[string]InstanceGroup),
 		envManager:    env.New(),
 		metricsCtx:    ctx,
 		metricsCancel: cancel,
@@ -481,19 +481,20 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 	return nil
 }
 
-// GroupSpec defines a group of processes to be managed together
-type GroupSpec struct {
+// InstanceGroup defines a group of processes to be managed together
+// where each member can have multiple instances (e.g., web-1, web-2, web-3)
+type InstanceGroup struct {
 	Name    string
 	Members []process.Spec
 }
 
-// SetGroups configures the group definitions
-func (m *Manager) SetGroups(groups []GroupSpec) {
+// SetInstanceGroups configures the instance group definitions
+func (m *Manager) SetInstanceGroups(groups []InstanceGroup) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Clear existing groups
-	m.groups = make(map[string]GroupSpec)
+	m.groups = make(map[string]InstanceGroup)
 
 	// Set new groups
 	for _, group := range groups {
@@ -501,21 +502,21 @@ func (m *Manager) SetGroups(groups []GroupSpec) {
 	}
 }
 
-// GetGroup returns the group specification by name
-func (m *Manager) GetGroup(name string) (GroupSpec, error) {
+// GetInstanceGroup returns the instance group specification by name
+func (m *Manager) GetInstanceGroup(name string) (InstanceGroup, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	group, exists := m.groups[name]
 	if !exists {
-		return GroupSpec{}, fmt.Errorf("group %s not found", name)
+		return InstanceGroup{}, fmt.Errorf("instance group %s not found", name)
 	}
 	return group, nil
 }
 
-// GroupStatus returns status of all processes in a group
-func (m *Manager) GroupStatus(groupName string) (map[string][]process.Status, error) {
-	group, err := m.GetGroup(groupName)
+// InstanceGroupStatus returns status of all processes in an instance group
+func (m *Manager) InstanceGroupStatus(groupName string) (map[string][]process.Status, error) {
+	group, err := m.GetInstanceGroup(groupName)
 	if err != nil {
 		return nil, err
 	}
@@ -536,9 +537,9 @@ func (m *Manager) GroupStatus(groupName string) (map[string][]process.Status, er
 	return result, nil
 }
 
-// GroupStart starts all processes in a group
-func (m *Manager) GroupStart(groupName string) error {
-	group, err := m.GetGroup(groupName)
+// InstanceGroupStart starts all processes in an instance group
+func (m *Manager) InstanceGroupStart(groupName string) error {
+	group, err := m.GetInstanceGroup(groupName)
 	if err != nil {
 		return err
 	}
@@ -563,9 +564,9 @@ func (m *Manager) GroupStart(groupName string) error {
 	return firstError
 }
 
-// GroupStop stops all processes in a group
-func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
-	group, err := m.GetGroup(groupName)
+// InstanceGroupStop stops all processes in an instance group
+func (m *Manager) InstanceGroupStop(groupName string, wait time.Duration) error {
+	group, err := m.GetInstanceGroup(groupName)
 	if err != nil {
 		return err
 	}

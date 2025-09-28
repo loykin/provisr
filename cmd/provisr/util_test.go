@@ -13,7 +13,7 @@ import (
 )
 
 func TestFindGroupByName(t *testing.T) {
-	groups := []provisr.GroupSpec{{Name: "a"}, {Name: "b"}}
+	groups := []provisr.ServiceGroup{{Name: "a"}, {Name: "b"}}
 	if g := findGroupByName(groups, "b"); g == nil || g.Name != "b" {
 		t.Fatalf("expected to find b, got %#v", g)
 	}

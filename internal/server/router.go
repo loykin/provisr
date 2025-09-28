@@ -535,7 +535,7 @@ func (r *Router) handleGroupStatus(c *gin.Context) {
 		return
 	}
 
-	groupStatus, err := r.mgr.GroupStatus(groupName)
+	groupStatus, err := r.mgr.InstanceGroupStatus(groupName)
 	if err != nil {
 		writeJSON(c, http.StatusNotFound, errorResp{Error: err.Error()})
 		return
@@ -557,7 +557,7 @@ func (r *Router) handleGroupStart(c *gin.Context) {
 		return
 	}
 
-	err := r.mgr.GroupStart(groupName)
+	err := r.mgr.InstanceGroupStart(groupName)
 	if err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
@@ -588,7 +588,7 @@ func (r *Router) handleGroupStop(c *gin.Context) {
 		}
 	}
 
-	err := r.mgr.GroupStop(groupName, wait)
+	err := r.mgr.InstanceGroupStop(groupName, wait)
 	if err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return

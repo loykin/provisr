@@ -559,14 +559,14 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	mgr.SetGlobalEnv(cfg.GlobalEnv)
 
 	// Convert and set group definitions
-	managerGroups := make([]provisr.ManagerGroupSpec, len(cfg.GroupSpecs))
+	managerGroups := make([]provisr.ManagerInstanceGroup, len(cfg.GroupSpecs))
 	for i, group := range cfg.GroupSpecs {
-		managerGroups[i] = provisr.ManagerGroupSpec{
+		managerGroups[i] = provisr.ManagerInstanceGroup{
 			Name:    group.Name,
 			Members: group.Members,
 		}
 	}
-	mgr.SetGroups(managerGroups)
+	mgr.SetInstanceGroups(managerGroups)
 
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {

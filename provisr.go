@@ -28,7 +28,7 @@ type Status = process.Status
 
 type Manager struct{ inner *manager.Manager }
 
-type ManagerGroupSpec = manager.GroupSpec
+type ManagerInstanceGroup = manager.InstanceGroup
 
 type HistoryConfig = cfg.HistoryConfig
 
@@ -42,12 +42,12 @@ type ProcessMetricsConfig = metrics.ProcessMetricsConfig
 
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
-func (m *Manager) SetGlobalEnv(kvs []string)           { m.inner.SetGlobalEnv(kvs) }
-func (m *Manager) SetGroups(groups []ManagerGroupSpec) { m.inner.SetGroups(groups) }
-func (m *Manager) Register(s Spec) error               { return m.inner.Register(s) }
-func (m *Manager) RegisterN(s Spec) error              { return m.inner.RegisterN(s) }
-func (m *Manager) Start(name string) error             { return m.inner.Start(name) }
-func (m *Manager) ApplyConfig(specs []Spec) error      { return m.inner.ApplyConfig(specs) }
+func (m *Manager) SetGlobalEnv(kvs []string)                       { m.inner.SetGlobalEnv(kvs) }
+func (m *Manager) SetInstanceGroups(groups []ManagerInstanceGroup) { m.inner.SetInstanceGroups(groups) }
+func (m *Manager) Register(s Spec) error                           { return m.inner.Register(s) }
+func (m *Manager) RegisterN(s Spec) error                          { return m.inner.RegisterN(s) }
+func (m *Manager) Start(name string) error                         { return m.inner.Start(name) }
+func (m *Manager) ApplyConfig(specs []Spec) error                  { return m.inner.ApplyConfig(specs) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
 }
@@ -60,14 +60,14 @@ func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
 }
 func (m *Manager) Status(name string) (Status, error)      { return m.inner.Status(name) }
 func (m *Manager) StatusAll(base string) ([]Status, error) { return m.inner.StatusAll(base) }
-func (m *Manager) GroupStatus(groupName string) (map[string][]Status, error) {
-	return m.inner.GroupStatus(groupName)
+func (m *Manager) InstanceGroupStatus(groupName string) (map[string][]Status, error) {
+	return m.inner.InstanceGroupStatus(groupName)
 }
-func (m *Manager) GroupStart(groupName string) error {
-	return m.inner.GroupStart(groupName)
+func (m *Manager) InstanceGroupStart(groupName string) error {
+	return m.inner.InstanceGroupStart(groupName)
 }
-func (m *Manager) GroupStop(groupName string, wait time.Duration) error {
-	return m.inner.GroupStop(groupName, wait)
+func (m *Manager) InstanceGroupStop(groupName string, wait time.Duration) error {
+	return m.inner.InstanceGroupStop(groupName, wait)
 }
 func (m *Manager) Count(base string) (int, error) { return m.inner.Count(base) }
 
@@ -91,13 +91,13 @@ func (m *Manager) SetProcessMetricsCollector(collector *metrics.ProcessMetricsCo
 // Group facade
 type Group struct{ inner *pg.Group }
 
-type GroupSpec = pg.GroupSpec
+type ServiceGroup = pg.ServiceGroup
 
 func NewGroup(m *Manager) *Group { return &Group{inner: pg.New(m.inner)} }
 
-func (g *Group) Start(gs GroupSpec) error                    { return g.inner.Start(gs) }
-func (g *Group) Stop(gs GroupSpec, wait time.Duration) error { return g.inner.Stop(gs, wait) }
-func (g *Group) Status(gs GroupSpec) (map[string][]Status, error) {
+func (g *Group) Start(gs ServiceGroup) error                    { return g.inner.Start(gs) }
+func (g *Group) Stop(gs ServiceGroup, wait time.Duration) error { return g.inner.Stop(gs, wait) }
+func (g *Group) Status(gs ServiceGroup) (map[string][]Status, error) {
 	m, err := g.inner.Status(gs)
 	return m, err
 }

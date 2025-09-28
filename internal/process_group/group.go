@@ -8,10 +8,10 @@ import (
 	"github.com/loykin/provisr/internal/process"
 )
 
-// GroupSpec defines a group of processes to be managed together.
+// ServiceGroup defines a group of different services to be managed together.
 // Each member is a full process.Spec; Instances is honored per member.
 // Name is a logical group identifier used for diagnostics only.
-type GroupSpec struct {
+type ServiceGroup struct {
 	Name    string
 	Members []process.Spec
 }
@@ -27,7 +27,7 @@ func New(mgr *manager.Manager) *Group { return &Group{mgr: mgr} }
 
 // Start starts all members. If any start fails, it stops any members that
 // have already been started in this call and returns the error.
-func (g *Group) Start(gs GroupSpec) error {
+func (g *Group) Start(gs ServiceGroup) error {
 	started := make([]process.Spec, 0, len(gs.Members))
 	for _, m := range gs.Members {
 		var err error
@@ -50,7 +50,7 @@ func (g *Group) Start(gs GroupSpec) error {
 
 // Stop stops all members regardless of their state, best-effort.
 // Returns the first error encountered.
-func (g *Group) Stop(gs GroupSpec, wait time.Duration) error {
+func (g *Group) Stop(gs ServiceGroup, wait time.Duration) error {
 	var firstErr error
 	for _, m := range gs.Members {
 		if err := g.mgr.StopAll(m.Name, wait); err != nil && firstErr == nil {
@@ -61,7 +61,7 @@ func (g *Group) Stop(gs GroupSpec, wait time.Duration) error {
 }
 
 // Status returns a map of member base name to its instance statuses.
-func (g *Group) Status(gs GroupSpec) (map[string][]process.Status, error) {
+func (g *Group) Status(gs ServiceGroup) (map[string][]process.Status, error) {
 	res := make(map[string][]process.Status, len(gs.Members))
 	for _, m := range gs.Members {
 		sts, err := g.mgr.StatusAll(m.Name)
