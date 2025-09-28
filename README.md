@@ -20,6 +20,7 @@ A minimal supervisord-like process manager written in Go.
 - **Process groups**: Start/stop/status together
 - **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully stop/remove programs no longer in config
 - **HTTP API**: Embeddable Gin-based API with configurable basePath and JSON I/O
+- **Metrics**: Prometheus metrics for processes, jobs, and cronjobs with unified collection
 - **Wildcard support**: For querying/stopping processes via REST (e.g., demo-*, *worker*)
 - **Framework integration**: Easy embedding into existing Gin and Echo apps (see examples)
 
@@ -39,8 +40,6 @@ provisr unregister --name web
 # Using a config file
 provisr start --config config/config.toml
 provisr cron --config config/config.toml
-provisr job create --spec job.toml
-provisr job status --name my-job
 provisr group-start --config config/config.toml --group backend
 
 # Start daemon
@@ -312,47 +311,57 @@ Use the programmatic API for dynamic job management:
 package main
 
 import (
-    "github.com/loykin/provisr/internal/job"
-    "github.com/loykin/provisr/internal/cronjob"
-    "github.com/loykin/provisr/internal/manager"
+    "fmt"
+    "time"
+    "github.com/loykin/provisr"
 )
 
 func main() {
     // Create managers
-    mgr := manager.NewManager()
-    jobMgr := job.NewManager(mgr)
-    cronMgr := cronjob.NewManager(mgr)
+    mgr := provisr.New()
+    jobMgr := provisr.NewJobManager(mgr)
+    scheduler := provisr.NewCronScheduler(mgr)
 
     // Create a job
-    jobSpec := job.JobSpec{
+    jobSpec := provisr.JobSpec{
         Name: "my-job",
         Command: "echo 'Hello from job!'",
         Parallelism: int32Ptr(2),
         Completions: int32Ptr(2),
     }
 
-    j, err := jobMgr.CreateJob(jobSpec)
+    err := jobMgr.CreateJob(jobSpec)
     if err != nil {
         panic(err)
     }
 
-    // Wait for completion
-    <-j.Done()
-    status := j.GetStatus()
-    fmt.Printf("Job completed: %s\n", status.Phase)
+    // Monitor job status
+    for {
+        status, exists := jobMgr.GetJob("my-job")
+        if !exists {
+            break
+        }
+        if status.Phase == "Succeeded" || status.Phase == "Failed" {
+            fmt.Printf("Job completed: %s\n", status.Phase)
+            break
+        }
+        time.Sleep(1 * time.Second)
+    }
 
     // Create a cronjob
-    cronSpec := cronjob.CronJobSpec{
+    cronSpec := provisr.CronJob{
         Name: "my-cronjob",
         Schedule: "@every 10s",
         JobTemplate: jobSpec,
     }
 
-    cj, err := cronMgr.CreateCronJob(cronSpec)
+    err = scheduler.Add(cronSpec)
     if err != nil {
         panic(err)
     }
 }
+
+func int32Ptr(i int32) *int32 { return &i }
 ```
 
 See the `examples/` directory for complete working examples of Jobs and CronJobs.
@@ -513,6 +522,39 @@ commonGroup.Use(loggingMiddleware())
 endpoints.RegisterAll(commonGroup)
 ```
 
+## Metrics
+
+provisr provides comprehensive Prometheus metrics for processes, jobs, and cronjobs:
+
+### Process Metrics
+- `provisr_process_starts_total` - Number of process starts
+- `provisr_process_restarts_total` - Number of auto restarts
+- `provisr_process_stops_total` - Number of stops
+- `provisr_process_running_instances` - Current running instances per process
+
+### Job Metrics
+- `provisr_job_total` - Total number of jobs started
+- `provisr_job_active` - Number of currently active jobs
+- `provisr_job_duration_seconds` - Job execution duration
+- `provisr_job_completions_total` - Job completion counts
+
+### CronJob Metrics
+- `provisr_cronjob_total` - Total cronjob executions
+- `provisr_cronjob_active` - Currently active cronjobs
+- `provisr_cronjob_duration_seconds` - CronJob execution duration
+- `provisr_cronjob_last_schedule_time` - Last scheduled time
+- `provisr_cronjob_next_schedule_time` - Next scheduled time
+
+```go
+// Enable metrics
+provisr.RegisterMetricsDefault()
+
+// Serve metrics on /metrics endpoint
+go provisr.ServeMetrics(":9090")
+```
+
+See `examples/embedded_metrics` and `examples/embedded_metrics_add` for complete examples.
+
 ## More examples
 
 - examples/embedded — minimal embedding
@@ -526,6 +568,10 @@ endpoints.RegisterAll(commonGroup)
 - examples/embedded_config_file — config-driven
 - examples/embedded_manager — manager-driven config apply (uses Manager.ApplyConfig)
 - examples/embedded_config_structure — struct-driven configuration
+- examples/job_basic — config-based job execution example
+- examples/job_advanced — programmatic job management with monitoring
+- examples/cronjob_basic — scheduled job execution
+- examples/job_config — job and cronjob configuration examples
 - examples/programs_directory — directory-based programs loading with groups and priorities
 - examples/programs_detach — demonstrate detached worker managed via programs config
 
