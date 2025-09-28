@@ -28,9 +28,8 @@ type CronJob struct {
 	isScheduled bool
 
 	// Job management
-	activeJobs   map[string]*job.Job
-	jobHistory   []*JobHistoryEntry
-	nextSchedule time.Time
+	activeJobs map[string]*job.Job
+	jobHistory []*JobHistoryEntry
 }
 
 // JobHistoryEntry represents a completed job in the history
