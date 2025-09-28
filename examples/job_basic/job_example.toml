@@ -1,0 +1,13 @@
+# Basic job example configuration
+[[processes]]
+type = "job"
+
+[processes.spec]
+name = "hello-job"
+command = "echo 'Hello from job!'; sleep 2"
+parallelism = 2                    # Run 2 instances in parallel
+completions = 2                    # Need 2 successful completions
+backoff_limit = 3                  # Allow up to 3 retries
+restart_policy = "Never"
+active_deadline_seconds = 30       # 30 second timeout
+ttl_seconds_after_finished = 60    # Cleanup after 1 minute

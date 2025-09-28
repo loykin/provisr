@@ -1,0 +1,26 @@
+# Example cronjob configuration
+type = "cronjob"
+
+[spec]
+name = "daily-backup"
+schedule = "0 2 * * *"                    # Run at 2 AM every day
+concurrency_policy = "Forbid"             # Don't allow concurrent executions
+successful_jobs_history_limit = 3         # Keep 3 successful job records
+failed_jobs_history_limit = 1             # Keep 1 failed job record
+starting_deadline_seconds = 300           # Must start within 5 minutes
+time_zone = "UTC"                         # Timezone for schedule
+
+# Job template - defines the job that gets created
+[spec.job_template]
+name = "backup-job"
+command = "bash /scripts/backup.sh"
+work_dir = "/app"
+env = ["BACKUP_TARGET=/data", "RETENTION_DAYS=7"]
+
+# Job template settings
+parallelism = 1                           # Only one backup process
+completions = 1                           # Only need one success
+backoff_limit = 2                         # Allow 2 retries
+restart_policy = "OnFailure"              # Restart on failure
+active_deadline_seconds = 7200            # 2 hour timeout for backup
+ttl_seconds_after_finished = 86400        # Keep job record for 24 hours

@@ -1,0 +1,18 @@
+# Basic cronjob example configuration
+[[processes]]
+type = "cronjob"
+
+[processes.spec]
+name = "hello-cronjob"
+schedule = "@every 5s"             # Run every 5 seconds
+concurrency_policy = "Forbid"      # Don't allow concurrent executions
+successful_jobs_history_limit = 3  # Keep 3 successful job records
+failed_jobs_history_limit = 1      # Keep 1 failed job record
+
+# Job template - defines the job that gets created
+[processes.spec.job_template]
+name = "hello-job"
+command = "echo 'Hello from cronjob at $(date)!'"
+restart_policy = "Never"
+active_deadline_seconds = 10       # 10 second timeout
+ttl_seconds_after_finished = 30    # Cleanup after 30 seconds

@@ -12,7 +12,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
-	cronpkg "github.com/loykin/provisr/internal/cron"
+	cronpkg "github.com/loykin/provisr/internal/cronjob"
 	"github.com/loykin/provisr/internal/detector"
 	"github.com/loykin/provisr/internal/process"
 	"github.com/loykin/provisr/internal/process_group"
@@ -37,7 +37,7 @@ type Config struct {
 	GlobalEnv  []string
 	Specs      []process.Spec
 	GroupSpecs []process_group.GroupSpec
-	CronJobs   []*cronpkg.Job
+	CronJobs   []cronpkg.CronJobSpec
 
 	configPath string
 }
@@ -157,7 +157,7 @@ func decodeTo[T any](m map[string]any) (T, error) {
 
 // decodeProcessEntry decodes and validates a ProcessConfig entry (process or cronjob).
 // ctx is used to improve error messages with the source (e.g., filename or "inline processes").
-func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.Job, error) {
+func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.CronJobSpec, error) {
 	var zero process.Spec
 	typ := strings.ToLower(strings.TrimSpace(pc.Type))
 	switch typ {
@@ -174,23 +174,24 @@ func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.Jo
 		}
 		return sp, nil, nil
 	case "cron", "cronjob":
-		jb, err := decodeTo[cronpkg.Job](pc.Spec)
+		jb, err := decodeTo[cronpkg.CronJobSpec](pc.Spec)
 		if err != nil {
 			return zero, nil, fmt.Errorf("decode cronjob spec in %s: %w", ctx, err)
 		}
 		if strings.TrimSpace(jb.Name) == "" {
-			jb.Name = strings.TrimSpace(jb.Spec.Name)
+			jb.Name = strings.TrimSpace(jb.JobTemplate.Name)
 		}
 		if strings.TrimSpace(jb.Name) == "" {
 			return zero, nil, fmt.Errorf("%s: cronjob requires name", ctx)
 		}
-		if strings.TrimSpace(jb.Spec.Command) == "" {
+		if strings.TrimSpace(jb.JobTemplate.Command) == "" {
 			return zero, nil, fmt.Errorf("%s: cronjob %q requires command", ctx, jb.Name)
 		}
 		if strings.TrimSpace(jb.Schedule) == "" {
 			return zero, nil, fmt.Errorf("%s: cronjob %q requires schedule", ctx, jb.Name)
 		}
-		return jb.Spec, &jb, nil
+		processSpec := jb.JobTemplate.ToProcessSpec()
+		return *processSpec, &jb, nil
 	default:
 		return zero, nil, fmt.Errorf("%s: unknown process type %q (allowed: process, cronjob)", ctx, pc.Type)
 	}
@@ -205,7 +206,7 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	// Initialize aggregated fields
 	config.Specs = make([]process.Spec, 0)
-	config.CronJobs = []*cronpkg.Job{}
+	config.CronJobs = []cronpkg.CronJobSpec{}
 
 	// 1) Inline processes: discriminated union decoding (refactored)
 	for _, pc := range config.Processes {
@@ -219,10 +220,10 @@ func LoadConfig(configPath string) (*Config, error) {
 		}
 		config.Specs = append(config.Specs, spec)
 		if job != nil {
-			if err := convertDetectorConfigs(&job.Spec); err != nil {
+			if err := convertDetectorConfigs(job.JobTemplate.ToProcessSpec()); err != nil {
 				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", job.Name, err)
 			}
-			config.CronJobs = append(config.CronJobs, job)
+			config.CronJobs = append(config.CronJobs, *job)
 		}
 	}
 
@@ -249,7 +250,8 @@ func LoadConfig(configPath string) (*Config, error) {
 			}
 		}
 		for _, j := range jobs {
-			if err := convertDetectorConfigs(&j.Spec); err != nil {
+			jobSpec := j.JobTemplate.ToProcessSpec()
+			if err := convertDetectorConfigs(jobSpec); err != nil {
 				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", j.Name, err)
 			}
 		}
@@ -310,7 +312,7 @@ func parseConfigFile(configPath string, out interface{}) error {
 // loadProgramEntries loads program entries from the programs directory using the same
 // discriminated-union format as inline [[processes]] blocks: {type, spec}.
 // Supported file extensions: toml, yaml/yml, json. No legacy plain process.Spec files supported.
-func loadProgramEntries(programsDir string) ([]process.Spec, []*cronpkg.Job, error) {
+func loadProgramEntries(programsDir string) ([]process.Spec, []cronpkg.CronJobSpec, error) {
 	infos, err := os.ReadDir(programsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -327,7 +329,7 @@ func loadProgramEntries(programsDir string) ([]process.Spec, []*cronpkg.Job, err
 	}
 
 	var specs []process.Spec
-	var jobs []*cronpkg.Job
+	var jobs []cronpkg.CronJobSpec
 	for _, de := range infos {
 		if de.IsDir() {
 			continue
@@ -359,7 +361,7 @@ func loadProgramEntries(programsDir string) ([]process.Spec, []*cronpkg.Job, err
 		}
 		specs = append(specs, sp)
 		if jb != nil {
-			jobs = append(jobs, jb)
+			jobs = append(jobs, *jb)
 		}
 	}
 	return specs, jobs, nil
@@ -456,8 +458,15 @@ func applyGlobalLogDefaults(cfg *Config) error {
 	for i := range cfg.Specs {
 		apply(&cfg.Specs[i])
 	}
-	for _, j := range cfg.CronJobs {
-		apply(&j.Spec)
+	for i := range cfg.CronJobs {
+		jobSpec := cfg.CronJobs[i].JobTemplate.ToProcessSpec()
+		apply(jobSpec)
+		// Update the JobTemplate with the modified process spec
+		// Note: We need to manually copy back the modified fields
+		cfg.CronJobs[i].JobTemplate.Name = jobSpec.Name
+		cfg.CronJobs[i].JobTemplate.Command = jobSpec.Command
+		cfg.CronJobs[i].JobTemplate.WorkDir = jobSpec.WorkDir
+		cfg.CronJobs[i].JobTemplate.Env = jobSpec.Env
 	}
 	return nil
 }

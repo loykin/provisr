@@ -311,11 +311,12 @@ func TestDecodeProcessEntry(t *testing.T) {
 				Type: "cronjob",
 				Spec: map[string]any{
 					"name": "test-cron",
-					"spec": map[string]any{
+					"job_template": map[string]any{
 						"name":    "test-cron-spec",
 						"command": "echo hello",
 					},
-					"schedule": "@every 1m",
+					"schedule":           "@every 1m",
+					"concurrency_policy": "Forbid",
 				},
 			},
 			ctx:        "test context",

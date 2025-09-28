@@ -1,0 +1,19 @@
+# Example job configuration
+type = "job"
+
+[spec]
+name = "data-processor"
+command = "python process_data.py --input /data/input --output /data/output"
+work_dir = "/app"
+env = ["PYTHONPATH=/app", "LOG_LEVEL=info"]
+
+# Job control settings
+parallelism = 3                    # Run 3 instances in parallel
+completions = 10                   # Need 10 successful completions
+backoff_limit = 5                  # Allow up to 5 retries
+completion_mode = "NonIndexed"     # Standard completion mode
+restart_policy = "OnFailure"       # Restart failed pods
+
+# Timeout and cleanup
+active_deadline_seconds = 3600     # Job timeout: 1 hour
+ttl_seconds_after_finished = 300   # Auto-cleanup after 5 minutes

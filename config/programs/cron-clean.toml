@@ -3,13 +3,9 @@ type = "cronjob"
 [spec]
 name = "cron-clean"
 schedule = "@every 10s"
-singleton = true
+concurrency_policy = "Forbid"
 
-[spec.spec]
+[spec.job_template]
 name = "cron-clean"
 # Demonstrate reading environment variables from config/config.toml (GLOBAL_NAME, SHARED_PORT, CHAIN)
 command = "sh -c 'echo [$(date)] cleaning from cron: GLOBAL_NAME=$GLOBAL_NAME SHARED_PORT=$SHARED_PORT CHAIN=$CHAIN'"
-
-[spec.log]
-stdout = "./cron-clean.stdout.log"
-stderr = "./cron-clean.stderr.log"
