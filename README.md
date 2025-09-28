@@ -18,7 +18,8 @@ A minimal supervisord-like process manager written in Go.
 - **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism, completions, and retry logic
 - **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks with flexible scheduling
 - **Process groups**: Start/stop/status together
-- **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully stop/remove programs no longer in config
+- **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully
+  stop/remove programs no longer in config
 - **HTTP API**: Embeddable Gin-based API with configurable basePath and JSON I/O
 - **Metrics**: Prometheus metrics for processes, jobs, and cronjobs with unified collection
 - **Wildcard support**: For querying/stopping processes via REST (e.g., demo-*, *worker*)
@@ -27,23 +28,16 @@ A minimal supervisord-like process manager written in Go.
 ## CLI quickstart
 
 ```shell
-# Process management
-provisr start --name demo --cmd "sleep 10"
-provisr status --name demo
-provisr stop --name demo
+# Quick process management workflow
+provisr register --name demo --command "sleep 10"  # Register process
+provisr start --name demo                          # Start process
+provisr status --name demo                         # Check status
+provisr stop --name demo                           # Stop process
 
-# Process registration (adds to programs directory)
-provisr register --name web --command "python app.py" --work-dir /app --auto-start
-provisr register-file --file ./my-process.json
-provisr unregister --name web
-
-# Using a config file
-provisr start --config config/config.toml
-provisr cron --config config/config.toml
-provisr group-start --config config/config.toml --group backend
-
-# Start daemon
-provisr serve --config config/config.toml
+# Config-driven workflow
+provisr serve --config config/config.toml          # Start daemon with config
+provisr cron --config config/config.toml           # Verify cron jobs
+provisr group-start --group backend                # Start process group
 ```
 
 ## Process Registration Commands
@@ -51,6 +45,7 @@ provisr serve --config config/config.toml
 Provisr includes commands to manage process definitions in the programs directory:
 
 ### register
+
 Creates a new process definition file in the programs directory:
 
 ```shell
@@ -59,6 +54,7 @@ provisr register --name api --command "./api-server" --log-dir /var/log/api
 ```
 
 ### register-file
+
 Registers an existing JSON process definition file:
 
 ```shell
@@ -66,6 +62,7 @@ provisr register-file --file ./my-process.json
 ```
 
 JSON format example:
+
 ```json
 {
   "name": "web-server",
@@ -81,6 +78,7 @@ JSON format example:
 ```
 
 ### unregister
+
 Removes a process definition from the programs directory:
 
 ```shell
@@ -147,8 +145,10 @@ provisr serve --config config/config.toml
 Notes:
 
 - The server requires a config file and reads the [server] section from it.
-- At startup, the manager applies the config once: it recovers processes from PID files (when configured), starts missing ones, and gracefully stops/removes programs not present in the config.
-- Daemonization is supported: use `--daemonize`. The daemon PID file path is configured via `[server].pidfile` in the config. For logs, use `--logfile` or set `[server].logfile` in the config.
+- At startup, the manager applies the config once: it recovers processes from PID files (when configured), starts
+  missing ones, and gracefully stops/removes programs not present in the config.
+- Daemonization is supported: use `--daemonize`. The daemon PID file path is configured via `[server].pidfile` in the
+  config. For logs, use `--logfile` or set `[server].logfile` in the config.
 
 Example TOML snippet (also present in config/config.toml):
 
@@ -250,19 +250,19 @@ Jobs are used for one-time task execution with support for:
 
 #### Job Configuration Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Job name (required) |
-| `command` | string | Command to execute (required) |
-| `work_dir` | string | Working directory |
-| `env` | []string | Environment variables |
-| `parallelism` | int32 | Number of parallel instances (default: 1) |
-| `completions` | int32 | Required successful completions (default: 1) |
-| `backoff_limit` | int32 | Maximum retry attempts (default: 6) |
-| `completion_mode` | string | "NonIndexed" or "Indexed" (default: "NonIndexed") |
-| `restart_policy` | string | "Never" or "OnFailure" (default: "Never") |
-| `active_deadline_seconds` | int64 | Job timeout in seconds |
-| `ttl_seconds_after_finished` | int32 | Auto-cleanup delay |
+| Field                        | Type     | Description                                       |
+|------------------------------|----------|---------------------------------------------------|
+| `name`                       | string   | Job name (required)                               |
+| `command`                    | string   | Command to execute (required)                     |
+| `work_dir`                   | string   | Working directory                                 |
+| `env`                        | []string | Environment variables                             |
+| `parallelism`                | int32    | Number of parallel instances (default: 1)         |
+| `completions`                | int32    | Required successful completions (default: 1)      |
+| `backoff_limit`              | int32    | Maximum retry attempts (default: 6)               |
+| `completion_mode`            | string   | "NonIndexed" or "Indexed" (default: "NonIndexed") |
+| `restart_policy`             | string   | "Never" or "OnFailure" (default: "Never")         |
+| `active_deadline_seconds`    | int64    | Job timeout in seconds                            |
+| `ttl_seconds_after_finished` | int32    | Auto-cleanup delay                                |
 
 ### CronJobs
 
@@ -276,17 +276,17 @@ CronJobs schedule Jobs to run periodically with support for:
 
 #### CronJob Configuration Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | CronJob name (required) |
-| `schedule` | string | Cron expression or @every (required) |
-| `job_template` | JobSpec | Template for created jobs (required) |
-| `concurrency_policy` | string | "Allow", "Forbid", or "Replace" (default: "Allow") |
-| `suspend` | bool | Pause scheduling (default: false) |
-| `successful_jobs_history_limit` | int32 | Keep successful jobs (default: 3) |
-| `failed_jobs_history_limit` | int32 | Keep failed jobs (default: 1) |
-| `starting_deadline_seconds` | int64 | Start deadline for missed schedules |
-| `time_zone` | string | Timezone for schedule (default: UTC) |
+| Field                           | Type    | Description                                        |
+|---------------------------------|---------|----------------------------------------------------|
+| `name`                          | string  | CronJob name (required)                            |
+| `schedule`                      | string  | Cron expression or @every (required)               |
+| `job_template`                  | JobSpec | Template for created jobs (required)               |
+| `concurrency_policy`            | string  | "Allow", "Forbid", or "Replace" (default: "Allow") |
+| `suspend`                       | bool    | Pause scheduling (default: false)                  |
+| `successful_jobs_history_limit` | int32   | Keep successful jobs (default: 3)                  |
+| `failed_jobs_history_limit`     | int32   | Keep failed jobs (default: 1)                      |
+| `starting_deadline_seconds`     | int64   | Start deadline for missed schedules                |
+| `time_zone`                     | string  | Timezone for schedule (default: UTC)               |
 
 #### Schedule Examples
 
@@ -311,54 +311,54 @@ Use the programmatic API for dynamic job management:
 package main
 
 import (
-    "fmt"
-    "time"
-    "github.com/loykin/provisr"
+	"fmt"
+	"time"
+	"github.com/loykin/provisr"
 )
 
 func main() {
-    // Create managers
-    mgr := provisr.New()
-    jobMgr := provisr.NewJobManager(mgr)
-    scheduler := provisr.NewCronScheduler(mgr)
+	// Create managers
+	mgr := provisr.New()
+	jobMgr := provisr.NewJobManager(mgr)
+	scheduler := provisr.NewCronScheduler(mgr)
 
-    // Create a job
-    jobSpec := provisr.JobSpec{
-        Name: "my-job",
-        Command: "echo 'Hello from job!'",
-        Parallelism: int32Ptr(2),
-        Completions: int32Ptr(2),
-    }
+	// Create a job
+	jobSpec := provisr.JobSpec{
+		Name:        "my-job",
+		Command:     "echo 'Hello from job!'",
+		Parallelism: int32Ptr(2),
+		Completions: int32Ptr(2),
+	}
 
-    err := jobMgr.CreateJob(jobSpec)
-    if err != nil {
-        panic(err)
-    }
+	err := jobMgr.CreateJob(jobSpec)
+	if err != nil {
+		panic(err)
+	}
 
-    // Monitor job status
-    for {
-        status, exists := jobMgr.GetJob("my-job")
-        if !exists {
-            break
-        }
-        if status.Phase == "Succeeded" || status.Phase == "Failed" {
-            fmt.Printf("Job completed: %s\n", status.Phase)
-            break
-        }
-        time.Sleep(1 * time.Second)
-    }
+	// Monitor job status
+	for {
+		status, exists := jobMgr.GetJob("my-job")
+		if !exists {
+			break
+		}
+		if status.Phase == "Succeeded" || status.Phase == "Failed" {
+			fmt.Printf("Job completed: %s\n", status.Phase)
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
 
-    // Create a cronjob
-    cronSpec := provisr.CronJob{
-        Name: "my-cronjob",
-        Schedule: "@every 10s",
-        JobTemplate: jobSpec,
-    }
+	// Create a cronjob
+	cronSpec := provisr.CronJob{
+		Name:        "my-cronjob",
+		Schedule:    "@every 10s",
+		JobTemplate: jobSpec,
+	}
 
-    err = scheduler.Add(cronSpec)
-    if err != nil {
-        panic(err)
-    }
+	err = scheduler.Add(cronSpec)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func int32Ptr(i int32) *int32 { return &i }
@@ -429,13 +429,13 @@ c := client.New(config)
 
 // Custom TLS client with CA certificate
 config := client.Config{
-    BaseURL: "https://provisr.example.com:8443/api",
-    TLS: &client.TLSClientConfig{
-        Enabled:    true,
-        CACert:     "/path/to/ca.crt",
-        ServerName: "provisr.example.com",
-        SkipVerify: false,
-    },
+BaseURL: "https://provisr.example.com:8443/api",
+TLS: &client.TLSClientConfig{
+Enabled:    true,
+CACert:     "/path/to/ca.crt",
+ServerName: "provisr.example.com",
+SkipVerify: false,
+},
 }
 c := client.New(config)
 ```
@@ -484,6 +484,7 @@ For advanced use cases where you need different middleware for different endpoin
 - Echo individual example: examples/embedded_http_echo_individual
 
 These examples demonstrate:
+
 - Registering each API endpoint separately
 - Applying custom middleware to specific endpoints
 - Authentication only on protected endpoints
@@ -527,18 +528,21 @@ endpoints.RegisterAll(commonGroup)
 provisr provides comprehensive Prometheus metrics for processes, jobs, and cronjobs:
 
 ### Process Metrics
+
 - `provisr_process_starts_total` - Number of process starts
 - `provisr_process_restarts_total` - Number of auto restarts
 - `provisr_process_stops_total` - Number of stops
 - `provisr_process_running_instances` - Current running instances per process
 
 ### Job Metrics
+
 - `provisr_job_total` - Total number of jobs started
 - `provisr_job_active` - Number of currently active jobs
 - `provisr_job_duration_seconds` - Job execution duration
 - `provisr_job_completions_total` - Job completion counts
 
 ### CronJob Metrics
+
 - `provisr_cronjob_total` - Total cronjob executions
 - `provisr_cronjob_active` - Currently active cronjobs
 - `provisr_cronjob_duration_seconds` - CronJob execution duration
@@ -585,15 +589,19 @@ This project reads/writes a few files at well-defined locations. The defaults an
 
 - PID file (spec.pid_file)
     - If provided, the manager writes the child PID to this file immediately after a successful start.
-    - You can also configure a default directory for PID files via `pid_dir` in the main config. When set, any process spec without an explicit `pid_file` will default to `<pid_dir>/<name>.pid` (resolved relative to the config file if not absolute).
+    - You can also configure a default directory for PID files via `pid_dir` in the main config. When set, any process
+      spec without an explicit `pid_file` will default to `<pid_dir>/<name>.pid` (resolved relative to the config file
+      if not absolute).
     - Extended format for safety and recovery:
         1) First line: PID
         2) Second line: JSON-encoded Spec snapshot (optional; used to recover process details on restart)
         3) Third line: JSON-encoded meta with `{ "start_unix": <seconds> }` (optional; used to verify PID identity)
     - Older single-line and two-line formats remain supported for backward compatibility.
-    - The PIDFile detector validates that the PID refers to the same process by comparing the recorded start time with the current process start time, preventing PID reuse mistakes.
+    - The PIDFile detector validates that the PID refers to the same process by comparing the recorded start time with
+      the current process start time, preventing PID reuse mistakes.
     - The parent directory is created if missing (mode 0750).
-    - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid) when submitted via HTTP API; the CLI/config can use relative paths which are resolved against the config file directory.
+    - Must be an absolute, cleaned path (e.g., /var/run/provisr/demo.pid) when submitted via HTTP API; the CLI/config
+      can use relative paths which are resolved against the config file directory.
 
 - Logs (spec.log)
     - If log.stdoutPath or log.stderrPath are set, logs are written exactly to those files.
@@ -622,12 +630,17 @@ This project reads/writes a few files at well-defined locations. The defaults an
 
 - The HTTP API performs input validation for process specs to mitigate uncontrolled path usage (CodeQL: "Uncontrolled
   data used in path expression").
-- PID reuse protection: PID file meta includes the process start time and is validated against the live process using platform-native methods (procfs on Linux, sysctl on Darwin/BSD via gopsutil, WinAPI on Windows). No external `ps` calls are used.
+- PID reuse protection: PID file meta includes the process start time and is validated against the live process using
+  platform-native methods (procfs on Linux, sysctl on Darwin/BSD via gopsutil, WinAPI on Windows). No external `ps`
+  calls are used.
 - Even with validation, run the server with least privileges and restrict log directories and pid file locations to
   trusted paths.
 
 ## Notes and breaking changes
 
-- Persistence store removed: internal/store has been deleted. The manager now operates purely via in-memory state and PID files for recovery.
-- Serve flags simplified: `provisr serve` requires a config file. Daemonization uses `--daemonize`; the daemon PID file is configured via `[server].pidfile`. API listen/base are configured via the TOML `[server]` section.
-- Config-driven reconciliation: at startup, processes are recovered from PID files when available; processes not present in the config are gracefully shut down and cleaned up.
+- Persistence store removed: internal/store has been deleted. The manager now operates purely via in-memory state and
+  PID files for recovery.
+- Serve flags simplified: `provisr serve` requires a config file. Daemonization uses `--daemonize`; the daemon PID file
+  is configured via `[server].pidfile`. API listen/base are configured via the TOML `[server]` section.
+- Config-driven reconciliation: at startup, processes are recovered from PID files when available; processes not present
+  in the config are gracefully shut down and cleaned up.
