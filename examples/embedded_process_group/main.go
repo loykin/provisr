@@ -14,7 +14,7 @@ func main() {
 	mgr := provisr.New()
 	g := provisr.NewGroup(mgr)
 
-	gs := provisr.GroupSpec{
+	gs := provisr.ServiceGroup{
 		Name: "demo-group",
 		Members: []provisr.Spec{
 			{Name: "web", Command: "sh -c 'echo web start; sleep 2'"},

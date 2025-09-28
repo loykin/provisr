@@ -36,7 +36,7 @@ type Config struct {
 	// Computed/aggregated fields
 	GlobalEnv  []string
 	Specs      []process.Spec
-	GroupSpecs []process_group.GroupSpec
+	GroupSpecs []process_group.ServiceGroup
 	CronJobs   []cronpkg.CronJobSpec
 
 	configPath string
@@ -471,13 +471,13 @@ func applyGlobalLogDefaults(cfg *Config) error {
 	return nil
 }
 
-func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_group.GroupSpec, error) {
+func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_group.ServiceGroup, error) {
 	specMap := make(map[string]process.Spec, len(specs))
 	for _, spec := range specs {
 		specMap[spec.Name] = spec
 	}
 
-	groups := make([]process_group.GroupSpec, 0, len(groupConfigs))
+	groups := make([]process_group.ServiceGroup, 0, len(groupConfigs))
 	for _, gc := range groupConfigs {
 		if gc.Name == "" {
 			return nil, fmt.Errorf("group requires name")
@@ -495,7 +495,7 @@ func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_gr
 			memberSpecs = append(memberSpecs, spec)
 		}
 
-		groups = append(groups, process_group.GroupSpec{
+		groups = append(groups, process_group.ServiceGroup{
 			Name:    gc.Name,
 			Members: memberSpecs,
 		})

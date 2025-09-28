@@ -12,7 +12,7 @@ import (
 func TestGroupStartStopBasic(t *testing.T) {
 	mgr := mgrpkg.NewManager()
 	g := New(mgr)
-	gs := GroupSpec{
+	gs := ServiceGroup{
 		Name: "grp1",
 		Members: []process.Spec{
 			{Name: "a", Command: "sleep 1"},
@@ -48,7 +48,7 @@ func TestGroupStartStopBasic(t *testing.T) {
 func TestGroupRollbackOnFailure(t *testing.T) {
 	mgr := mgrpkg.NewManager()
 	g := New(mgr)
-	gs := GroupSpec{
+	gs := ServiceGroup{
 		Name: "grp2",
 		Members: []process.Spec{
 			{Name: "ok", Command: "sleep 1"},
@@ -76,7 +76,7 @@ func TestGroupRollbackOnFailure(t *testing.T) {
 func TestGroupWithInstances(t *testing.T) {
 	mgr := mgrpkg.NewManager()
 	g := New(mgr)
-	gs := GroupSpec{
+	gs := ServiceGroup{
 		Name: "grp3",
 		Members: []process.Spec{
 			{Name: "batch", Command: "sleep 1", Instances: 3},

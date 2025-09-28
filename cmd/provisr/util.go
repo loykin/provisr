@@ -51,7 +51,7 @@ func statusesByBase(mgr *provisr.Manager, specs []provisr.Spec) map[string][]pro
 	return all
 }
 
-func findGroupByName(groups []provisr.GroupSpec, name string) *provisr.GroupSpec {
+func findGroupByName(groups []provisr.ServiceGroup, name string) *provisr.ServiceGroup {
 	for i := range groups {
 		if groups[i].Name == name {
 			return &groups[i]
