@@ -5,8 +5,9 @@ import (
 	"time"
 
 	cfg "github.com/loykin/provisr/internal/config"
-	"github.com/loykin/provisr/internal/cron"
+	"github.com/loykin/provisr/internal/cronjob"
 	"github.com/loykin/provisr/internal/history"
+	"github.com/loykin/provisr/internal/job"
 	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
@@ -101,17 +102,42 @@ func (g *Group) Status(gs GroupSpec) (map[string][]Status, error) {
 	return m, err
 }
 
-type CronScheduler struct{ inner *cron.Scheduler }
+// Job facade
+type JobManager struct{ inner *job.Manager }
 
-type CronJob = cron.Job // alias; use pointer when adding to avoid copying atomics
+type JobSpec = job.Spec        // alias
+type JobStatus = job.JobStatus // alias
 
-func NewCronScheduler(m *Manager) *CronScheduler {
-	return &CronScheduler{inner: cron.NewScheduler(m.inner)}
+func NewJobManager(m *Manager) *JobManager {
+	return &JobManager{inner: job.NewManager(m.inner)}
 }
 
-func (s *CronScheduler) Add(j *CronJob) error { return s.inner.Add(j) }
-func (s *CronScheduler) Start() error         { return s.inner.Start() }
-func (s *CronScheduler) Stop()                { s.inner.Stop() }
+func (jm *JobManager) CreateJob(spec JobSpec) error { _, err := jm.inner.CreateJob(spec); return err }
+func (jm *JobManager) GetJob(name string) (JobStatus, bool) {
+	j, exists := jm.inner.GetJob(name)
+	if !exists {
+		return JobStatus{}, false
+	}
+	return j.GetStatus(), true
+}
+func (jm *JobManager) ListJobs() map[string]JobStatus { return jm.inner.GetJobStatus() }
+func (jm *JobManager) UpdateJob(name string, spec JobSpec) error {
+	return jm.inner.UpdateJob(name, spec)
+}
+func (jm *JobManager) DeleteJob(name string) error { return jm.inner.DeleteJob(name) }
+func (jm *JobManager) Shutdown() error             { return jm.inner.Shutdown() }
+
+type CronScheduler struct{ inner *cronjob.Manager }
+
+type CronJob = cronjob.CronJobSpec // alias
+
+func NewCronScheduler(m *Manager) *CronScheduler {
+	return &CronScheduler{inner: cronjob.NewManager(m.inner)}
+}
+
+func (s *CronScheduler) Add(j CronJob) error { _, err := s.inner.CreateCronJob(j); return err }
+func (s *CronScheduler) Start() error        { return nil } // CronJobs start automatically when created
+func (s *CronScheduler) Stop() error         { return s.inner.Shutdown() }
 
 func LoadConfig(path string) (*cfg.Config, error) {
 	return cfg.LoadConfig(path)

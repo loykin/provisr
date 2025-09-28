@@ -15,7 +15,8 @@ A minimal supervisord-like process manager written in Go.
 - **Auto-restart**: Retry with interval, start duration window
 - **Robust liveness**: Via detectors (pidfile, pid, command) with PID reuse protection using process start time metadata
 - **Structured logging**: Unified slog-based structured logging with rotating file logs (lumberjack)
-- **Cron scheduler**: Cron-like scheduler (@every duration)
+- **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism, completions, and retry logic
+- **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks with flexible scheduling
 - **Process groups**: Start/stop/status together
 - **Config-driven reconciliation**: Recover running processes from PID files, start missing ones, and gracefully stop/remove programs no longer in config
 - **HTTP API**: Embeddable Gin-based API with configurable basePath and JSON I/O
@@ -38,6 +39,8 @@ provisr unregister --name web
 # Using a config file
 provisr start --config config/config.toml
 provisr cron --config config/config.toml
+provisr job create --spec job.toml
+provisr job status --name my-job
 provisr group-start --config config/config.toml --group backend
 
 # Start daemon
@@ -164,32 +167,62 @@ Once running, use the endpoints described below.
 Provisr uses a single, unified schema for process definitions in both the main config and the programs directory.
 
 - Discriminated union entries: each entry has `type` and `spec`.
-    - `type = "process"` | `"cronjob"`
-    - `spec` contains the fields for a process.Spec (and for cronjob: schedule, etc. live inside its spec structure).
+    - `type = "process"` | `"job"` | `"cronjob"`
+    - `spec` contains the fields for the respective type.
 - Inline definitions live under `[[processes]]` blocks in the main config.
 - The programs directory (set via `programs_directory = "programs"`) contains per-program files in the same schema.
   Supported extensions: .toml, .yaml/.yml, .json.
 - Legacy plain per-file process specs are not supported.
 
-Example inline (TOML):
+### Process Example
 
 ```toml
-[[processes]]
-type = "process"
-[processes.spec]
-name = "web"
-command = "sh -c 'while true; do echo web; sleep 2; done'"
-priority = 10
-```
-
-Example programs file (programs/web.toml) with the same schema:
-
-```toml
+# Long-running process
 type = "process"
 [spec]
 name = "web"
 command = "sh -c 'while true; do echo web; sleep 2; done'"
 priority = 10
+```
+
+### Job Example
+
+```toml
+# One-time job execution
+type = "job"
+[spec]
+name = "data-processor"
+command = "python process_data.py"
+parallelism = 3                    # Run 3 instances in parallel
+completions = 10                   # Need 10 successful completions
+backoff_limit = 5                  # Allow up to 5 retries
+completion_mode = "NonIndexed"     # Standard completion mode
+restart_policy = "OnFailure"       # Restart failed instances
+active_deadline_seconds = 3600     # Job timeout: 1 hour
+ttl_seconds_after_finished = 300   # Auto-cleanup after 5 minutes
+```
+
+### CronJob Example
+
+```toml
+# Recurring scheduled job
+type = "cronjob"
+[spec]
+name = "daily-backup"
+schedule = "0 2 * * *"                    # Run at 2 AM every day
+concurrency_policy = "Forbid"             # Don't allow concurrent executions
+successful_jobs_history_limit = 3         # Keep 3 successful job records
+failed_jobs_history_limit = 1             # Keep 1 failed job record
+
+# Job template - defines the job that gets created
+[spec.job_template]
+name = "backup-job"
+command = "bash /scripts/backup.sh"
+parallelism = 1
+completions = 1
+backoff_limit = 2
+restart_policy = "OnFailure"
+active_deadline_seconds = 7200            # 2 hour timeout
 ```
 
 Groups reference program names:
@@ -200,8 +233,129 @@ name = "webstack"
 members = ["web", "api"]
 ```
 
-Cron jobs can also be defined with `type = "cronjob"` in either place. The `provisr cron --config=config.toml` command
-runs them.
+## Jobs and CronJobs
+
+Provisr implements Kubernetes-style Jobs and CronJobs for task execution and scheduling.
+
+### Jobs
+
+Jobs are used for one-time task execution with support for:
+
+- **Parallelism**: Run multiple instances concurrently
+- **Completions**: Specify required number of successful completions
+- **Backoff limit**: Configure retry attempts for failed instances
+- **Restart policies**: `Never` or `OnFailure`
+- **Completion modes**: `NonIndexed` (default) or `Indexed`
+- **Timeouts**: Active deadline for job execution
+- **TTL**: Automatic cleanup after completion
+
+#### Job Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Job name (required) |
+| `command` | string | Command to execute (required) |
+| `work_dir` | string | Working directory |
+| `env` | []string | Environment variables |
+| `parallelism` | int32 | Number of parallel instances (default: 1) |
+| `completions` | int32 | Required successful completions (default: 1) |
+| `backoff_limit` | int32 | Maximum retry attempts (default: 6) |
+| `completion_mode` | string | "NonIndexed" or "Indexed" (default: "NonIndexed") |
+| `restart_policy` | string | "Never" or "OnFailure" (default: "Never") |
+| `active_deadline_seconds` | int64 | Job timeout in seconds |
+| `ttl_seconds_after_finished` | int32 | Auto-cleanup delay |
+
+### CronJobs
+
+CronJobs schedule Jobs to run periodically with support for:
+
+- **Cron expressions**: Standard cron syntax or `@every` shortcuts
+- **Concurrency policies**: Control overlapping executions
+- **History limits**: Manage job record retention
+- **Timezone support**: Schedule in specific timezones
+- **Suspension**: Temporarily pause scheduling
+
+#### CronJob Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | CronJob name (required) |
+| `schedule` | string | Cron expression or @every (required) |
+| `job_template` | JobSpec | Template for created jobs (required) |
+| `concurrency_policy` | string | "Allow", "Forbid", or "Replace" (default: "Allow") |
+| `suspend` | bool | Pause scheduling (default: false) |
+| `successful_jobs_history_limit` | int32 | Keep successful jobs (default: 3) |
+| `failed_jobs_history_limit` | int32 | Keep failed jobs (default: 1) |
+| `starting_deadline_seconds` | int64 | Start deadline for missed schedules |
+| `time_zone` | string | Timezone for schedule (default: UTC) |
+
+#### Schedule Examples
+
+```
+# Cron expressions
+"0 2 * * *"        # Daily at 2 AM
+"0 */4 * * *"      # Every 4 hours
+"0 9 * * 1-5"      # Weekdays at 9 AM
+
+# @every shortcuts
+"@every 30s"       # Every 30 seconds
+"@every 5m"        # Every 5 minutes
+"@every 1h"        # Every hour
+"@every 24h"       # Every 24 hours
+```
+
+### Job and CronJob Management
+
+Use the programmatic API for dynamic job management:
+
+```go
+package main
+
+import (
+    "github.com/loykin/provisr/internal/job"
+    "github.com/loykin/provisr/internal/cronjob"
+    "github.com/loykin/provisr/internal/manager"
+)
+
+func main() {
+    // Create managers
+    mgr := manager.NewManager()
+    jobMgr := job.NewManager(mgr)
+    cronMgr := cronjob.NewManager(mgr)
+
+    // Create a job
+    jobSpec := job.JobSpec{
+        Name: "my-job",
+        Command: "echo 'Hello from job!'",
+        Parallelism: int32Ptr(2),
+        Completions: int32Ptr(2),
+    }
+
+    j, err := jobMgr.CreateJob(jobSpec)
+    if err != nil {
+        panic(err)
+    }
+
+    // Wait for completion
+    <-j.Done()
+    status := j.GetStatus()
+    fmt.Printf("Job completed: %s\n", status.Phase)
+
+    // Create a cronjob
+    cronSpec := cronjob.CronJobSpec{
+        Name: "my-cronjob",
+        Schedule: "@every 10s",
+        JobTemplate: jobSpec,
+    }
+
+    cj, err := cronMgr.CreateCronJob(cronSpec)
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
+See the `examples/` directory for complete working examples of Jobs and CronJobs.
 
 ## TLS Configuration
 

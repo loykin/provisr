@@ -624,8 +624,8 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	if len(cfg.CronJobs) > 0 {
 		cronScheduler = provisr.NewCronScheduler(mgr)
 		for _, j := range cfg.CronJobs {
-			jb := provisr.CronJob{Name: j.Name, Spec: j.Spec, Schedule: j.Schedule, Singleton: j.Singleton}
-			if err := cronScheduler.Add(&jb); err != nil {
+			jb := provisr.CronJob(j) // Direct assignment since they're the same type
+			if err := cronScheduler.Add(jb); err != nil {
 				return fmt.Errorf("failed to add cron job %s: %w", j.Name, err)
 			}
 		}
@@ -661,7 +661,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	fmt.Println("Shutting down...")
 	if cronScheduler != nil {
-		cronScheduler.Stop()
+		_ = cronScheduler.Stop()
 	}
 	return server.Close()
 }

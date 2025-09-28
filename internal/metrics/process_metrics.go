@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,26 @@ type ProcessMetrics struct {
 	NumFDs     int32     `json:"num_fds,omitempty"` // Unix only
 }
 
+// InstanceMetrics represents metrics for a single process instance
+type InstanceMetrics struct {
+	ProcessName string `json:"process_name"`
+	InstanceID  string `json:"instance_id"`
+	ProcessMetrics
+}
+
+// ProcessAggregatedMetrics holds aggregated metrics for all instances of a process
+type ProcessAggregatedMetrics struct {
+	ProcessName     string            `json:"process_name"`
+	TotalInstances  int               `json:"total_instances"`
+	AvgCPUPercent   float64           `json:"avg_cpu_percent"`
+	TotalMemoryMB   float64           `json:"total_memory_mb"`
+	AvgMemoryMB     float64           `json:"avg_memory_mb"`
+	TotalNumThreads int32             `json:"total_num_threads"`
+	TotalNumFDs     int32             `json:"total_num_fds"`
+	Instances       []InstanceMetrics `json:"instances"`
+	Timestamp       time.Time         `json:"timestamp"`
+}
+
 // ProcessMetricsHistory stores historical metrics for a process
 type ProcessMetricsHistory struct {
 	ProcessName string           `json:"process_name"`
@@ -38,18 +60,27 @@ type ProcessMetricsHistory struct {
 	count    int
 }
 
+// ProcessInstanceHistory stores historical metrics for process instances
+type ProcessInstanceHistory struct {
+	ProcessName string                      `json:"process_name"`
+	Instances   map[string][]ProcessMetrics `json:"instances"` // instanceID -> metrics history
+	MaxSize     int                         `json:"max_size"`
+	mu          sync.RWMutex
+}
+
 // ProcessMetricsCollector manages CPU and memory monitoring for managed processes
 type ProcessMetricsCollector struct {
-	enabled    bool
-	interval   time.Duration
-	history    map[string]*ProcessMetricsHistory
-	historyMu  sync.RWMutex
-	maxHistory int
-	stopCh     chan struct{}
-	stopOnce   sync.Once
-	wg         sync.WaitGroup
+	enabled         bool
+	interval        time.Duration
+	history         map[string]*ProcessMetricsHistory  // legacy: processName -> history
+	instanceHistory map[string]*ProcessInstanceHistory // processName -> instance history
+	historyMu       sync.RWMutex
+	maxHistory      int
+	stopCh          chan struct{}
+	stopOnce        sync.Once
+	wg              sync.WaitGroup
 
-	// Prometheus metrics for process monitoring
+	// Prometheus metrics for process monitoring with consistent labels
 	processCPUPercent *prometheus.GaugeVec
 	processMemoryMB   *prometheus.GaugeVec
 	processNumThreads *prometheus.GaugeVec
@@ -62,6 +93,22 @@ type ProcessMetricsConfig struct {
 	Interval    time.Duration `mapstructure:"interval"`
 	MaxHistory  int           `mapstructure:"max_history"`
 	HistorySize int           `mapstructure:"history_size"` // alias for MaxHistory
+}
+
+// parseProcessName extracts process name and instance ID from full name
+// Examples: "app-1" -> ("app", "1"), "app" -> ("app", "0")
+func parseProcessName(fullName string) (processName, instanceID string) {
+	parts := strings.Split(fullName, "-")
+	if len(parts) >= 2 {
+		// Check if last part is numeric
+		if _, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+			processName = strings.Join(parts[:len(parts)-1], "-")
+			instanceID = parts[len(parts)-1]
+			return
+		}
+	}
+	// If no numeric suffix, use full name as process name and "0" as instance
+	return fullName, "0"
 }
 
 // NewProcessMetricsCollector creates a new process metrics collector
@@ -80,18 +127,19 @@ func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsColl
 	}
 
 	return &ProcessMetricsCollector{
-		enabled:    config.Enabled,
-		interval:   interval,
-		history:    make(map[string]*ProcessMetricsHistory),
-		maxHistory: maxHistory,
-		stopCh:     make(chan struct{}),
+		enabled:         config.Enabled,
+		interval:        interval,
+		history:         make(map[string]*ProcessMetricsHistory),
+		instanceHistory: make(map[string]*ProcessInstanceHistory),
+		maxHistory:      maxHistory,
+		stopCh:          make(chan struct{}),
 		processCPUPercent: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "provisr",
 				Subsystem: "process",
 				Name:      "cpu_percent",
 				Help:      "CPU usage percentage for managed processes.",
-			}, []string{"name"},
+			}, []string{"process_name", "instance_id"},
 		),
 		processMemoryMB: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -99,7 +147,7 @@ func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsColl
 				Subsystem: "process",
 				Name:      "memory_mb",
 				Help:      "Memory usage in MB for managed processes.",
-			}, []string{"name"},
+			}, []string{"process_name", "instance_id"},
 		),
 		processNumThreads: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -107,7 +155,7 @@ func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsColl
 				Subsystem: "process",
 				Name:      "num_threads",
 				Help:      "Number of threads for managed processes.",
-			}, []string{"name"},
+			}, []string{"process_name", "instance_id"},
 		),
 		processNumFDs: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -115,7 +163,7 @@ func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsColl
 				Subsystem: "process",
 				Name:      "num_fds",
 				Help:      "Number of file descriptors for managed processes (Unix only).",
-			}, []string{"name"},
+			}, []string{"process_name", "instance_id"},
 		),
 	}
 }
@@ -214,17 +262,20 @@ func (c *ProcessMetricsCollector) collectMetrics(processes map[string]int32) {
 
 	// Batch update Prometheus metrics and history
 	for name, metrics := range metricsResults {
-		// Update Prometheus metrics
-		c.processCPUPercent.WithLabelValues(name).Set(metrics.CPUPercent)
-		c.processMemoryMB.WithLabelValues(name).Set(metrics.MemoryMB)
-		c.processNumThreads.WithLabelValues(name).Set(float64(metrics.NumThreads))
+		processName, instanceID := parseProcessName(name)
+
+		// Update Prometheus metrics with consistent labels
+		c.processCPUPercent.WithLabelValues(processName, instanceID).Set(metrics.CPUPercent)
+		c.processMemoryMB.WithLabelValues(processName, instanceID).Set(metrics.MemoryMB)
+		c.processNumThreads.WithLabelValues(processName, instanceID).Set(float64(metrics.NumThreads))
 
 		if runtime.GOOS != "windows" && metrics.NumFDs > 0 {
-			c.processNumFDs.WithLabelValues(name).Set(float64(metrics.NumFDs))
+			c.processNumFDs.WithLabelValues(processName, instanceID).Set(float64(metrics.NumFDs))
 		}
 
-		// Store in history
+		// Store in both legacy and new history structures
 		c.addToHistory(name, metrics)
+		c.addToInstanceHistory(processName, instanceID, metrics)
 	}
 
 	// Clean up metrics for processes that no longer exist
@@ -316,27 +367,97 @@ func (c *ProcessMetricsCollector) addToHistory(name string, metrics ProcessMetri
 	}
 }
 
+// addToInstanceHistory adds metrics to the instance-based historical data
+func (c *ProcessMetricsCollector) addToInstanceHistory(processName, instanceID string, metrics ProcessMetrics) {
+	c.historyMu.Lock()
+	defer c.historyMu.Unlock()
+
+	history, exists := c.instanceHistory[processName]
+	if !exists {
+		history = &ProcessInstanceHistory{
+			ProcessName: processName,
+			Instances:   make(map[string][]ProcessMetrics),
+			MaxSize:     c.maxHistory,
+		}
+		c.instanceHistory[processName] = history
+	}
+
+	history.mu.Lock()
+	defer history.mu.Unlock()
+
+	// Initialize instance history if it doesn't exist
+	if history.Instances[instanceID] == nil {
+		history.Instances[instanceID] = make([]ProcessMetrics, 0, c.maxHistory)
+	}
+
+	// Add new metrics to the instance history
+	instanceMetrics := history.Instances[instanceID]
+	if len(instanceMetrics) >= c.maxHistory {
+		// Remove oldest entry
+		instanceMetrics = instanceMetrics[1:]
+	}
+	instanceMetrics = append(instanceMetrics, metrics)
+	history.Instances[instanceID] = instanceMetrics
+}
+
 // cleanupMetrics removes metrics for processes that no longer exist
 func (c *ProcessMetricsCollector) cleanupMetrics(activeProcesses map[string]int32) {
 	c.historyMu.RLock()
 	var toDelete []string
+	var toDeleteFromInstance []struct {
+		processName string
+		instanceID  string
+	}
+
 	for name := range c.history {
 		if _, exists := activeProcesses[name]; !exists {
 			toDelete = append(toDelete, name)
 		}
 	}
+
+	// Also cleanup instance history
+	for processName, history := range c.instanceHistory {
+		history.mu.RLock()
+		for instanceID := range history.Instances {
+			fullName := processName + "-" + instanceID
+			if instanceID == "0" {
+				fullName = processName
+			}
+			if _, exists := activeProcesses[fullName]; !exists {
+				toDeleteFromInstance = append(toDeleteFromInstance, struct {
+					processName string
+					instanceID  string
+				}{processName, instanceID})
+			}
+		}
+		history.mu.RUnlock()
+	}
 	c.historyMu.RUnlock()
 
-	if len(toDelete) > 0 {
+	if len(toDelete) > 0 || len(toDeleteFromInstance) > 0 {
 		c.historyMu.Lock()
 		for _, name := range toDelete {
 			delete(c.history, name)
-			// Remove from Prometheus metrics
-			c.processCPUPercent.DeleteLabelValues(name)
-			c.processMemoryMB.DeleteLabelValues(name)
-			c.processNumThreads.DeleteLabelValues(name)
+			processName, instanceID := parseProcessName(name)
+			// Remove from Prometheus metrics with new labels
+			c.processCPUPercent.DeleteLabelValues(processName, instanceID)
+			c.processMemoryMB.DeleteLabelValues(processName, instanceID)
+			c.processNumThreads.DeleteLabelValues(processName, instanceID)
 			if runtime.GOOS != "windows" {
-				c.processNumFDs.DeleteLabelValues(name)
+				c.processNumFDs.DeleteLabelValues(processName, instanceID)
+			}
+		}
+
+		// Cleanup instance history
+		for _, item := range toDeleteFromInstance {
+			if history, exists := c.instanceHistory[item.processName]; exists {
+				history.mu.Lock()
+				delete(history.Instances, item.instanceID)
+				// If no instances left, remove the entire process history
+				if len(history.Instances) == 0 {
+					delete(c.instanceHistory, item.processName)
+				}
+				history.mu.Unlock()
 			}
 		}
 		c.historyMu.Unlock()
@@ -448,7 +569,154 @@ func (c *ProcessMetricsCollector) SetEnabled(enabled bool) {
 	c.enabled = enabled
 }
 
+// GetProcessMetrics returns aggregated metrics for a specific process
+func (c *ProcessMetricsCollector) GetProcessMetrics(processName string) (ProcessAggregatedMetrics, bool) {
+	if !c.enabled {
+		return ProcessAggregatedMetrics{}, false
+	}
+
+	c.historyMu.RLock()
+	defer c.historyMu.RUnlock()
+
+	history, exists := c.instanceHistory[processName]
+	if !exists {
+		return ProcessAggregatedMetrics{}, false
+	}
+
+	history.mu.RLock()
+	defer history.mu.RUnlock()
+
+	if len(history.Instances) == 0 {
+		return ProcessAggregatedMetrics{}, false
+	}
+
+	var instances []InstanceMetrics
+	var totalCPU, totalMemory float64
+	var totalThreads, totalFDs int32
+	timestamp := time.Now()
+
+	for instanceID, metrics := range history.Instances {
+		if len(metrics) == 0 {
+			continue
+		}
+
+		// Get latest metrics for this instance
+		latest := metrics[len(metrics)-1]
+		instance := InstanceMetrics{
+			ProcessName:    processName,
+			InstanceID:     instanceID,
+			ProcessMetrics: latest,
+		}
+		instances = append(instances, instance)
+
+		totalCPU += latest.CPUPercent
+		totalMemory += latest.MemoryMB
+		totalThreads += latest.NumThreads
+		totalFDs += latest.NumFDs
+
+		if latest.Timestamp.After(timestamp) || timestamp.IsZero() {
+			timestamp = latest.Timestamp
+		}
+	}
+
+	if len(instances) == 0 {
+		return ProcessAggregatedMetrics{}, false
+	}
+
+	return ProcessAggregatedMetrics{
+		ProcessName:     processName,
+		TotalInstances:  len(instances),
+		AvgCPUPercent:   totalCPU / float64(len(instances)),
+		TotalMemoryMB:   totalMemory,
+		AvgMemoryMB:     totalMemory / float64(len(instances)),
+		TotalNumThreads: totalThreads,
+		TotalNumFDs:     totalFDs,
+		Instances:       instances,
+		Timestamp:       timestamp,
+	}, true
+}
+
+// GetInstanceMetrics returns metrics for a specific process instance
+func (c *ProcessMetricsCollector) GetInstanceMetrics(processName, instanceID string) (InstanceMetrics, bool) {
+	if !c.enabled {
+		return InstanceMetrics{}, false
+	}
+
+	c.historyMu.RLock()
+	defer c.historyMu.RUnlock()
+
+	history, exists := c.instanceHistory[processName]
+	if !exists {
+		return InstanceMetrics{}, false
+	}
+
+	history.mu.RLock()
+	defer history.mu.RUnlock()
+
+	metrics, exists := history.Instances[instanceID]
+	if !exists || len(metrics) == 0 {
+		return InstanceMetrics{}, false
+	}
+
+	latest := metrics[len(metrics)-1]
+	return InstanceMetrics{
+		ProcessName:    processName,
+		InstanceID:     instanceID,
+		ProcessMetrics: latest,
+	}, true
+}
+
+// GetAllProcessMetrics returns aggregated metrics for all processes
+func (c *ProcessMetricsCollector) GetAllProcessMetrics() map[string]ProcessAggregatedMetrics {
+	if !c.enabled {
+		return make(map[string]ProcessAggregatedMetrics)
+	}
+
+	result := make(map[string]ProcessAggregatedMetrics)
+
+	c.historyMu.RLock()
+	defer c.historyMu.RUnlock()
+
+	for processName := range c.instanceHistory {
+		if metrics, ok := c.GetProcessMetrics(processName); ok {
+			result[processName] = metrics
+		}
+	}
+
+	return result
+}
+
+// GetInstanceHistory returns historical metrics for a specific instance
+func (c *ProcessMetricsCollector) GetInstanceHistory(processName, instanceID string) ([]ProcessMetrics, bool) {
+	if !c.enabled {
+		return nil, false
+	}
+
+	c.historyMu.RLock()
+	defer c.historyMu.RUnlock()
+
+	history, exists := c.instanceHistory[processName]
+	if !exists {
+		return nil, false
+	}
+
+	history.mu.RLock()
+	defer history.mu.RUnlock()
+
+	metrics, exists := history.Instances[instanceID]
+	if !exists {
+		return nil, false
+	}
+
+	// Return a copy to avoid race conditions
+	result := make([]ProcessMetrics, len(metrics))
+	copy(result, metrics)
+	return result, true
+}
+
 // AddToHistoryForTesting adds metrics to history for testing purposes
 func (c *ProcessMetricsCollector) AddToHistoryForTesting(name string, metrics ProcessMetrics) {
 	c.addToHistory(name, metrics)
+	processName, instanceID := parseProcessName(name)
+	c.addToInstanceHistory(processName, instanceID, metrics)
 }

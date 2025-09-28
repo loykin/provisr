@@ -83,7 +83,11 @@ func Register(r prometheus.Registerer) error {
 	if regOK.Load() {
 		return nil
 	}
-	cs := []prometheus.Collector{processStarts, processRestarts, processStops, processStartDuration, runningInstances, stateTransitions, currentStates}
+	cs := []prometheus.Collector{
+		processStarts, processRestarts, processStops, processStartDuration, runningInstances, stateTransitions, currentStates,
+		jobsTotal, jobDuration, jobsActive, jobCompletions, jobBackoffLimit,
+		cronjobsTotal, cronjobDuration, cronjobsActive, cronjobLastSchedule, cronjobNextSchedule,
+	}
 	for _, c := range cs {
 		if err := r.Register(c); err != nil {
 			// If already registered, ignore (allows double Register with default registry)
@@ -165,5 +169,147 @@ func SetCurrentState(name, state string, active bool) {
 			value = 1
 		}
 		currentStates.WithLabelValues(name, state).Set(value)
+	}
+}
+
+// Job and CronJob specific metrics
+var (
+	jobsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "provisr",
+			Subsystem: "job",
+			Name:      "total",
+			Help:      "Total number of jobs started.",
+		}, []string{"job_name", "phase"},
+	)
+	jobDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "provisr",
+			Subsystem: "job",
+			Name:      "duration_seconds",
+			Help:      "Job execution duration in seconds.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"job_name", "phase"},
+	)
+	jobsActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "provisr",
+			Subsystem: "job",
+			Name:      "active",
+			Help:      "Number of currently active jobs.",
+		}, []string{"job_name"},
+	)
+	jobCompletions = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "provisr",
+			Subsystem: "job",
+			Name:      "completions_total",
+			Help:      "Total number of job completions.",
+		}, []string{"job_name", "completion_mode", "result"},
+	)
+	jobBackoffLimit = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "provisr",
+			Subsystem: "job",
+			Name:      "backoff_limit",
+			Help:      "Job backoff limit distribution.",
+			Buckets:   []float64{0, 1, 2, 3, 6, 10, 20, 50},
+		}, []string{"job_name"},
+	)
+
+	cronjobsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "provisr",
+			Subsystem: "cronjob",
+			Name:      "total",
+			Help:      "Total number of cronjob executions.",
+		}, []string{"cronjob_name", "phase"},
+	)
+	cronjobDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "provisr",
+			Subsystem: "cronjob",
+			Name:      "duration_seconds",
+			Help:      "CronJob execution duration in seconds.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"cronjob_name", "phase"},
+	)
+	cronjobsActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "provisr",
+			Subsystem: "cronjob",
+			Name:      "active",
+			Help:      "Number of currently active cronjobs.",
+		}, []string{"cronjob_name"},
+	)
+	cronjobLastSchedule = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "provisr",
+			Subsystem: "cronjob",
+			Name:      "last_schedule_time",
+			Help:      "Last time a cronjob was scheduled (unix timestamp).",
+		}, []string{"cronjob_name"},
+	)
+	cronjobNextSchedule = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "provisr",
+			Subsystem: "cronjob",
+			Name:      "next_schedule_time",
+			Help:      "Next time a cronjob will be scheduled (unix timestamp).",
+		}, []string{"cronjob_name"},
+	)
+)
+
+func IncJobTotal(jobName, phase string) {
+	if regOK.Load() {
+		jobsTotal.WithLabelValues(jobName, phase).Inc()
+	}
+}
+
+func IncJobActive(jobName string) {
+	if regOK.Load() {
+		jobsActive.WithLabelValues(jobName).Inc()
+	}
+}
+
+func DecJobActive(jobName string) {
+	if regOK.Load() {
+		jobsActive.WithLabelValues(jobName).Dec()
+	}
+}
+
+func IncCronJobTotal(cronjobName, phase string) {
+	if regOK.Load() {
+		cronjobsTotal.WithLabelValues(cronjobName, phase).Inc()
+	}
+}
+
+func ObserveCronJobDuration(cronjobName, phase string, seconds float64) {
+	if regOK.Load() {
+		cronjobDuration.WithLabelValues(cronjobName, phase).Observe(seconds)
+	}
+}
+
+func IncCronJobActive(cronjobName string) {
+	if regOK.Load() {
+		cronjobsActive.WithLabelValues(cronjobName).Inc()
+	}
+}
+
+func DecCronJobActive(cronjobName string) {
+	if regOK.Load() {
+		cronjobsActive.WithLabelValues(cronjobName).Dec()
+	}
+}
+
+func SetCronJobLastSchedule(cronjobName string, timestamp float64) {
+	if regOK.Load() {
+		cronjobLastSchedule.WithLabelValues(cronjobName).Set(timestamp)
+	}
+}
+
+func SetCronJobNextSchedule(cronjobName string, timestamp float64) {
+	if regOK.Load() {
+		cronjobNextSchedule.WithLabelValues(cronjobName).Set(timestamp)
 	}
 }
