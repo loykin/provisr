@@ -1,0 +1,26 @@
+[server]
+enabled = true
+listen = ":8080"
+base_path = "/api"
+
+[server.auth]
+enabled = true
+jwt_secret = "your-secret-key-here-make-it-long-and-random"
+token_ttl = "24h"
+bcrypt_cost = 12
+
+[server.auth.store]
+type = "sqlite"
+path = "auth.db"
+
+# PostgreSQL example (alternative to SQLite)
+# [server.auth.store]
+# type = "postgresql"
+# host = "localhost"
+# port = 5432
+# database = "provisr_auth"
+# username = "provisr"
+# password = "your-password"
+# ssl_mode = "require"
+# max_open_conns = 10
+# max_idle_conns = 5
