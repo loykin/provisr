@@ -33,11 +33,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=$(go list ./internal/config ./internal/detector ./internal/env ./internal/manager ./internal/process ./internal/server)
+          packages=$(go list ./internal/config ./internal/detector ./internal/env ./internal/process ./internal/server)
           for pkg in $packages; do
             echo "Running fuzz on $pkg"
             go test $pkg -run=^$ -fuzz=Fuzz -fuzztime=10m
           done
+          
+          echo "Running fuzz on ./internal/manager"
+          go test ./internal/manager -run=^$ -fuzz=FuzzManagerConcurrentOperations -fuzztime=5m
+          go test ./internal/manager -run=^$ -fuzz=FuzzProcessSpecValidation -fuzztime=2m
+          go test ./internal/manager -run=^$ -fuzz=FuzzPatternMatching -fuzztime=2m
 
       - name: Build (sanity)
         run: go build ./...
