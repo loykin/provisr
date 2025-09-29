@@ -103,6 +103,9 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 		createGroupStartCommand(provisrCommand, groupFlags),
 		createGroupStopCommand(provisrCommand, groupFlags),
 		createGroupStatusCommand(provisrCommand, groupFlags),
+		createAuthCommand(provisrCommand, globalFlags),
+		createLoginCommand(provisrCommand),
+		createLogoutCommand(provisrCommand),
 		createServeCommand(globalFlags),
 	)
 
@@ -664,4 +667,287 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		_ = cronScheduler.Stop()
 	}
 	return server.Close()
+}
+
+// createAuthCommand creates the auth command with subcommands
+func createAuthCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Authentication management commands",
+		Long: `Manage users and client credentials for authentication.
+
+Examples:
+  provisr auth user create --username=admin --password=secret --roles=admin
+  provisr auth user list
+  provisr auth client create --name="API Client" --scopes=operator
+  provisr auth client list`,
+	}
+
+	// Add subcommands
+	cmd.AddCommand(
+		createAuthUserCommand(provisrCommand, globalFlags),
+		createAuthClientCommand(provisrCommand, globalFlags),
+		createAuthTestCommand(provisrCommand, globalFlags),
+	)
+
+	return cmd
+}
+
+// createAuthUserCommand creates the auth user subcommand
+func createAuthUserCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "user",
+		Short: "User management commands",
+		Long:  "Manage user accounts for authentication",
+	}
+
+	// Add user subcommands
+	cmd.AddCommand(
+		createAuthUserCreateCommand(provisrCommand, globalFlags),
+		createAuthUserListCommand(provisrCommand, globalFlags),
+		createAuthUserDeleteCommand(provisrCommand, globalFlags),
+		createAuthUserPasswordCommand(provisrCommand, globalFlags),
+	)
+
+	return cmd
+}
+
+// createAuthClientCommand creates the auth client subcommand
+func createAuthClientCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "client",
+		Short: "Client credential management commands",
+		Long:  "Manage client credentials for API authentication",
+	}
+
+	// Add client subcommands
+	cmd.AddCommand(
+		createAuthClientCreateCommand(provisrCommand, globalFlags),
+		createAuthClientListCommand(provisrCommand, globalFlags),
+		createAuthClientDeleteCommand(provisrCommand, globalFlags),
+	)
+
+	return cmd
+}
+
+// createAuthUserCreateCommand creates the auth user create subcommand
+func createAuthUserCreateCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	flags := &AuthUserCreateFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new user",
+		Long: `Create a new user account for authentication.
+
+Examples:
+  provisr auth user create --username=admin --password=secret --roles=admin
+  provisr auth user create --username=operator --password=secret --email=op@example.com --roles=operator`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthUserCreate(*flags, globalFlags.ConfigPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.Username, "username", "", "username (required)")
+	cmd.Flags().StringVar(&flags.Password, "password", "", "password (required)")
+	cmd.Flags().StringVar(&flags.Email, "email", "", "email address")
+	cmd.Flags().StringSliceVar(&flags.Roles, "roles", []string{"user"}, "user roles (comma-separated)")
+
+	_ = cmd.MarkFlagRequired("username")
+	_ = cmd.MarkFlagRequired("password")
+
+	return cmd
+}
+
+// createAuthUserListCommand creates the auth user list subcommand
+func createAuthUserListCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all users",
+		Long:  "List all user accounts in the system",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthUserList(globalFlags.ConfigPath)
+		},
+	}
+
+	return cmd
+}
+
+// createAuthUserDeleteCommand creates the auth user delete subcommand
+func createAuthUserDeleteCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	flags := &AuthUserDeleteFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete a user",
+		Long: `Delete a user account from the system.
+
+Examples:
+  provisr auth user delete --username=olduser`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthUserDelete(*flags, globalFlags.ConfigPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.Username, "username", "", "username to delete (required)")
+	_ = cmd.MarkFlagRequired("username")
+
+	return cmd
+}
+
+// createAuthUserPasswordCommand creates the auth user password subcommand
+func createAuthUserPasswordCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	flags := &AuthUserPasswordFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "password",
+		Short: "Reset user password",
+		Long: `Reset a user's password.
+
+Examples:
+  provisr auth user password --username=admin --new-password=newsecret`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthUserPassword(*flags, globalFlags.ConfigPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.Username, "username", "", "username (required)")
+	cmd.Flags().StringVar(&flags.NewPassword, "new-password", "", "new password (required)")
+
+	_ = cmd.MarkFlagRequired("username")
+	_ = cmd.MarkFlagRequired("new-password")
+
+	return cmd
+}
+
+// createAuthClientCreateCommand creates the auth client create subcommand
+func createAuthClientCreateCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	flags := &AuthClientCreateFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new client credential",
+		Long: `Create a new client credential for API authentication.
+
+Examples:
+  provisr auth client create --name="API Client" --scopes=operator
+  provisr auth client create --name="Admin Client" --scopes=admin,operator`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthClientCreate(*flags, globalFlags.ConfigPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.Name, "name", "", "client name (required)")
+	cmd.Flags().StringSliceVar(&flags.Scopes, "scopes", []string{"operator"}, "client scopes (comma-separated)")
+
+	_ = cmd.MarkFlagRequired("name")
+
+	return cmd
+}
+
+// createAuthClientListCommand creates the auth client list subcommand
+func createAuthClientListCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all client credentials",
+		Long:  "List all client credentials in the system",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthClientList(globalFlags.ConfigPath)
+		},
+	}
+
+	return cmd
+}
+
+// createAuthClientDeleteCommand creates the auth client delete subcommand
+func createAuthClientDeleteCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	flags := &AuthClientDeleteFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete a client credential",
+		Long: `Delete a client credential from the system.
+
+Examples:
+  provisr auth client delete --client-id=client-123`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthClientDelete(*flags, globalFlags.ConfigPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.ClientID, "client-id", "", "client ID to delete (required)")
+	_ = cmd.MarkFlagRequired("client-id")
+
+	return cmd
+}
+
+// createAuthTestCommand creates the auth test subcommand
+func createAuthTestCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
+	flags := &AuthTestFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test authentication with credentials",
+		Long: `Test authentication with different methods and credentials.
+
+Examples:
+  provisr auth test --method=basic --username=admin --password=secret
+  provisr auth test --method=client_secret --client-id=client_123 --client-secret=secret123`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.AuthTest(*flags, globalFlags.ConfigPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.Method, "method", "basic", "authentication method (basic, client_secret, jwt)")
+	cmd.Flags().StringVar(&flags.Username, "username", "", "username (for basic auth)")
+	cmd.Flags().StringVar(&flags.Password, "password", "", "password (for basic auth)")
+	cmd.Flags().StringVar(&flags.ClientID, "client-id", "", "client ID (for client_secret auth)")
+	cmd.Flags().StringVar(&flags.ClientSecret, "client-secret", "", "client secret (for client_secret auth)")
+	cmd.Flags().StringVar(&flags.Token, "token", "", "JWT token (for jwt auth)")
+
+	return cmd
+}
+
+// createLoginCommand creates the login command
+func createLoginCommand(provisrCommand command) *cobra.Command {
+	flags := &LoginFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "login",
+		Short: "Login to provisr server",
+		Long: `Login to provisr server and save session for future commands.
+
+Examples:
+  provisr login --username=admin --password=secret
+  provisr login --method=client_secret --client-id=client_123 --client-secret=secret123
+  provisr login --server-url=http://remote:8080/api --username=admin --password=secret`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.Login(*flags)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.Method, "method", "basic", "authentication method (basic, client_secret)")
+	cmd.Flags().StringVar(&flags.Username, "username", "", "username (for basic auth)")
+	cmd.Flags().StringVar(&flags.Password, "password", "", "password (for basic auth)")
+	cmd.Flags().StringVar(&flags.ClientID, "client-id", "", "client ID (for client_secret auth)")
+	cmd.Flags().StringVar(&flags.ClientSecret, "client-secret", "", "client secret (for client_secret auth)")
+	cmd.Flags().StringVar(&flags.ServerURL, "server-url", "", "server URL (default: http://localhost:8080/api)")
+
+	return cmd
+}
+
+// createLogoutCommand creates the logout command
+func createLogoutCommand(provisrCommand command) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "logout",
+		Short: "Logout from provisr server",
+		Long: `Logout from provisr server and clear saved session.
+
+Examples:
+  provisr logout`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.Logout()
+		},
+	}
+
+	return cmd
 }

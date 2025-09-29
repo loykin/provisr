@@ -10,8 +10,9 @@ import (
 
 // APIClient provides HTTP client functionality to communicate with provisr daemon
 type APIClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL   string
+	client    *http.Client
+	authToken string
 }
 
 // NewAPIClient creates a new API client
@@ -285,4 +286,67 @@ func (c *APIClient) GroupStop(groupName string, wait ...time.Duration) error {
 		return fmt.Errorf("API error: %s", errorResp.Error)
 	}
 	return nil
+}
+
+// LoginResponse represents the response from login endpoint
+type LoginResponse struct {
+	Success  bool       `json:"success"`
+	UserID   string     `json:"user_id"`
+	Username string     `json:"username"`
+	Roles    []string   `json:"roles"`
+	Token    *TokenInfo `json:"token"`
+}
+
+// TokenInfo represents JWT token information
+type TokenInfo struct {
+	Type      string    `json:"type"`
+	Value     string    `json:"value"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Login authenticates with the server and returns login response
+func (c *APIClient) Login(loginRequest map[string]interface{}) (*LoginResponse, error) {
+	data, err := json.Marshal(loginRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.client.Post(c.baseURL+"/auth/login", "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result LoginResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		// Try to decode error response again
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&errorResp); jsonErr == nil {
+			if errorResp.Message != "" {
+				return nil, fmt.Errorf("login failed: %s", errorResp.Message)
+			}
+		}
+		return nil, fmt.Errorf("login failed: HTTP %d", resp.StatusCode)
+	}
+
+	return &result, nil
+}
+
+// SetAuthToken sets the authentication token for API requests
+func (c *APIClient) SetAuthToken(token string) {
+	c.authToken = token
+}
+
+// addAuthHeaders adds authentication headers to the request
+func (c *APIClient) addAuthHeaders(req *http.Request) {
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
 }

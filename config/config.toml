@@ -111,3 +111,32 @@ enabled = false
 interval = "5s"
 # Maximum number of historical metrics to keep per process
 max_history = 100
+
+# Authentication configuration
+[auth]
+# Enable authentication for the API server
+enabled = false
+# Database path for storing users and client credentials
+database_path = "auth.db"
+# Database type: "sqlite" or "postgresql"
+database_type = "sqlite"
+# PostgreSQL connection string (only used when database_type = "postgresql")
+# database_url = "postgres://user:password@localhost/provisr_auth?sslmode=disable"
+
+# JWT configuration
+[auth.jwt]
+# Secret key for signing JWT tokens (change this in production!)
+secret = "your-secret-key-change-this-in-production"
+# Token expiration time
+expires_in = "24h"
+
+# Default admin user (created automatically if no users exist)
+[auth.admin]
+# Enable auto-creation of admin user on first startup
+auto_create = true
+# Default admin username
+username = "admin"
+# Default admin password (change this immediately!)
+password = "admin"
+# Admin email (optional)
+email = "admin@localhost"

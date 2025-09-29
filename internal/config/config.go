@@ -80,13 +80,14 @@ type LogConfig struct {
 }
 
 type ServerConfig struct {
-	Listen        string     `mapstructure:"listen"`
-	BasePath      string     `mapstructure:"base_path"`
-	PidFile       string     `mapstructure:"pidfile"`
-	LogFile       string     `mapstructure:"logfile"`
-	TLS           *TLSConfig `mapstructure:"tls"`
-	TLSMinVersion string     `mapstructure:"tls_min_version"`
-	TLSMaxVersion string     `mapstructure:"tls_max_version"`
+	Listen        string      `mapstructure:"listen"`
+	BasePath      string      `mapstructure:"base_path"`
+	PidFile       string      `mapstructure:"pidfile"`
+	LogFile       string      `mapstructure:"logfile"`
+	TLS           *TLSConfig  `mapstructure:"tls"`
+	TLSMinVersion string      `mapstructure:"tls_min_version"`
+	TLSMaxVersion string      `mapstructure:"tls_max_version"`
+	Auth          *AuthConfig `mapstructure:"auth"`
 }
 
 type TLSConfig struct {
@@ -104,6 +105,27 @@ type AutoGenTLS struct {
 	DNSNames     []string `mapstructure:"dns_names"`
 	IPAddresses  []string `mapstructure:"ip_addresses"`
 	ValidDays    int      `mapstructure:"valid_days"`
+}
+
+type AuthConfig struct {
+	Enabled    bool            `mapstructure:"enabled"`
+	Store      AuthStoreConfig `mapstructure:"store"`
+	JWTSecret  string          `mapstructure:"jwt_secret"`
+	TokenTTL   time.Duration   `mapstructure:"token_ttl"`
+	BcryptCost int             `mapstructure:"bcrypt_cost"`
+}
+
+type AuthStoreConfig struct {
+	Type         string `mapstructure:"type"` // "sqlite" or "postgresql"
+	Path         string `mapstructure:"path,omitempty"`
+	Host         string `mapstructure:"host,omitempty"`
+	Port         int    `mapstructure:"port,omitempty"`
+	Database     string `mapstructure:"database,omitempty"`
+	Username     string `mapstructure:"username,omitempty"`
+	Password     string `mapstructure:"password,omitempty"`
+	SSLMode      string `mapstructure:"ssl_mode,omitempty"`
+	MaxOpenConns int    `mapstructure:"max_open_conns,omitempty"`
+	MaxIdleConns int    `mapstructure:"max_idle_conns,omitempty"`
 }
 
 type ProcessConfig struct {
