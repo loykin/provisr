@@ -48,3 +48,48 @@ type ServeFlags struct {
 	PidFile    string
 	LogFile    string
 }
+
+// Auth command flags
+type AuthUserCreateFlags struct {
+	Username string
+	Password string
+	Email    string
+	Roles    []string
+}
+
+type AuthClientCreateFlags struct {
+	Name   string
+	Scopes []string
+}
+
+type AuthUserDeleteFlags struct {
+	Username string
+}
+
+type AuthClientDeleteFlags struct {
+	ClientID string
+}
+
+type AuthUserPasswordFlags struct {
+	Username    string
+	NewPassword string
+}
+
+type AuthTestFlags struct {
+	Method       string
+	Username     string
+	Password     string
+	ClientID     string
+	ClientSecret string
+	Token        string
+}
+
+// Login command flags
+type LoginFlags struct {
+	Username     string
+	Password     string
+	ClientID     string
+	ClientSecret string
+	Method       string
+	ServerURL    string
+}

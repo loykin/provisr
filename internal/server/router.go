@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/loykin/provisr/internal/auth"
 	"github.com/loykin/provisr/internal/config"
 	mng "github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/process"
@@ -25,8 +26,9 @@ import (
 // basePath may be empty or start with '/'; no trailing slash.
 
 type Router struct {
-	mgr      *mng.Manager
-	basePath string
+	mgr         *mng.Manager
+	basePath    string
+	authService *auth.AuthService
 }
 
 // APIEndpoints provides individual access to API handlers for custom registration
@@ -66,6 +68,13 @@ func (r *Router) Handler() http.Handler {
 	group.GET("/metrics", r.handleProcessMetrics)
 	group.GET("/metrics/history", r.handleProcessMetricsHistory)
 	group.GET("/metrics/group", r.handleProcessMetricsGroup)
+
+	// Add auth endpoints if auth service is available
+	if r.authService != nil {
+		authAPI := NewAuthAPI(r.authService)
+		authAPI.RegisterAuthEndpoints(group)
+	}
+
 	return g
 }
 

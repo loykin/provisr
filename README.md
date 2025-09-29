@@ -100,6 +100,129 @@ provisr serve --config config/config.toml
 provisr serve --config config/config.toml --daemonize
 ```
 
+## Authentication
+
+Provisr supports multiple authentication methods for securing both HTTP API and CLI access:
+
+### Authentication Methods
+
+- **Basic Auth**: Username/password authentication
+- **Client Credentials**: OAuth2-style client_id/client_secret
+- **JWT Tokens**: JSON Web Tokens for stateless authentication
+
+### Configuration
+
+Enable authentication in your `config.toml`:
+
+```toml
+[auth]
+enabled = true
+database_path = "auth.db"
+database_type = "sqlite"
+
+[auth.jwt]
+secret = "your-secret-key-change-this-in-production"
+expires_in = "24h"
+
+[auth.admin]
+auto_create = true
+username = "admin"
+password = "admin"  # Change this immediately!
+email = "admin@localhost"
+```
+
+### CLI Session Management
+
+The `provisr login` command provides persistent session management:
+
+```shell
+# Login with username/password
+provisr login --username=admin --password=secret
+
+# Login with client credentials
+provisr login --method=client_secret --client-id=client_123 --client-secret=secret456
+
+# Login to remote server
+provisr login --server-url=http://remote:8080/api --username=admin --password=secret
+
+# Use authenticated commands (session is automatically used)
+provisr status
+provisr start --name=myapp
+provisr stop --name=myapp
+
+# Check session status
+cat ~/.provisr/session.json
+
+# Logout when done
+provisr logout
+```
+
+### User & Client Management
+
+```shell
+# Create users
+provisr auth user create --username=operator --password=secret --roles=operator
+
+# Create API clients
+provisr auth client create --name="CI Client" --scopes=operator
+
+# List users and clients
+provisr auth user list
+provisr auth client list
+```
+
+### HTTP API Authentication
+
+```shell
+# Login via API
+curl -X POST localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"basic","username":"admin","password":"secret"}'
+
+# Use JWT token
+curl -H "Authorization: Bearer <jwt-token>" http://localhost:8080/api/status
+
+# Basic authentication (legacy)
+curl -u admin:password http://localhost:8080/api/status
+```
+
+### Session Security
+
+- Sessions stored in `~/.provisr/session.json` with 0600 permissions
+- Automatic token expiration and cleanup
+- Server URL validation prevents token reuse on wrong servers
+- Support for multiple server sessions (logout and login to switch)
+
+## Storage
+
+Provisr uses a flexible storage layer that supports multiple backends:
+
+### Supported Backends
+
+- **SQLite**: File-based database (default)
+- **PostgreSQL**: Production-ready relational database
+
+### Generic Store Interface
+
+```go
+// Create store using factory
+config := store.Config{
+    Type: "sqlite",
+    Path: "data.db",
+}
+store, _ := store.CreateStore(config)
+
+// Or use specific auth store
+authStore, _ := store.NewAuthStore(config)
+```
+
+### Features
+
+- **Transaction Support**: ACID transactions across operations
+- **Connection Pooling**: Configurable connection limits
+- **Type Safety**: Generic interfaces with compile-time safety
+- **Extensible**: Easy to add new storage backends
+
 ## Configuration
 
 Provisr supports three entity types: `process`, `job`, and `cronjob`. Each can be defined in:
@@ -709,6 +832,11 @@ Available metrics: process starts/stops/restarts, job completions, cronjob sched
 - `embedded_lifecycle_hooks` - Lifecycle hook patterns
 - `embedded_metrics` - Prometheus metrics integration
 - `embedded_logger` - Custom logging setup
+
+### Storage & Authentication
+- `auth_basic` - Authentication system usage and API examples
+- `auth_login` - CLI login and session management examples
+- `store_basic` - Generic store interface examples
 
 See the `examples/` directory for complete implementations.
 
