@@ -39,9 +39,41 @@ provisr stop --name demo
 # Start daemon with configuration file
 provisr serve --config config/config.toml
 
+# Login with admin credentials
+provisr login admin  # Password will be prompted securely
+
 # Manage process groups
 provisr group-start --group backend
 provisr group-stop --group backend
+```
+
+## Testing
+
+### Unit Tests
+
+```shell
+# Run unit tests
+make test-unit
+# or
+go test -v ./...
+```
+
+### Integration Tests
+
+```shell
+# Run integration tests
+make test-integration
+# or
+./scripts/simple-test.sh
+```
+
+### All Tests (CI)
+
+```shell
+# Run all tests including unit and integration
+make test
+# or for full CI pipeline
+make ci
 ```
 
 ### Process Registration
