@@ -1,0 +1,33 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, auth ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Run all tests (unit + integration)
+      run: make ci
+
+    - name: Upload test artifacts (on failure)
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-artifacts
+        path: |
+          provisr-logs/
+          *.log
+          auth.db
+          scripts/
