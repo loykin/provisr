@@ -33,15 +33,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=$(go list ./internal/config ./internal/detector ./internal/env ./internal/process ./internal/server)
-          for pkg in $packages; do
-            echo "Running fuzz on $pkg"
-            go test $pkg -run=^$ -fuzz=Fuzz -fuzztime=10m
-          done
           
-          echo "Running fuzz on ./internal/manager"
+          # Packages with single Fuzz function
+          echo "Running fuzz on ./internal/config"
+          go test ./internal/config -run=^$ -fuzz=Fuzz -fuzztime=10m
+          
+          echo "Running fuzz on ./internal/detector"
+          go test ./internal/detector -run=^$ -fuzz=Fuzz -fuzztime=10m
+          
+          echo "Running fuzz on ./internal/env"
+          go test ./internal/env -run=^$ -fuzz=Fuzz -fuzztime=10m
+          
+          echo "Running fuzz on ./internal/server"
+          go test ./internal/server -run=^$ -fuzz=Fuzz -fuzztime=10m
+          
+          # internal/process has multiple fuzz functions - run each separately
+          echo "Running fuzz on ./internal/process (FuzzReadPIDFileWithMeta)"
+          go test ./internal/process -run=^$ -fuzz=FuzzReadPIDFileWithMeta -fuzztime=2m
+          
+          echo "Running fuzz on ./internal/process (FuzzBuildCommand)"
+          go test ./internal/process -run=^$ -fuzz=FuzzBuildCommand -fuzztime=3m
+          
+          echo "Running fuzz on ./internal/process (FuzzSpecValidation)"
+          go test ./internal/process -run=^$ -fuzz=FuzzSpecValidation -fuzztime=3m
+          
+          echo "Running fuzz on ./internal/process (FuzzParseExplicitShell)"
+          go test ./internal/process -run=^$ -fuzz=FuzzParseExplicitShell -fuzztime=2m
+          
+          # internal/manager fuzz functions
+          echo "Running fuzz on ./internal/manager (FuzzManagerConcurrentOperations)"
           go test ./internal/manager -run=^$ -fuzz=FuzzManagerConcurrentOperations -fuzztime=5m
+          
+          echo "Running fuzz on ./internal/manager (FuzzProcessSpecValidation)"
           go test ./internal/manager -run=^$ -fuzz=FuzzProcessSpecValidation -fuzztime=2m
+          
+          echo "Running fuzz on ./internal/manager (FuzzPatternMatching)"
           go test ./internal/manager -run=^$ -fuzz=FuzzPatternMatching -fuzztime=2m
 
       - name: Build (sanity)
