@@ -44,8 +44,18 @@ jobs:
           echo "Running fuzz on ./internal/env"
           go test ./internal/env -run=^$ -fuzz=Fuzz -fuzztime=10m
           
-          echo "Running fuzz on ./internal/server"
-          go test ./internal/server -run=^$ -fuzz=Fuzz -fuzztime=10m
+          # internal/server has multiple fuzz functions - run each separately
+          echo "Running fuzz on ./internal/server (FuzzIsSafeName)"
+          go test ./internal/server -run=^$ -fuzz=FuzzIsSafeName -fuzztime=2m
+
+          echo "Running fuzz on ./internal/server (FuzzIsSafeAbsPath)"
+          go test ./internal/server -run=^$ -fuzz=FuzzIsSafeAbsPath -fuzztime=3m
+
+          echo "Running fuzz on ./internal/server (FuzzSanitizeBase)"
+          go test ./internal/server -run=^$ -fuzz=FuzzSanitizeBase -fuzztime=3m
+
+          echo "Running fuzz on ./internal/server (FuzzCombinedValidation)"
+          go test ./internal/server -run=^$ -fuzz=FuzzCombinedValidation -fuzztime=2m
           
           # internal/process has multiple fuzz functions - run each separately
           echo "Running fuzz on ./internal/process (FuzzReadPIDFileWithMeta)"
