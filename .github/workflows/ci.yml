@@ -152,7 +152,9 @@ jobs:
 
       - name: Run tests (macOS)
         if: runner.os == 'Darwin'
-        run: go test ./... -v
+        env:
+          CGO_ENABLED: 1
+        run: go test -p 1 -race -covermode=atomic -v $(go list ./... | grep -v '/examples')
 
       - name: Show coverage summary (Linux only)
         if: runner.os == 'Linux'
