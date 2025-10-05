@@ -75,8 +75,11 @@ func TestConfigureCmdAppliesEnvWorkdirLogging(t *testing.T) {
 	if len(cmd.Env) != len(mergedEnv) || cmd.Env[0] != "FOO=bar" {
 		t.Fatalf("env not applied: got %#v", cmd.Env)
 	}
-	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
-		t.Fatalf("SysProcAttr Setpgid not set")
+	// Check SysProcAttr only on Unix systems (Windows doesn't have Setpgid)
+	if runtime.GOOS != "windows" {
+		if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+			t.Fatalf("SysProcAttr Setpgid not set")
+		}
 	}
 
 	// Start and let it produce logs
