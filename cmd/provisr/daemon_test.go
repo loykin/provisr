@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -10,7 +11,8 @@ func TestDaemonize(t *testing.T) {
 	// In real usage, we'd need more sophisticated integration tests
 
 	// Test PID file writing
-	pidFile := "/tmp/test_daemon.pid"
+	tempDir := t.TempDir()
+	pidFile := filepath.Join(tempDir, "test_daemon.pid")
 	defer func() { _ = os.Remove(pidFile) }()
 
 	err := writePidFile(pidFile, os.Getpid())
