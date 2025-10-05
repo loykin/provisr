@@ -1,6 +1,6 @@
 module cronjob_basic_example
 
-go 1.24.0
+go 1.25
 
 replace github.com/loykin/provisr => ../..
 
