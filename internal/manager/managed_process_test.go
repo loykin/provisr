@@ -360,7 +360,7 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 	pid := status.PID
 	t.Logf("Started process with PID: %d", pid)
 
-	err = syscall.Kill(pid, syscall.SIGKILL)
+	err = killProcessByPID(pid)
 	if err != nil {
 		t.Fatalf("Failed to kill process: %v", err)
 	}

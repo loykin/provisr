@@ -5,7 +5,6 @@ package manager
 import (
 	"fmt"
 	"os"
-	"strings"
 )
 
 // killProcessForTest kills a process for testing purposes on Windows
