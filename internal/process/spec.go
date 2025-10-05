@@ -95,19 +95,16 @@ func (s *Spec) DeepCopy() *Spec {
 func (s *Spec) BuildCommand() *exec.Cmd {
 	cmdStr := strings.TrimSpace(s.Command)
 	if cmdStr == "" {
-		// #nosec G204
-		return exec.Command("/bin/true")
+		return getTrueCommand()
 	}
 	// If the command already explicitly uses a shell, honor it without adding another layer.
 	if _, afterC, ok := parseExplicitShell(cmdStr); ok {
-		// Always use absolute shell path to avoid PATH dependency when Env is overridden.
-		// #nosec G204
-		return exec.Command("/bin/sh", "-c", afterC)
+		// Use platform-specific shell command
+		return getShellCommand(afterC)
 	}
-	// Fallback: when metacharacters are present, use /bin/sh -c
+	// Fallback: when metacharacters are present, use shell
 	if strings.ContainsAny(cmdStr, "|&;<>*?`$\"'(){}[]~") {
-		// #nosec G204
-		return exec.Command("/bin/sh", "-c", cmdStr)
+		return getShellCommand(cmdStr)
 	}
 	parts := strings.Fields(cmdStr)
 	name := parts[0]
