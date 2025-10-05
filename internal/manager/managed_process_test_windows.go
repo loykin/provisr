@@ -30,7 +30,8 @@ func killProcessByPID(pid int) error {
 
 // getTestCommand returns a platform-appropriate test command
 func getTestCommand(message string, duration int) string {
-	return fmt.Sprintf("cmd /c \"echo %s && timeout /t %d /nobreak\"", message, duration)
+	// Use ping for reliable delay on Windows - ping -n (duration+1) gives roughly duration seconds
+	return fmt.Sprintf("cmd /c \"echo %s && ping -n %d 127.0.0.1 >nul\"", message, duration+1)
 }
 
 // getEnvTestCommand returns a command that echoes an environment variable
@@ -40,7 +41,7 @@ func getEnvTestCommand(varName string) string {
 
 // getComplexTestCommand returns a complex test command for stress testing
 func getComplexTestCommand() string {
-	return "cmd /c \"timeout /t 1 /nobreak >nul && echo started && timeout /t 2 /nobreak\""
+	return "cmd /c \"ping -n 3 127.0.0.1 >nul && echo started && ping -n 5 127.0.0.1 >nul\""
 }
 
 // getSimpleTestCommand returns a simple test command
