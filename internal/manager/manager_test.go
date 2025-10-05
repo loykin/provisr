@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -814,14 +813,6 @@ func TestManagerProcessCoordination(t *testing.T) {
 	t.Logf("✓ Manager coordination successful: %d/%d processes running", runningCount, numProcesses)
 }
 
-// Helper function to kill process by PID
-func killProcessByPID(pid int) error {
-	if pid <= 0 {
-		return fmt.Errorf("invalid PID: %d", pid)
-	}
-	return syscall.Kill(pid, syscall.SIGKILL)
-}
-
 // TestManagerRestartOnly tests that Manager exclusively handles restart logic
 func TestManagerRestartOnly(t *testing.T) {
 	t.Log("=== Manager-Only Restart Test ===")
@@ -853,7 +844,7 @@ func TestManagerRestartOnly(t *testing.T) {
 	t.Logf("✓ Initial state: PID=%d, Restarts=%d", originalPID, originalRestarts)
 
 	// Test 1: Single kill and restart
-	err = syscall.Kill(originalPID, syscall.SIGKILL)
+	err = killProcessByPID(originalPID)
 	require.NoError(t, err)
 	t.Logf("✓ Killed process PID %d", originalPID)
 
@@ -881,7 +872,7 @@ func TestManagerRestartOnly(t *testing.T) {
 		require.True(t, currentStatus.Running, "Process should be running before kill")
 
 		// Kill the process
-		err = syscall.Kill(currentStatus.PID, syscall.SIGKILL)
+		err = killProcessByPID(currentStatus.PID)
 		require.NoError(t, err)
 		t.Logf("Rapid kill #%d: PID %d", i, currentStatus.PID)
 
