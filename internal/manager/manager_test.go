@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -69,7 +69,7 @@ func TestManagerSetGlobalEnv(t *testing.T) {
 	// but we can test that it doesn't panic and processes work)
 	spec := process.Spec{
 		Name:    "test-env-process",
-		Command: "echo $TEST_VAR",
+		Command: getEnvTestCommand("TEST_VAR"),
 	}
 
 	if err := mgr.Register(spec); err != nil {
@@ -814,14 +814,6 @@ func TestManagerProcessCoordination(t *testing.T) {
 	t.Logf("✓ Manager coordination successful: %d/%d processes running", runningCount, numProcesses)
 }
 
-// Helper function to kill process by PID
-func killProcessByPID(pid int) error {
-	if pid <= 0 {
-		return fmt.Errorf("invalid PID: %d", pid)
-	}
-	return syscall.Kill(pid, syscall.SIGKILL)
-}
-
 // TestManagerRestartOnly tests that Manager exclusively handles restart logic
 func TestManagerRestartOnly(t *testing.T) {
 	t.Log("=== Manager-Only Restart Test ===")
@@ -853,7 +845,7 @@ func TestManagerRestartOnly(t *testing.T) {
 	t.Logf("✓ Initial state: PID=%d, Restarts=%d", originalPID, originalRestarts)
 
 	// Test 1: Single kill and restart
-	err = syscall.Kill(originalPID, syscall.SIGKILL)
+	err = killProcessByPID(originalPID)
 	require.NoError(t, err)
 	t.Logf("✓ Killed process PID %d", originalPID)
 
@@ -881,7 +873,7 @@ func TestManagerRestartOnly(t *testing.T) {
 		require.True(t, currentStatus.Running, "Process should be running before kill")
 
 		// Kill the process
-		err = syscall.Kill(currentStatus.PID, syscall.SIGKILL)
+		err = killProcessByPID(currentStatus.PID)
 		require.NoError(t, err)
 		t.Logf("Rapid kill #%d: PID %d", i, currentStatus.PID)
 
@@ -907,6 +899,11 @@ func TestManagerRestartOnly(t *testing.T) {
 
 // Test state-based command validation
 func TestStateBasedCommandValidation(t *testing.T) {
+	// Skip this test on Windows - use Windows-specific version instead
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping Unix-specific test on Windows - see TestStateBasedCommandValidation_Windows")
+	}
+
 	spec := process.Spec{
 		Name:    "validation-test",
 		Command: "sleep 0.5",
@@ -943,8 +940,8 @@ func TestStateBasedCommandValidation(t *testing.T) {
 		// Create a process that takes longer to start - use a more complex command
 		slowSpec := process.Spec{
 			Name:          "slow-start-test",
-			Command:       "sh -c 'sleep 0.1 && echo started && sleep 2'", // Takes time to fully start
-			StartDuration: 200 * time.Millisecond,                         // Process must stay up for this duration
+			Command:       getComplexTestCommand(), // Takes time to fully start
+			StartDuration: 200 * time.Millisecond,  // Process must stay up for this duration
 		}
 
 		slowMp := NewManagedProcess(slowSpec, mockEnvMerger)

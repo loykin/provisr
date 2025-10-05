@@ -12,17 +12,20 @@ permissions:
 jobs:
   test:
     name: Go Test
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 0
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
 
       - name: Show Go version
@@ -34,35 +37,42 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Install staticcheck
+      - name: Install staticcheck (Linux only)
+        if: runner.os == 'Linux'
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
-      - name: Staticcheck
+      - name: Staticcheck (Linux only)
+        if: runner.os == 'Linux'
         run: $(go env GOPATH)/bin/staticcheck ./...
 
-      - name: Install gosec
+      - name: Install gosec (Linux only)
+        if: runner.os == 'Linux'
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
-      - name: Run gosec (static analysis)
+      - name: Run gosec (static analysis) (Linux only)
+        if: runner.os == 'Linux'
         run: |
           set -e
           $(go env GOPATH)/bin/gosec -no-fail -fmt=json -out=gosec-report.json ./...
 
-      - name: Upload gosec report artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Upload gosec report artifact (Linux only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
         with:
           name: gosec-report
           path: gosec-report.json
 
-      - name: Trivy Scan (Go dependencies)
+      - name: Trivy Scan (Go dependencies) (Linux only)
+        if: runner.os == 'Linux'
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           format: json
           output: trivy-report.json
 
-      - name: Upload Trivy report artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Upload Trivy report artifact (Linux only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report.json
@@ -93,23 +103,23 @@ jobs:
           set -e
           echo "Building provisr binary for daemon"
           go build -o provisr-ci ./cmd/provisr
-          
+
           echo "Starting provisr daemon in background"
           ./provisr-ci serve examples/embedded_client/daemon-config.toml &
           DAEMON_PID=$!
-          
+
           echo "Waiting for daemon to start..."
-          sleep 3
-          
+          sleep 5
+
           # Check if daemon is responding (using direct HTTP call)
           echo "Checking daemon readiness..."
-          for i in {1..10}; do
-            if timeout 5s curl -s http://localhost:8080/api/status 2>/dev/null | grep -q "ok"; then
+          for i in {1..15}; do
+            if curl -s --connect-timeout 2 --max-time 5 http://localhost:8080/api/status 2>/dev/null | grep -q "ok"; then
               echo "Daemon is ready"
               break
             fi
-            if [ $i -eq 10 ]; then
-              echo "Daemon failed to start after 10 attempts"
+            if [ $i -eq 15 ]; then
+              echo "Daemon failed to start after 15 attempts"
               echo "Checking if daemon process is still running..."
               if kill -0 $DAEMON_PID 2>/dev/null; then
                 echo "Daemon process is running but not responding to API calls"
@@ -119,31 +129,40 @@ jobs:
               kill $DAEMON_PID 2>/dev/null || true
               exit 1
             fi
-            echo "Waiting for daemon... ($i/10)"
+            echo "Waiting for daemon... ($i/15)"
             sleep 2
           done
-          
+
           echo "Running examples/embedded_client"
           go run ./examples/embedded_client
-          
+
           echo "Stopping daemon"
           kill $DAEMON_PID || true
           wait $DAEMON_PID 2>/dev/null || true
-          
+
           echo "✅ embedded_client example completed successfully"
         env:
           CI: true
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage (Linux only)
+        if: runner.os == 'Linux'
         env:
           CGO_ENABLED: 1
         run: go test -p 1 -race -covermode=atomic -coverprofile=coverage.out $(go list ./... | grep -v '/examples')
 
-      - name: Show coverage summary
+      - name: Run tests (macOS)
+        if: runner.os == 'Darwin'
+        env:
+          CGO_ENABLED: 1
+        run: go test -p 1 -race -covermode=atomic -v $(go list ./... | grep -v '/examples')
+
+      - name: Show coverage summary (Linux only)
+        if: runner.os == 'Linux'
         run: go tool cover -func=coverage.out | tail -n 1
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Upload coverage artifact (Linux only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.out
@@ -157,10 +176,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        uses: actions/checkout@v4
 
       - name: Download coverage artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        uses: actions/download-artifact@v4
         with:
           name: coverage
           path: .
@@ -204,7 +223,7 @@ jobs:
           commit_message: "chore(ci): publish coverage endpoint (Shields)"
 
       - name: Download Trivy report artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        uses: actions/download-artifact@v4
         with:
           name: trivy-report
           path: .

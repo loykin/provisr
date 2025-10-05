@@ -240,8 +240,9 @@ func TestBuildCommand_EmptyCommand(t *testing.T) {
 	}
 	cmd := spec.BuildCommand()
 
-	if cmd.Path != "/bin/true" {
-		t.Errorf("expected /bin/true for empty command, got %q", cmd.Path)
+	// Cross-platform test - just ensure we get a valid command
+	if cmd == nil || cmd.Path == "" {
+		t.Errorf("expected valid command for empty string, got %v", cmd)
 	}
 }
 
@@ -252,8 +253,8 @@ func TestBuildCommand_SimpleCommand(t *testing.T) {
 	}
 	cmd := spec.BuildCommand()
 
-	if !(cmd.Path == "ls" || strings.HasSuffix(cmd.Path, "/ls")) {
-		t.Errorf("expected ls or a path ending with /ls, got %q", cmd.Path)
+	if !(cmd.Path == "ls" || strings.HasSuffix(cmd.Path, "/ls") || strings.HasSuffix(cmd.Path, "\\ls.exe")) {
+		t.Errorf("expected ls or a path ending with /ls or \\ls.exe, got %q", cmd.Path)
 	}
 
 	expected := []string{"ls", "-la"}

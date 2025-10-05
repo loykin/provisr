@@ -14,10 +14,10 @@ type CommandDetector struct{ Command string }
 func buildShellAwareCommand(cmdStr string) *exec.Cmd {
 	cmdStr = strings.TrimSpace(cmdStr)
 	if cmdStr == "" {
-		return exec.Command("/bin/true")
+		return getTrueCommand()
 	}
 	if strings.ContainsAny(cmdStr, "|&;<>*?`$\"'(){}[]~") {
-		return exec.Command("/bin/sh", "-c", cmdStr)
+		return getShellCommand(cmdStr)
 	}
 	parts := strings.Fields(cmdStr)
 	name := parts[0]
