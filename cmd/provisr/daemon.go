@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"syscall"
 )
 
 // daemonize starts the process as a daemon in the background
@@ -53,9 +52,7 @@ func daemonize(pidFile string, logFile string) error {
 	cmd := exec.Command(executable, newArgs...)
 
 	// Set process attributes for daemon
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // Create new session
-	}
+	configureDaemonAttrs(cmd)
 
 	// Redirect stdin, stdout, stderr
 	cmd.Stdin = nil

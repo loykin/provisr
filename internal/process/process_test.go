@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -87,7 +86,7 @@ func TestConfigureCmdAppliesEnvWorkdirLogging(t *testing.T) {
 
 	// Wait for process to exit by polling OS without calling Wait()
 	pid := r.Snapshot().PID
-	_ = waitUntil(2*time.Second, 20*time.Millisecond, func() bool { return syscall.Kill(pid, 0) != nil })
+	_ = waitUntil(2*time.Second, 20*time.Millisecond, func() bool { return !processExists(pid) })
 	// Allow file buffers to flush
 	time.Sleep(50 * time.Millisecond)
 
@@ -237,7 +236,7 @@ func TestDetectorsAndUpdateSpec(t *testing.T) {
 	_ = r.TryStart(cmd)
 	// Wait for process to exit via OS polling
 	pid := r.Snapshot().PID
-	_ = waitUntil(2*time.Second, 20*time.Millisecond, func() bool { return syscall.Kill(pid, 0) != nil })
+	_ = waitUntil(2*time.Second, 20*time.Millisecond, func() bool { return !processExists(pid) })
 	// ensure EnforceStartDuration with 0 is no-op
 	if err := r.EnforceStartDuration(0); err != nil {
 		t.Fatalf("EnforceStartDuration(0) unexpected err: %v", err)
@@ -281,7 +280,7 @@ func TestProcessDetectAliveParallel(t *testing.T) {
 	pid := r.Snapshot().PID
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
+		if !processExists(pid) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
