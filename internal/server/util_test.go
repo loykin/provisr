@@ -47,7 +47,7 @@ func TestIsSafeAbsPath(t *testing.T) {
 	if !isSafeAbsPath("") {
 		t.Fatalf("empty should be allowed")
 	}
-	abs := filepath.Join(string(filepath.Separator), "tmp", "x")
+	abs := getPlatformAbsPath()
 	if !isSafeAbsPath(abs) {
 		t.Fatalf("abs clean path should be allowed: %s", abs)
 	}

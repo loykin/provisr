@@ -14,16 +14,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
 
       - name: Show Go version
@@ -61,7 +70,7 @@ jobs:
 
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
@@ -78,7 +87,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        uses: actions/download-artifact@v4
         with:
           pattern: binaries-*
           merge-multiple: true
@@ -109,11 +118,11 @@ jobs:
           for f in *.tar.gz *.zip; do
           cosign attest-blob --yes $f \
             --type slsaprovenance \
-            --predicate <(echo '{
-              "buildType": "https://slsa.dev/container/v1",
-              "builder": { "id": "https://github.com/loykin/provisr" },
-              "invocation": { "configSource": { "uri": "git+https://github.com/loykin/provisr@${GITHUB_REF_NAME}" } }
-            }') \
+            --predicate <(echo "{
+              \"buildType\": \"https://slsa.dev/container/v1\",
+              \"builder\": { \"id\": \"https://github.com/loykin/provisr\" },
+              \"invocation\": { \"configSource\": { \"uri\": \"git+https://github.com/loykin/provisr@${GITHUB_REF_NAME}\" } }
+            }") \
             --output-attestation $f.intoto.jsonl \
             --output-certificate $f.pem
           done
@@ -121,7 +130,7 @@ jobs:
           COSIGN_EXPERIMENTAL: "true"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@62c96d0c4e8a889135c1f3a25910db8dbe0e85f7
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             *.tar.gz

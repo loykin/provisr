@@ -1,7 +1,7 @@
 package manager
 
 import (
-	"syscall"
+	"runtime"
 	"testing"
 	"time"
 
@@ -325,6 +325,10 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows - see TestDetectAliveFalsePositiveInManager_Windows")
+	}
+
 	spec := process.Spec{
 		Name:        "test-false-positive",
 		Command:     "sh -c 'echo starting; sleep 10'",
@@ -355,7 +359,7 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 	pid := status.PID
 	t.Logf("Started process with PID: %d", pid)
 
-	err = syscall.Kill(pid, syscall.SIGKILL)
+	err = killProcessByPID(pid)
 	if err != nil {
 		t.Fatalf("Failed to kill process: %v", err)
 	}
@@ -386,6 +390,10 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 func TestManagedProcessNoAutoRestart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping no auto-restart test")
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows - see TestManagedProcessNoAutoRestart_Windows")
 	}
 
 	spec := process.Spec{
@@ -420,7 +428,7 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	t.Logf("Initial state: PID=%d, Restarts=%d", initialPID, initialRestarts)
 
 	// Kill the process
-	err = syscall.Kill(initialPID, syscall.SIGKILL)
+	err = killProcessByPID(initialPID)
 	if err != nil {
 		t.Fatalf("Failed to kill process: %v", err)
 	}

@@ -197,8 +197,8 @@ func FuzzSanitizeBase(f *testing.F) {
 // FuzzCombinedValidation tests the interaction of validation functions
 func FuzzCombinedValidation(f *testing.F) {
 	// Test combinations of name and path validation
-	f.Add("process-name", "/work/dir")
-	f.Add("../bad", "/safe/path")
+	addPlatformSpecificSeeds(f)
+	f.Add("../bad", "")
 	f.Add("good", "../bad/path")
 	f.Add("", "")
 
