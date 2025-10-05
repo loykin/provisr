@@ -2,7 +2,6 @@ package manager
 
 import (
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 
@@ -429,7 +428,7 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	t.Logf("Initial state: PID=%d, Restarts=%d", initialPID, initialRestarts)
 
 	// Kill the process
-	err = syscall.Kill(initialPID, syscall.SIGKILL)
+	err = killProcessByPID(initialPID)
 	if err != nil {
 		t.Fatalf("Failed to kill process: %v", err)
 	}
