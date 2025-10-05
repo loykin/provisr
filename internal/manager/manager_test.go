@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -898,6 +899,11 @@ func TestManagerRestartOnly(t *testing.T) {
 
 // Test state-based command validation
 func TestStateBasedCommandValidation(t *testing.T) {
+	// Skip this test on Windows - use Windows-specific version instead
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping Unix-specific test on Windows - see TestStateBasedCommandValidation_Windows")
+	}
+
 	spec := process.Spec{
 		Name:    "validation-test",
 		Command: "sleep 0.5",
