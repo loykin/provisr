@@ -16,10 +16,10 @@ import (
 // with random operations to catch race conditions and state inconsistencies
 func FuzzManagerConcurrentOperations(f *testing.F) {
 	// Seed with interesting test cases
-	f.Add([]byte("proc-1 sleep 0.1"))
-	f.Add([]byte("test-proc /bin/sh -c 'echo hello'"))
-	f.Add([]byte("multi-instance-proc echo test"))
-	f.Add([]byte("long-name-process-with-special-chars_123 true"))
+	f.Add([]byte("proc-1 " + getTestCommand("proc1", 1)))
+	f.Add([]byte("test-proc " + getTestCommand("hello", 1)))
+	f.Add([]byte("multi-instance-proc " + getSimpleTestCommand("test")))
+	f.Add([]byte("long-name-process-with-special-chars_123 " + getTrueCommand()))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < 5 || len(data) > 1000 {
@@ -189,7 +189,7 @@ func FuzzPatternMatching(f *testing.F) {
 		if processName != "" && isValidName(processName) {
 			spec := process.Spec{
 				Name:      processName,
-				Command:   "sleep 0.1",
+				Command:   getTestCommand("test", 1),
 				Instances: 1,
 			}
 			_ = mgr.Register(spec) // Ignore errors for fuzzing
