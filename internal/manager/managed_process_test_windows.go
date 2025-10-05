@@ -41,9 +41,8 @@ func getEnvTestCommand(varName string) string {
 
 // getComplexTestCommand returns a complex test command for stress testing
 func getComplexTestCommand() string {
-	// Use longer delay to ensure process runs longer than StartDuration (200ms)
-	// ping -n 6 takes about 5 seconds, ping -n 10 takes about 9 seconds
-	return "cmd /c \"ping -n 6 127.0.0.1 >nul && echo started && ping -n 10 127.0.0.1 >nul\""
+	// Use PowerShell for reliable long-running process that exceeds StartDuration (200ms)
+	return "powershell -Command \"Start-Sleep -Seconds 2; Write-Output 'started'; Start-Sleep -Seconds 5\""
 }
 
 // getSimpleTestCommand returns a simple test command
