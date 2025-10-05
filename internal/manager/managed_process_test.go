@@ -1,9 +1,6 @@
 package manager
 
 import (
-	"os"
-	"runtime"
-	"syscall"
 	"testing"
 	"time"
 
@@ -358,22 +355,9 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 	t.Logf("Started process with PID: %d", pid)
 
 	// Kill process (platform-specific)
-	if runtime.GOOS == "windows" {
-		// On Windows, we use os.Process.Kill() for simplicity in tests
-		proc, err := os.FindProcess(pid)
-		if err != nil {
-			t.Fatalf("Failed to find process: %v", err)
-		}
-		err = proc.Kill()
-		if err != nil {
-			t.Fatalf("Failed to kill process: %v", err)
-		}
-	} else {
-		// On Unix systems, use syscall.Kill
-		err = syscall.Kill(pid, syscall.SIGKILL)
-		if err != nil {
-			t.Fatalf("Failed to kill process: %v", err)
-		}
+	err = killProcessForTest(pid)
+	if err != nil {
+		t.Fatalf("Failed to kill process: %v", err)
 	}
 
 	// Wait for process to die
@@ -436,7 +420,7 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 	t.Logf("Initial state: PID=%d, Restarts=%d", initialPID, initialRestarts)
 
 	// Kill the process
-	err = syscall.Kill(initialPID, syscall.SIGKILL)
+	err = killProcessForTest(initialPID)
 	if err != nil {
 		t.Fatalf("Failed to kill process: %v", err)
 	}
