@@ -1,10 +1,16 @@
 package factory
 
 import (
+	"path/filepath"
 	"testing"
 )
 
 func TestFactoryDSNTypes(t *testing.T) {
+	// Create a temporary file for SQLite testing
+	tempDir := t.TempDir()
+	sqliteFile := filepath.Join(tempDir, "test.db")
+	sqliteDSN := "sqlite:///" + filepath.ToSlash(sqliteFile)
+
 	tests := []struct {
 		name        string
 		dsn         string
@@ -17,7 +23,7 @@ func TestFactoryDSNTypes(t *testing.T) {
 		{"OpenSearch DSN", "opensearch://localhost:9200/process-logs", false, true},
 		{"PostgreSQL DSN", "postgres://user:pass@localhost:5432/db?sslmode=disable", false, true},
 		{"PostgreSQL DSN alt", "postgresql://user:pass@localhost:5432/db", false, true},
-		{"SQLite file DSN", "sqlite:///tmp/test.db", false, false},
+		{"SQLite file DSN", sqliteDSN, false, false},
 		{"SQLite memory DSN", "sqlite://:memory:", false, false},
 	}
 

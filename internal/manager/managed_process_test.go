@@ -326,7 +326,7 @@ func TestDetectAliveFalsePositiveInManager(t *testing.T) {
 
 	spec := process.Spec{
 		Name:        "test-false-positive",
-		Command:     "sh -c 'echo starting; sleep 10'",
+		Command:     getTestCommand("starting", 10),
 		AutoRestart: false, // Don't auto-restart for this test
 	}
 
@@ -390,7 +390,7 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 
 	spec := process.Spec{
 		Name:        "test-no-restart",
-		Command:     "sh -c 'echo no-restart-test; sleep 5'",
+		Command:     getTestCommand("no-restart-test", 5),
 		AutoRestart: false, // Explicitly disable auto-restart
 	}
 

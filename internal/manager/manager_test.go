@@ -68,7 +68,7 @@ func TestManagerSetGlobalEnv(t *testing.T) {
 	// but we can test that it doesn't panic and processes work)
 	spec := process.Spec{
 		Name:    "test-env-process",
-		Command: "echo $TEST_VAR",
+		Command: getEnvTestCommand("TEST_VAR"),
 	}
 
 	if err := mgr.Register(spec); err != nil {
@@ -934,8 +934,8 @@ func TestStateBasedCommandValidation(t *testing.T) {
 		// Create a process that takes longer to start - use a more complex command
 		slowSpec := process.Spec{
 			Name:          "slow-start-test",
-			Command:       "sh -c 'sleep 0.1 && echo started && sleep 2'", // Takes time to fully start
-			StartDuration: 200 * time.Millisecond,                         // Process must stay up for this duration
+			Command:       getComplexTestCommand(), // Takes time to fully start
+			StartDuration: 200 * time.Millisecond,  // Process must stay up for this duration
 		}
 
 		slowMp := NewManagedProcess(slowSpec, mockEnvMerger)
