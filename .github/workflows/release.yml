@@ -14,16 +14,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
 
       - name: Show Go version
@@ -34,9 +41,7 @@ jobs:
         run: |
           mkdir -p dist
           BIN_NAME=provisr
-          EXT=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
-          BIN_FILE="${BIN_NAME}${EXT}"
+          BIN_FILE="${BIN_NAME}"
           OUT_DIR="${BIN_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
 
           echo "Building $BIN_FILE for $OUT_DIR"
@@ -51,17 +56,13 @@ jobs:
             find "$OUT_DIR/config" -name '*.db' -type f -delete || true
           fi
 
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -9 -r "dist/${OUT_DIR}.zip" "$OUT_DIR"
-          else
-            tar -czf "dist/${OUT_DIR}.tar.gz" "$OUT_DIR"
-          fi
+          tar -czf "dist/${OUT_DIR}.tar.gz" "$OUT_DIR"
 
           rm -rf "$OUT_DIR" "$BIN_FILE"
 
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
@@ -78,7 +79,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        uses: actions/download-artifact@v4
         with:
           pattern: binaries-*
           merge-multiple: true
@@ -88,7 +89,7 @@ jobs:
 
       - name: Generate checksums
         run: |
-          sha256sum *.tar.gz *.zip > checksums.txt
+          sha256sum *.tar.gz > checksums.txt
           cat checksums.txt
 
       - name: Install cosign
@@ -96,7 +97,7 @@ jobs:
 
       - name: Sign artifacts with cosign
         run: |
-          for f in *.tar.gz *.zip checksums.txt; do
+          for f in *.tar.gz checksums.txt; do
           cosign sign-blob --yes $f \
             --output-signature $f.sig \
             --output-certificate $f.pem
@@ -106,14 +107,14 @@ jobs:
 
       - name: Generate provenance
         run: |
-          for f in *.tar.gz *.zip; do
+          for f in *.tar.gz; do
           cosign attest-blob --yes $f \
             --type slsaprovenance \
-            --predicate <(echo '{
-              "buildType": "https://slsa.dev/container/v1",
-              "builder": { "id": "https://github.com/loykin/provisr" },
-              "invocation": { "configSource": { "uri": "git+https://github.com/loykin/provisr@${GITHUB_REF_NAME}" } }
-            }') \
+            --predicate <(echo "{
+              \"buildType\": \"https://slsa.dev/container/v1\",
+              \"builder\": { \"id\": \"https://github.com/loykin/provisr\" },
+              \"invocation\": { \"configSource\": { \"uri\": \"git+https://github.com/loykin/provisr@${GITHUB_REF_NAME}\" } }
+            }") \
             --output-attestation $f.intoto.jsonl \
             --output-certificate $f.pem
           done
@@ -121,11 +122,10 @@ jobs:
           COSIGN_EXPERIMENTAL: "true"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@62c96d0c4e8a889135c1f3a25910db8dbe0e85f7
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             *.tar.gz
-            *.zip
             checksums.txt
             *.sig
             *.intoto.jsonl
