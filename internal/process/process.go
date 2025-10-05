@@ -306,7 +306,7 @@ func (r *Process) DetectAlive() (bool, string) {
 
 	// If we have a PID, prefer checking it directly first
 	if pid > 0 {
-		if syscall.Kill(pid, 0) == nil {
+		if killProcess(pid, 0) == nil {
 			return true, "exec:pid"
 		}
 	}
@@ -382,7 +382,7 @@ func (r *Process) StopWithSignal(sig syscall.Signal) error {
 	cmd := r.CopyCmd()
 	if cmd != nil && cmd.Process != nil {
 		pid := cmd.Process.Pid
-		if err := syscall.Kill(-pid, sig); err != nil {
+		if err := killProcess(-pid, sig); err != nil {
 			slog.Warn("Failed to send signal to process group, falling back to SIGKILL",
 				"pid", pid, "signal", sig, "error", err)
 			// Fall back to SIGKILL best-effort; upper layers manage further retries
@@ -395,11 +395,11 @@ func (r *Process) StopWithSignal(sig syscall.Signal) error {
 	pid := r.pid
 	r.mu.Unlock()
 	if pid > 0 {
-		if err := syscall.Kill(-pid, sig); err != nil {
+		if err := killProcess(-pid, sig); err != nil {
 			slog.Warn("Failed to send signal to stored PID, falling back to SIGKILL",
 				"pid", pid, "signal", sig, "error", err)
 			// Fall back to SIGKILL on the same PID
-			if killErr := syscall.Kill(-pid, syscall.SIGKILL); killErr != nil {
+			if killErr := killProcess(-pid, syscall.SIGKILL); killErr != nil {
 				slog.Warn("Failed to kill process with SIGKILL fallback", "pid", pid, "error", killErr)
 			}
 		}
@@ -420,7 +420,7 @@ func (r *Process) Kill() error {
 		return nil
 	}
 	pid := cmd.Process.Pid
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+	if err := killProcess(-pid, syscall.SIGKILL); err != nil {
 		slog.Warn("Failed to kill process", "pid", pid, "error", err)
 	}
 	return nil

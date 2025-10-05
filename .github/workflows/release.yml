@@ -23,6 +23,8 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +43,9 @@ jobs:
         run: |
           mkdir -p dist
           BIN_NAME=provisr
-          BIN_FILE="${BIN_NAME}"
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
+          BIN_FILE="${BIN_NAME}${EXT}"
           OUT_DIR="${BIN_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
 
           echo "Building $BIN_FILE for $OUT_DIR"
@@ -56,7 +60,11 @@ jobs:
             find "$OUT_DIR/config" -name '*.db' -type f -delete || true
           fi
 
-          tar -czf "dist/${OUT_DIR}.tar.gz" "$OUT_DIR"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -9 -r "dist/${OUT_DIR}.zip" "$OUT_DIR"
+          else
+            tar -czf "dist/${OUT_DIR}.tar.gz" "$OUT_DIR"
+          fi
 
           rm -rf "$OUT_DIR" "$BIN_FILE"
 
@@ -89,7 +97,7 @@ jobs:
 
       - name: Generate checksums
         run: |
-          sha256sum *.tar.gz > checksums.txt
+          sha256sum *.tar.gz *.zip > checksums.txt
           cat checksums.txt
 
       - name: Install cosign
@@ -97,7 +105,7 @@ jobs:
 
       - name: Sign artifacts with cosign
         run: |
-          for f in *.tar.gz checksums.txt; do
+          for f in *.tar.gz *.zip checksums.txt; do
           cosign sign-blob --yes $f \
             --output-signature $f.sig \
             --output-certificate $f.pem
@@ -107,7 +115,7 @@ jobs:
 
       - name: Generate provenance
         run: |
-          for f in *.tar.gz; do
+          for f in *.tar.gz *.zip; do
           cosign attest-blob --yes $f \
             --type slsaprovenance \
             --predicate <(echo "{
@@ -126,6 +134,7 @@ jobs:
         with:
           files: |
             *.tar.gz
+            *.zip
             checksums.txt
             *.sig
             *.intoto.jsonl
