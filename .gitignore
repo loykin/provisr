@@ -3,7 +3,7 @@
 .vscode/
 
 # Build artifacts
-provisr
+/provisr
 provisr-*
 
 # Logs
