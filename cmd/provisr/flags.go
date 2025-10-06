@@ -93,3 +93,11 @@ type LoginFlags struct {
 	Method       string
 	ServerURL    string
 }
+
+// Template command flags
+type TemplateCreateFlags struct {
+	Name   string
+	Type   string
+	Force  bool
+	Output string
+}
