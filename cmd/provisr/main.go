@@ -86,6 +86,7 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 	unregisterFlags := &UnregisterFlags{}
 	groupFlags := &GroupCommandFlags{}
 	cronFlags := &CronFlags{}
+	templateFlags := &TemplateCreateFlags{}
 
 	provisrCommand := command{mgr: mgr}
 
@@ -107,6 +108,7 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 		createLoginCommand(provisrCommand),
 		createLogoutCommand(provisrCommand),
 		createServeCommand(globalFlags),
+		createTemplateCommand(provisrCommand, templateFlags),
 	)
 
 	return root, func() {
@@ -947,6 +949,51 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.Logout()
 		},
+	}
+
+	return cmd
+}
+
+// createTemplateCommand creates the template command
+func createTemplateCommand(provisrCommand command, templateFlags *TemplateCreateFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "template",
+		Short: "Create process templates",
+		Long: `Create process configuration templates for common service types.
+Templates can be modified and registered using register-file command.
+
+Supported template types:
+  web       - Web application server
+  api       - REST API service
+  worker    - Background worker
+  database  - Database service
+  cron      - Scheduled task
+  simple    - Basic process
+
+Examples:
+  provisr template --type=web --name=my-webapp
+  provisr template --type=api --name=user-service
+  provisr template --type=worker --output=./custom-worker.json
+  provisr template --type=simple --name=hello-world --force`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return provisrCommand.TemplateCreate(TemplateCreateFlags{
+				Name:   templateFlags.Name,
+				Type:   templateFlags.Type,
+				Force:  templateFlags.Force,
+				Output: templateFlags.Output,
+			})
+		},
+	}
+
+	// Add flags specific to template command
+	cmd.Flags().StringVar(&templateFlags.Type, "type", "", "template type (required): web, api, worker, database, cron, simple")
+	cmd.Flags().StringVar(&templateFlags.Name, "name", "", "process name for template (defaults to type-sample)")
+	cmd.Flags().StringVar(&templateFlags.Output, "output", "", "output file path (defaults to templates/name.json)")
+	cmd.Flags().BoolVar(&templateFlags.Force, "force", false, "overwrite existing template file")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("type"); err != nil {
+		panic(err)
 	}
 
 	return cmd
