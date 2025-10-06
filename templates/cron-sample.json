@@ -1,0 +1,16 @@
+{
+  "auto_restart": false,
+  "command": "./scheduled-task",
+  "env": [
+    "SCHEDULE=daily",
+    "LOG_LEVEL=info"
+  ],
+  "log": {
+    "file": {
+      "dir": "/var/log/cron-sample"
+    }
+  },
+  "name": "cron-sample",
+  "priority": 30,
+  "work_dir": "/app"
+}
