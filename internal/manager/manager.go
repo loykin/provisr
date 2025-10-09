@@ -96,7 +96,10 @@ func (m *Manager) getProcessPIDs() map[string]int32 {
 	for name, mp := range m.processes {
 		status := mp.Status()
 		if status.Running && status.PID > 0 {
-			result[name] = int32(status.PID)
+			// Ensure PID fits in int32 range before conversion
+			if status.PID <= 2147483647 {
+				result[name] = int32(status.PID)
+			}
 		}
 	}
 	return result
