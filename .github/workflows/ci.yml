@@ -179,7 +179,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download coverage artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: coverage
           path: .
@@ -223,7 +223,7 @@ jobs:
           commit_message: "chore(ci): publish coverage endpoint (Shields)"
 
       - name: Download Trivy report artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: trivy-report
           path: .
