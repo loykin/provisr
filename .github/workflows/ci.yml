@@ -57,7 +57,7 @@ jobs:
 
       - name: Upload gosec report artifact (Linux only)
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gosec-report
           path: gosec-report.json
@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload Trivy report artifact (Linux only)
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: trivy-report
           path: trivy-report.json
@@ -162,7 +162,7 @@ jobs:
 
       - name: Upload coverage artifact (Linux only)
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage
           path: coverage.out
