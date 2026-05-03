@@ -1,6 +1,6 @@
 module github.com/loykin/provisr/examples/auth_basic
 
-go 1.25.1
+go 1.26
 
 replace github.com/loykin/provisr => ../..
 
