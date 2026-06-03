@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cronjob"
+	"github.com/loykin/provisr/internal/detector"
 	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/job"
 	"github.com/loykin/provisr/internal/logger"
@@ -32,8 +33,15 @@ type TLSConfig = cfg.TLSConfig
 type AutoGenTLS = cfg.AutoGenTLS
 type ServerAuthConfig = cfg.AuthConfig
 
-// Log config type
+// Log config types
 type LogConfig = logger.Config
+type LogFileConfig = logger.FileConfig
+type LogSlogConfig = logger.SlogConfig
+
+// Detector is the interface for custom process readiness / liveness checks.
+// Implement it and assign to Spec.Detectors to override default detection.
+type Detector = detector.Detector
+type CommandDetector = detector.CommandDetector
 
 // Lifecycle types
 type LifecycleHooks = process.LifecycleHooks
@@ -103,6 +111,10 @@ func (m *Manager) InstanceGroupStop(groupName string, wait time.Duration) error 
 	return m.inner.InstanceGroupStop(groupName, wait)
 }
 func (m *Manager) Count(base string) (int, error) { return m.inner.Count(base) }
+
+// Shutdown gracefully stops all managed processes and releases resources.
+// Call this when the embedding application is shutting down (e.g. on SIGTERM).
+func (m *Manager) Shutdown() error { return m.inner.Shutdown() }
 
 // Process Metrics methods
 func (m *Manager) GetProcessMetrics(name string) (metrics.ProcessMetrics, bool) {

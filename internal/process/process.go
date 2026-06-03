@@ -61,7 +61,7 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 		slog.Warn("Detached processes do not support logging")
 	}
 
-	if !spec.Detached && (spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "") {
+	if !spec.Detached && (spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" || spec.Log.File.StdoutWriter != nil || spec.Log.File.StderrWriter != nil) {
 		if spec.Log.File.Dir != "" {
 			if err := os.MkdirAll(spec.Log.File.Dir, 0o750); err != nil {
 				slog.Warn("Failed to create log directory", "dir", spec.Log.File.Dir, "error", err)
