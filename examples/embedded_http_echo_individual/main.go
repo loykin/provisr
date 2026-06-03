@@ -108,7 +108,17 @@ func main() {
 
 	// Create Echo instance
 	e := echo.New()
-	e.Use(middleware.Logger())
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogMethod:  true,
+		LogURI:     true,
+		LogStatus:  true,
+		LogLatency: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			log.Printf("request: %s %s status=%d latency=%s",
+				v.Method, v.URI, v.Status, v.Latency)
+			return nil
+		},
+	}))
 	e.Use(middleware.Recover())
 
 	// Create API endpoints for individual registration

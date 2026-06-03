@@ -26,37 +26,71 @@ func NewManager(processManager *manager.Manager) *Manager {
 	}
 }
 
-// CreateJob creates and starts a new job
+// CreateJob creates and starts a new job.
+// If DependsOn is set, the job enters Pending state and starts only after all
+// listed jobs succeed. If any dependency fails, this job is marked Failed.
 func (m *Manager) CreateJob(spec Spec) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Validate spec
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid job spec: %w", err)
 	}
 
-	// Check for duplicate name
 	if _, exists := m.jobs[spec.Name]; exists {
 		return nil, fmt.Errorf("job %q already exists", spec.Name)
 	}
 
-	// Create job
-	job := NewJob(spec, m.processManager)
-	m.jobs[spec.Name] = job
+	j := NewJob(spec, m.processManager)
+	m.jobs[spec.Name] = j
 
-	// Start job
-	if err := job.Start(); err != nil {
-		delete(m.jobs, spec.Name)
-		return nil, fmt.Errorf("failed to start job: %w", err)
+	if len(spec.DependsOn) > 0 {
+		// Collect dep references while holding the lock to avoid TOCTOU.
+		depJobs := make([]*Job, 0, len(spec.DependsOn))
+		for _, depName := range spec.DependsOn {
+			dep, exists := m.jobs[depName]
+			if !exists {
+				delete(m.jobs, spec.Name)
+				return nil, fmt.Errorf("job %q: dependency %q not found", spec.Name, depName)
+			}
+			depJobs = append(depJobs, dep)
+		}
+		slog.Info("Job created, waiting for dependencies", "name", spec.Name, "deps", spec.DependsOn)
+		go watchDependencies(j, depJobs)
+	} else {
+		if err := j.Start(); err != nil {
+			delete(m.jobs, spec.Name)
+			return nil, fmt.Errorf("failed to start job: %w", err)
+		}
+		slog.Info("Job created and started", "name", spec.Name)
 	}
 
-	// Update metrics
 	metrics.IncJobTotal(spec.Name, string(JobPhaseRunning))
 	metrics.IncJobActive(spec.Name)
 
-	slog.Info("Job created and started", "name", spec.Name)
-	return job, nil
+	return j, nil
+}
+
+// watchDependencies waits for all deps to finish, then starts j or marks it failed.
+func watchDependencies(j *Job, deps []*Job) {
+	for _, dep := range deps {
+		<-dep.Done()
+	}
+	for _, dep := range deps {
+		if dep.GetStatus().Phase != JobPhaseSucceeded {
+			depName := dep.GetSpec().Name
+			depPhase := dep.GetStatus().Phase
+			j.FailWithReason("DependencyFailed",
+				fmt.Sprintf("dependency %q did not succeed (phase: %s)", depName, depPhase))
+			slog.Warn("Job blocked by failed dependency", "job", j.GetSpec().Name, "dep", depName, "phase", depPhase)
+			return
+		}
+	}
+	spec := j.GetSpec()
+	slog.Info("All dependencies satisfied, starting job", "job", spec.Name)
+	if err := j.Start(); err != nil {
+		j.FailWithReason("StartFailed", fmt.Sprintf("failed to start after deps: %v", err))
+	}
 }
 
 // GetJob retrieves a job by name
