@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/loykin/provisr/internal/tls"
 	"github.com/loykin/provisr/pkg/client"
+	provtls "github.com/loykin/provisr/pkg/tls"
 )
 
 func main() {
@@ -47,7 +47,7 @@ func devExample() {
 	fmt.Printf("TLS certificate storage location: %s\n", baseDir)
 
 	// Create development TLS configuration
-	tlsConfig, err := tls.CreateDevTLS(baseDir)
+	tlsConfig, err := provtls.CreateDevTLS(baseDir)
 	if err != nil {
 		log.Fatalf("Failed to create dev TLS config: %v", err)
 	}
@@ -62,7 +62,7 @@ func devExample() {
 	}
 
 	// Quick test TLS configuration
-	quickTLSConfig, err := tls.QuickSelfSignedTLS(filepath.Join(baseDir, "quick"))
+	quickTLSConfig, err := provtls.QuickSelfSignedTLS(filepath.Join(baseDir, "quick"))
 	if err != nil {
 		log.Printf("Failed to create quick TLS config: %v", err)
 	} else {
@@ -98,9 +98,6 @@ func clientExample() {
 			Enabled:    true,
 			ServerName: "my-provisr-server.com",
 			SkipVerify: false,
-			// CACert: "/path/to/ca.crt", // CA certificate file
-			// ClientCert: "/path/to/client.crt", // Client certificate
-			// ClientKey: "/path/to/client.key",  // Client private key
 		},
 	}
 	customClient := client.New(customConfig)
@@ -126,10 +123,8 @@ func clientExample() {
 
 // builderExample demonstrates TLS builder pattern usage
 func builderExample() {
-	// Generate various TLS configurations using Builder pattern
-
 	// 1. Basic auto-generation configuration
-	basicConfig := tls.NewTLSBuilder().
+	basicConfig := provtls.NewTLSBuilder().
 		WithDir("/etc/provisr/tls").
 		WithAutoGenerate(true).
 		Build()
@@ -139,7 +134,7 @@ func builderExample() {
 	fmt.Printf("  Auto Generate: %t\n", basicConfig.AutoGenerate)
 
 	// 2. Custom auto-generation configuration
-	customConfig := tls.NewTLSBuilder().
+	customConfig := provtls.NewTLSBuilder().
 		WithDir("/var/lib/provisr/ssl").
 		WithAutoGenerate(true).
 		WithAutoGenConfig("provisr.local", []string{
@@ -157,7 +152,7 @@ func builderExample() {
 	fmt.Printf("  Valid Days: %d days\n", customConfig.AutoGen.ValidDays)
 
 	// 3. Manual certificate configuration
-	manualConfig := tls.NewTLSBuilder().
+	manualConfig := provtls.NewTLSBuilder().
 		WithCertFiles("/etc/ssl/provisr.crt", "/etc/ssl/provisr.key").
 		Build()
 
@@ -169,15 +164,15 @@ func builderExample() {
 	fmt.Printf("\nPreset usage examples:\n")
 
 	// Development preset
-	devPreset := tls.Default.Development("/tmp/dev-tls")
+	devPreset := provtls.Default.Development("/tmp/dev-tls")
 	fmt.Printf("Development: %s (auto-generate: %t)\n", devPreset.Dir, devPreset.AutoGenerate)
 
 	// Production preset
-	prodPreset := tls.Default.Production("/etc/ssl/cert.pem", "/etc/ssl/key.pem")
+	prodPreset := provtls.Default.Production("/etc/ssl/cert.pem", "/etc/ssl/key.pem")
 	fmt.Printf("Production: %s, %s\n", prodPreset.CertFile, prodPreset.KeyFile)
 
 	// Testing preset
-	testPreset, err := tls.Default.Testing()
+	testPreset, err := provtls.Default.Testing()
 	if err != nil {
 		fmt.Printf("Failed to create testing preset: %v\n", err)
 	} else {

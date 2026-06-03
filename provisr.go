@@ -4,10 +4,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/cronjob"
 	"github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/job"
+	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/internal/manager"
 	"github.com/loykin/provisr/internal/metrics"
 	"github.com/loykin/provisr/internal/process"
@@ -19,9 +21,40 @@ import (
 // Re-export core types for external consumers.
 // These are aliases so conversions are zero-cost.
 
+// Process types
 type Spec = process.Spec
-
 type Status = process.Status
+
+// Config types
+type Config = cfg.Config
+type ServerConfig = cfg.ServerConfig
+type TLSConfig = cfg.TLSConfig
+type AutoGenTLS = cfg.AutoGenTLS
+type ServerAuthConfig = cfg.AuthConfig
+
+// Log config type
+type LogConfig = logger.Config
+
+// Lifecycle types
+type LifecycleHooks = process.LifecycleHooks
+type Hook = process.Hook
+type FailureMode = process.FailureMode
+type RunMode = process.RunMode
+type LifecyclePhase = process.LifecyclePhase
+
+const (
+	FailureModeIgnore = process.FailureModeIgnore
+	FailureModeFail   = process.FailureModeFail
+	FailureModeRetry  = process.FailureModeRetry
+
+	RunModeBlocking = process.RunModeBlocking
+	RunModeAsync    = process.RunModeAsync
+
+	PhasePreStart  = process.PhasePreStart
+	PhasePostStart = process.PhasePostStart
+	PhasePreStop   = process.PhasePreStop
+	PhasePostStop  = process.PhasePostStop
+)
 
 // Manager is a thin facade over internal/process.Manager.
 // It provides a stable public API for embedding.
@@ -148,10 +181,53 @@ func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
 	return iapi.NewServer(addr, basePath, m.inner)
 }
 
-// NewTLSServer starts an HTTPS server with TLS configuration from server config
-func NewTLSServer(serverConfig cfg.ServerConfig, m *Manager) (*http.Server, error) {
+// NewTLSServer starts an HTTPS server with TLS configuration from server config.
+func NewTLSServer(serverConfig ServerConfig, m *Manager) (*http.Server, error) {
 	return iapi.NewTLSServer(serverConfig, m.inner)
 }
+
+// Router is a thin facade over the internal HTTP router for embedding into
+// Gin, Echo, or any net/http-compatible mux.
+type Router struct{ inner *iapi.Router }
+
+// NewRouter constructs a Router with the given basePath (e.g. "/api").
+func NewRouter(m *Manager, basePath string) *Router {
+	return &Router{inner: iapi.NewRouter(m.inner, basePath)}
+}
+
+// Handler returns the net/http.Handler for the provisr API.
+func (r *Router) Handler() http.Handler { return r.inner.Handler() }
+
+// APIEndpoints provides individual gin.HandlerFunc accessors so callers can
+// attach per-route middleware before registering with a Gin router group.
+type APIEndpoints struct{ inner *iapi.APIEndpoints }
+
+// NewAPIEndpoints constructs an APIEndpoints facade with the given basePath.
+func NewAPIEndpoints(m *Manager, basePath string) *APIEndpoints {
+	return &APIEndpoints{inner: iapi.NewAPIEndpoints(m.inner, basePath)}
+}
+
+func (e *APIEndpoints) RegisterHandler() gin.HandlerFunc    { return e.inner.RegisterHandler() }
+func (e *APIEndpoints) StartHandler() gin.HandlerFunc       { return e.inner.StartHandler() }
+func (e *APIEndpoints) StopHandler() gin.HandlerFunc        { return e.inner.StopHandler() }
+func (e *APIEndpoints) StatusHandler() gin.HandlerFunc      { return e.inner.StatusHandler() }
+func (e *APIEndpoints) UnregisterHandler() gin.HandlerFunc  { return e.inner.UnregisterHandler() }
+func (e *APIEndpoints) GroupStartHandler() gin.HandlerFunc  { return e.inner.GroupStartHandler() }
+func (e *APIEndpoints) GroupStopHandler() gin.HandlerFunc   { return e.inner.GroupStopHandler() }
+func (e *APIEndpoints) GroupStatusHandler() gin.HandlerFunc { return e.inner.GroupStatusHandler() }
+func (e *APIEndpoints) DebugProcessesHandler() gin.HandlerFunc {
+	return e.inner.DebugProcessesHandler()
+}
+func (e *APIEndpoints) ProcessMetricsHandler() gin.HandlerFunc {
+	return e.inner.ProcessMetricsHandler()
+}
+func (e *APIEndpoints) ProcessMetricsHistoryHandler() gin.HandlerFunc {
+	return e.inner.ProcessMetricsHistoryHandler()
+}
+func (e *APIEndpoints) ProcessMetricsGroupHandler() gin.HandlerFunc {
+	return e.inner.ProcessMetricsGroupHandler()
+}
+func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) { e.inner.RegisterAll(group) }
 
 // Metrics helpers (public facade)
 

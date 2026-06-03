@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
-	"github.com/loykin/provisr/internal/job"
-	"github.com/loykin/provisr/internal/process"
 )
 
 // Example demonstrating Job and CronJob with lifecycle hooks
@@ -17,50 +15,50 @@ func main() {
 	mgr := provisr.New()
 
 	// Example 1: Data processing job with setup and cleanup hooks
-	dataJobSpec := job.Spec{
+	dataJobSpec := provisr.JobSpec{
 		Name:    "data-processor",
 		Command: "sh -c 'echo \"Processing data...\"; sleep 3; echo \"Data processing completed\"'",
-		Lifecycle: process.LifecycleHooks{
-			PreStart: []process.Hook{
+		Lifecycle: provisr.LifecycleHooks{
+			PreStart: []provisr.Hook{
 				{
 					Name:        "download-data",
 					Command:     "echo 'Downloading input data...' && sleep 1",
-					FailureMode: process.FailureModeFail,
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeFail,
+					RunMode:     provisr.RunModeBlocking,
 				},
 				{
 					Name:        "validate-input",
 					Command:     "echo 'Validating input data...' && sleep 1",
-					FailureMode: process.FailureModeFail,
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeFail,
+					RunMode:     provisr.RunModeBlocking,
 				},
 			},
-			PostStart: []process.Hook{
+			PostStart: []provisr.Hook{
 				{
 					Name:        "notify-start",
 					Command:     "echo 'Notifying team that job started...'",
-					FailureMode: process.FailureModeIgnore,
-					RunMode:     process.RunModeAsync,
+					FailureMode: provisr.FailureModeIgnore,
+					RunMode:     provisr.RunModeAsync,
 				},
 			},
-			PostStop: []process.Hook{
+			PostStop: []provisr.Hook{
 				{
 					Name:        "upload-results",
 					Command:     "echo 'Uploading results...' && sleep 1",
-					FailureMode: process.FailureModeRetry,
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeRetry,
+					RunMode:     provisr.RunModeBlocking,
 				},
 				{
 					Name:        "cleanup-workspace",
 					Command:     "echo 'Cleaning up workspace...'",
-					FailureMode: process.FailureModeIgnore,
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeIgnore,
+					RunMode:     provisr.RunModeBlocking,
 				},
 				{
 					Name:        "notify-completion",
 					Command:     "echo 'Notifying team that job completed...'",
-					FailureMode: process.FailureModeIgnore,
-					RunMode:     process.RunModeAsync,
+					FailureMode: provisr.FailureModeIgnore,
+					RunMode:     provisr.RunModeAsync,
 				},
 			},
 		},

@@ -8,14 +8,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	mng "github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/server"
+	"github.com/loykin/provisr"
 )
 
 func main() {
 	gin.SetMode(gin.ReleaseMode)
-	mgr := mng.NewManager()
+	mgr := provisr.New()
 	base := os.Getenv("API_BASE") // e.g. "/abc"
 	if base == "" {
 		base = "/api"
@@ -25,13 +23,13 @@ func main() {
 	r.Use(gin.Logger(), gin.Recovery())
 
 	// Mount provisr API under base path
-	apiRouter := server.NewRouter(mgr, base)
+	apiRouter := provisr.NewRouter(mgr, base)
 	r.Any(base+"/*any", gin.WrapH(apiRouter.Handler()))
 	// Also support exact paths to avoid 404 on no extra segment
 	r.Any(base, gin.WrapH(apiRouter.Handler()))
 
 	// Start a demo process so you can see it in /status (2 instances)
-	_ = mgr.RegisterN(process.Spec{
+	_ = mgr.RegisterN(provisr.Spec{
 		Name:      "demo",
 		Command:   "/bin/sh -c 'while true; do echo demo; sleep 5; done'",
 		Instances: 2,

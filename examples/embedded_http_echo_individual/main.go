@@ -11,9 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	mng "github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/server"
+	"github.com/loykin/provisr"
 )
 
 // Custom middleware for authentication (Echo version)
@@ -102,7 +100,7 @@ func (rwa *responseWriterAdapter) CloseNotify() <-chan bool {
 
 func main() {
 	gin.SetMode(gin.ReleaseMode)
-	mgr := mng.NewManager()
+	mgr := provisr.New()
 	base := os.Getenv("API_BASE")
 	if base == "" {
 		base = "/api"
@@ -114,7 +112,7 @@ func main() {
 	e.Use(middleware.Recover())
 
 	// Create API endpoints for individual registration
-	endpoints := server.NewAPIEndpoints(mgr, base)
+	endpoints := provisr.NewAPIEndpoints(mgr, base)
 
 	// Create API group
 	apiGroup := e.Group(base)
@@ -178,7 +176,7 @@ func main() {
 	}
 
 	// Start a demo process
-	_ = mgr.RegisterN(process.Spec{
+	_ = mgr.RegisterN(provisr.Spec{
 		Name:      "demo",
 		Command:   "/bin/sh -c 'while true; do echo demo; sleep 5; done'",
 		Instances: 2,

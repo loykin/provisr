@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/loykin/provisr/internal/auth"
+	"github.com/loykin/provisr/pkg/auth"
 )
 
 func main() {

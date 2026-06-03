@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/loykin/provisr/internal/store"
+	"github.com/loykin/provisr/pkg/store"
 )
 
 func main() {
@@ -116,7 +116,6 @@ func main() {
 	// Example 3: Update user
 	fmt.Println("\n=== Update User Example ===")
 
-	// Update user email
 	retrievedUser.Email = "updated@example.com"
 	if err := authStore.UpdateUser(ctx, retrievedUser); err != nil {
 		log.Fatalf("Failed to update user: %v", err)

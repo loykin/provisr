@@ -7,20 +7,18 @@ import (
 	"os"
 
 	"github.com/labstack/echo/v4"
-	mng "github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/server"
+	"github.com/loykin/provisr"
 )
 
 func main() {
 	e := echo.New()
-	mgr := mng.NewManager()
+	mgr := provisr.New()
 	base := os.Getenv("API_BASE")
 	if base == "" {
 		base = "/api"
 	}
 
-	r := server.NewRouter(mgr, base)
+	r := provisr.NewRouter(mgr, base)
 	h := r.Handler()
 
 	// Mount under base using Echo's WrapHandler
@@ -28,7 +26,7 @@ func main() {
 	e.Any(base+"/*", echo.WrapHandler(h))
 
 	// Start a demo process so you can see it in /status (2 instances)
-	_ = mgr.RegisterN(process.Spec{
+	_ = mgr.RegisterN(provisr.Spec{
 		Name:      "demo",
 		Command:   "/bin/sh -c 'while true; do echo demo; sleep 5; done'",
 		Instances: 2,

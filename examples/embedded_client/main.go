@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/loykin/provisr/internal/logger"
 	"github.com/loykin/provisr/pkg/client"
+	"github.com/loykin/provisr/pkg/logger"
 )
 
 func main() {

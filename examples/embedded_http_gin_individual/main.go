@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	mng "github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/server"
+	"github.com/loykin/provisr"
 )
 
 // Custom middleware for authentication (example)
@@ -50,7 +48,7 @@ func rateLimitMiddleware() gin.HandlerFunc {
 
 func main() {
 	gin.SetMode(gin.ReleaseMode)
-	mgr := mng.NewManager()
+	mgr := provisr.New()
 	base := os.Getenv("API_BASE")
 	if base == "" {
 		base = "/api"
@@ -60,7 +58,7 @@ func main() {
 	r.Use(gin.Logger(), gin.Recovery())
 
 	// Create API endpoints for individual registration
-	endpoints := server.NewAPIEndpoints(mgr, base)
+	endpoints := provisr.NewAPIEndpoints(mgr, base)
 
 	// Create API group
 	apiGroup := r.Group(base)
@@ -125,18 +123,8 @@ func main() {
 		debugGroup.GET("/processes", endpoints.DebugProcessesHandler())
 	}
 
-	// Alternative approach: Register all endpoints with common middleware
-	// and then add specific middleware to individual routes
-	//
-	// commonGroup := r.Group(base + "/v2")
-	// commonGroup.Use(loggingMiddleware()) // All endpoints get logging
-	// endpoints.RegisterAll(commonGroup)
-	//
-	// // Then add auth to specific endpoints
-	// commonGroup.Use(authMiddleware()).POST("/register", endpoints.RegisterHandler())
-
 	// Start a demo process so you can test the endpoints
-	_ = mgr.RegisterN(process.Spec{
+	_ = mgr.RegisterN(provisr.Spec{
 		Name:      "demo",
 		Command:   "/bin/sh -c 'while true; do echo demo; sleep 5; done'",
 		Instances: 2,

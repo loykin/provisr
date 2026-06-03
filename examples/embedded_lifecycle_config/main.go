@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
-	"github.com/loykin/provisr/internal/config"
 )
 
 // Example demonstrating lifecycle hooks from configuration file
@@ -30,7 +29,7 @@ func main() {
 	fmt.Printf("Loading configuration from: %s\n", configPath)
 
 	// Load configuration
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := provisr.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
