@@ -10,15 +10,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/loykin/provisr/internal/logger"
-	mng "github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/core"
 )
 
 func setupRouter(t *testing.T, base string) http.Handler {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	mgr := mng.NewManager()
+	mgr := core.New()
 	r := NewRouter(mgr, base)
 	return r.Handler()
 }
@@ -41,7 +39,7 @@ func doReq(t *testing.T, h http.Handler, method, path string, body any) *httptes
 
 func TestStartMissingName(t *testing.T) {
 	h := setupRouter(t, "/abc")
-	spec := process.Spec{Command: "/bin/true"} // missing name - should fail
+	spec := core.Spec{Command: "/bin/true"} // missing name - should fail
 	rec := doReq(t, h, http.MethodPost, "/abc/start", spec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
@@ -83,7 +81,7 @@ func TestStatusUnknown(t *testing.T) {
 func TestWildcardStatusAndStop(t *testing.T) {
 	h := setupRouter(t, "")
 	// start 2 instances via API
-	startSpec := process.Spec{
+	startSpec := core.Spec{
 		Name:      "demo",
 		Command:   "go version",
 		Instances: 2,
@@ -118,20 +116,20 @@ func TestWildcardStatusAndStop(t *testing.T) {
 func TestStartInvalidNameAndPaths(t *testing.T) {
 	h := setupRouter(t, "")
 	// invalid name
-	badNameSpec := process.Spec{Name: "../bad", Command: "go version"} // invalid name - should fail
+	badNameSpec := core.Spec{Name: "../bad", Command: "go version"} // invalid name - should fail
 	rec := doReq(t, h, http.MethodPost, "/register", badNameSpec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid name expected 400, got %d", rec.Code)
 	}
 
 	// invalid workdir (relative)
-	badWorkDirSpec := process.Spec{Name: "ok", Command: "go version", WorkDir: "rel/path"} // relative path - should fail
+	badWorkDirSpec := core.Spec{Name: "ok", Command: "go version", WorkDir: "rel/path"} // relative path - should fail
 	rec = doReq(t, h, http.MethodPost, "/register", badWorkDirSpec)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid workdir expected 400, got %d", rec.Code)
 	}
 	// invalid pid file (relative)
-	spec1 := process.Spec{
+	spec1 := core.Spec{
 		Name:    "ok",
 		Command: "go version",
 		PIDFile: "pid.pid", // relative path - should fail
@@ -142,30 +140,30 @@ func TestStartInvalidNameAndPaths(t *testing.T) {
 	}
 
 	// invalid log paths (relative)
-	spec2 := process.Spec{
+	spec2 := core.Spec{
 		Name:    "ok",
 		Command: "go version",
-		Log:     logger.Config{File: logger.FileConfig{Dir: "logs"}}, // relative path - should fail
+		Log:     core.LogConfig{File: core.LogFileConfig{Dir: "logs"}}, // relative path - should fail
 	}
 	rec = doReq(t, h, http.MethodPost, "/register", spec2)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.dir expected 400, got %d", rec.Code)
 	}
 
-	spec3 := process.Spec{
+	spec3 := core.Spec{
 		Name:    "ok",
 		Command: "go version",
-		Log:     logger.Config{File: logger.FileConfig{StdoutPath: "out.log"}}, // relative path - should fail
+		Log:     core.LogConfig{File: core.LogFileConfig{StdoutPath: "out.log"}}, // relative path - should fail
 	}
 	rec = doReq(t, h, http.MethodPost, "/register", spec3)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid log.stdoutPath expected 400, got %d", rec.Code)
 	}
 
-	spec4 := process.Spec{
+	spec4 := core.Spec{
 		Name:    "ok",
 		Command: "go version",
-		Log:     logger.Config{File: logger.FileConfig{StderrPath: "err.log"}}, // relative path - should fail
+		Log:     core.LogConfig{File: core.LogFileConfig{StderrPath: "err.log"}}, // relative path - should fail
 	}
 	rec = doReq(t, h, http.MethodPost, "/register", spec4)
 	if rec.Code != http.StatusBadRequest {
@@ -190,7 +188,7 @@ func TestSelectorsMutualExclusion(t *testing.T) {
 func TestStartThenStatusByBaseAndName(t *testing.T) {
 	h := setupRouter(t, "/api/") // ensure base sanitization works
 	// successful start
-	startSpec := process.Spec{
+	startSpec := core.Spec{
 		Name:    "svc",
 		Command: "go version",
 	}
@@ -217,7 +215,7 @@ func TestStartThenStatusByBaseAndName(t *testing.T) {
 
 func TestNewServerStartClose(t *testing.T) {
 	// ensure NewServer returns a server and can be closed quickly
-	mgr := mng.NewManager()
+	mgr := core.New()
 	srv, err := NewServer("127.0.0.1:0", "/x", mgr)
 	if err != nil {
 		t.Fatalf("NewServer error: %v", err)

@@ -1,0 +1,9 @@
+go 1.26
+
+use .
+
+use ./core
+
+use ./examples
+
+use ./history/clickhouse

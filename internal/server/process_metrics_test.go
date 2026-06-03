@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/metrics"
+	"github.com/loykin/provisr/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,18 +18,18 @@ func TestProcessMetricsEndpoints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Create manager and set up metrics collector
-	mgr := manager.NewManager()
-	config := metrics.ProcessMetricsConfig{
+	mgr := core.New()
+	config := core.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := metrics.NewProcessMetricsCollector(config)
+	collector := core.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
 	// Add some test metrics
-	testMetrics := map[string]metrics.ProcessMetrics{
+	testMetrics := map[string]core.ProcessMetrics{
 		"app-1": {
 			PID:        1234,
 			Name:       "app-1",
@@ -70,7 +69,7 @@ func TestProcessMetricsEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var result map[string]metrics.ProcessMetrics
+		var result map[string]core.ProcessMetrics
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 
@@ -88,7 +87,7 @@ func TestProcessMetricsEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var result metrics.ProcessMetrics
+		var result core.ProcessMetrics
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 
@@ -216,7 +215,7 @@ func TestProcessMetricsDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Create manager without metrics collector
-	mgr := manager.NewManager()
+	mgr := core.New()
 
 	router := NewRouter(mgr, "/api")
 	ts := httptest.NewServer(router.Handler())
@@ -268,13 +267,13 @@ func TestProcessMetricsDisabled(t *testing.T) {
 func TestAPIEndpointsProcessMetrics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	mgr := manager.NewManager()
-	config := metrics.ProcessMetricsConfig{
+	mgr := core.New()
+	config := core.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := metrics.NewProcessMetricsCollector(config)
+	collector := core.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
@@ -311,18 +310,18 @@ func TestAPIEndpointsProcessMetrics(t *testing.T) {
 func TestProcessMetricsGroupEdgeCases(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	mgr := manager.NewManager()
-	config := metrics.ProcessMetricsConfig{
+	mgr := core.New()
+	config := core.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := metrics.NewProcessMetricsCollector(config)
+	collector := core.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
 	// Add test metrics with various naming patterns
-	testMetrics := map[string]metrics.ProcessMetrics{
+	testMetrics := map[string]core.ProcessMetrics{
 		"app":           {PID: 1111, Name: "app", CPUPercent: 5.0, MemoryMB: 50.0},
 		"app-1":         {PID: 1234, Name: "app-1", CPUPercent: 15.5, MemoryMB: 128.0},
 		"app-2":         {PID: 5678, Name: "app-2", CPUPercent: 25.0, MemoryMB: 256.0},
@@ -401,19 +400,19 @@ func TestProcessMetricsGroupEdgeCases(t *testing.T) {
 func TestProcessMetricsConcurrentRequests(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	mgr := manager.NewManager()
-	config := metrics.ProcessMetricsConfig{
+	mgr := core.New()
+	config := core.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := metrics.NewProcessMetricsCollector(config)
+	collector := core.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
 	// Add some test metrics
 	for i := 0; i < 10; i++ {
-		metric := metrics.ProcessMetrics{
+		metric := core.ProcessMetrics{
 			PID:        int32(1000 + i),
 			Name:       fmt.Sprintf("proc-%d", i),
 			CPUPercent: float64(i * 10),
