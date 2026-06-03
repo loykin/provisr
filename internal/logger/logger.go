@@ -46,13 +46,15 @@ type SlogConfig struct {
 
 // FileConfig contains configuration for process file logging
 type FileConfig struct {
-	Dir        string `json:"dir" mapstructure:"dir"`                 // base directory for logs
-	StdoutPath string `json:"stdoutPath" mapstructure:"stdout"`       // explicit stdout path overrides Dir
-	StderrPath string `json:"stderrPath" mapstructure:"stderr"`       // explicit stderr path overrides Dir
-	MaxSizeMB  int    `json:"maxSizeMB" mapstructure:"max_size_mb"`   // megabytes before rotation (default 10)
-	MaxBackups int    `json:"maxBackups" mapstructure:"max_backups"`  // number of backups to keep (default 3)
-	MaxAgeDays int    `json:"maxAgeDays" mapstructure:"max_age_days"` // days to keep (default 7)
-	Compress   bool   `json:"compress" mapstructure:"compress"`       // Gzip rotated files
+	Dir          string    `json:"dir" mapstructure:"dir"`                 // base directory for logs
+	StdoutPath   string    `json:"stdoutPath" mapstructure:"stdout"`       // explicit stdout path overrides Dir
+	StderrPath   string    `json:"stderrPath" mapstructure:"stderr"`       // explicit stderr path overrides Dir
+	MaxSizeMB    int       `json:"maxSizeMB" mapstructure:"max_size_mb"`   // megabytes before rotation (default 10)
+	MaxBackups   int       `json:"maxBackups" mapstructure:"max_backups"`  // number of backups to keep (default 3)
+	MaxAgeDays   int       `json:"maxAgeDays" mapstructure:"max_age_days"` // days to keep (default 7)
+	Compress     bool      `json:"compress" mapstructure:"compress"`       // Gzip rotated files
+	StdoutWriter io.Writer `json:"-" mapstructure:"-"`                     // inject custom stdout writer (overrides StdoutPath/Dir)
+	StderrWriter io.Writer `json:"-" mapstructure:"-"`                     // inject custom stderr writer (overrides StderrPath/Dir)
 }
 
 // Config provides unified configuration by composing SlogConfig and FileConfig
@@ -128,43 +130,59 @@ func (c *Config) NewSlogger() *slog.Logger {
 	return slog.New(handler)
 }
 
-// ProcessWriters creates file writers for process stdout/stderr logging
+// nopWriteCloser wraps an io.Writer with a no-op Close method.
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }
+
+// ProcessWriters creates writers for process stdout/stderr.
+// Injected writers (StdoutWriter/StderrWriter) take precedence over file paths.
 func (c *Config) ProcessWriters(processName string) (stdout, stderr io.WriteCloser, err error) {
-	if c.File.Dir == "" && c.File.StdoutPath == "" && c.File.StderrPath == "" {
+	hasFile := c.File.Dir != "" || c.File.StdoutPath != "" || c.File.StderrPath != ""
+	hasWriter := c.File.StdoutWriter != nil || c.File.StderrWriter != nil
+
+	if !hasFile && !hasWriter {
 		return nil, nil, nil
 	}
 
-	var outPath, errPath string
-
-	if c.File.StdoutPath != "" {
-		outPath = c.File.StdoutPath
-	} else if c.File.Dir != "" {
-		outPath = filepath.Join(c.File.Dir, processName+".stdout.log")
-	}
-
-	if c.File.StderrPath != "" {
-		errPath = c.File.StderrPath
-	} else if c.File.Dir != "" {
-		errPath = filepath.Join(c.File.Dir, processName+".stderr.log")
-	}
-
-	if outPath != "" {
-		stdout = &lj.Logger{
-			Filename:   outPath,
-			MaxSize:    c.getMaxSizeMB(),
-			MaxBackups: c.getMaxBackups(),
-			MaxAge:     c.getMaxAgeDays(),
-			Compress:   c.File.Compress,
+	// Injected writers take precedence over file paths
+	if c.File.StdoutWriter != nil {
+		stdout = nopWriteCloser{c.File.StdoutWriter}
+	} else {
+		var outPath string
+		if c.File.StdoutPath != "" {
+			outPath = c.File.StdoutPath
+		} else if c.File.Dir != "" {
+			outPath = filepath.Join(c.File.Dir, processName+".stdout.log")
+		}
+		if outPath != "" {
+			stdout = &lj.Logger{
+				Filename:   outPath,
+				MaxSize:    c.getMaxSizeMB(),
+				MaxBackups: c.getMaxBackups(),
+				MaxAge:     c.getMaxAgeDays(),
+				Compress:   c.File.Compress,
+			}
 		}
 	}
 
-	if errPath != "" {
-		stderr = &lj.Logger{
-			Filename:   errPath,
-			MaxSize:    c.getMaxSizeMB(),
-			MaxBackups: c.getMaxBackups(),
-			MaxAge:     c.getMaxAgeDays(),
-			Compress:   c.File.Compress,
+	if c.File.StderrWriter != nil {
+		stderr = nopWriteCloser{c.File.StderrWriter}
+	} else {
+		var errPath string
+		if c.File.StderrPath != "" {
+			errPath = c.File.StderrPath
+		} else if c.File.Dir != "" {
+			errPath = filepath.Join(c.File.Dir, processName+".stderr.log")
+		}
+		if errPath != "" {
+			stderr = &lj.Logger{
+				Filename:   errPath,
+				MaxSize:    c.getMaxSizeMB(),
+				MaxBackups: c.getMaxBackups(),
+				MaxAge:     c.getMaxAgeDays(),
+				Compress:   c.File.Compress,
+			}
 		}
 	}
 
