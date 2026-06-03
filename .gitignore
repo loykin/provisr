@@ -6,6 +6,9 @@
 /provisr
 provisr-*
 
+# Runtime files
+*.pid
+
 # Logs
 *.log
 

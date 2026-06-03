@@ -1,3 +1,0 @@
-2748
-{"name":"example-service","command":"echo 'Hello from pre-configured process!'","work_dir":"","env":null,"pid_file":"examples/embedded_client/run/example-service.pid","priority":0,"retry_count":0,"retry_interval":0,"start_duration":0,"auto_restart":false,"restart_interval":0,"instances":1,"detached":false,"detectors":null,"log":{"slog":{"level":"","format":"","color":false,"timestamps":false,"source":false},"file":{"dir":"","stdoutPath":"","stderrPath":"","maxSizeMB":0,"maxBackups":0,"maxAgeDays":0,"compress":false}},"lifecycle":{"pre_start":null,"post_start":null,"pre_stop":null,"post_stop":null}}
-{"start_unix":1759627626}
