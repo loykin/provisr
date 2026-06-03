@@ -8,10 +8,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/loykin/provisr/core"
 	"github.com/loykin/provisr/internal/auth"
 	"github.com/loykin/provisr/internal/config"
-	mng "github.com/loykin/provisr/internal/manager"
-	"github.com/loykin/provisr/internal/process"
 	tlsutil "github.com/loykin/provisr/internal/tls"
 )
 
@@ -26,27 +25,27 @@ import (
 // basePath may be empty or start with '/'; no trailing slash.
 
 type Router struct {
-	mgr         *mng.Manager
+	mgr         *core.Manager
 	basePath    string
 	authService *auth.AuthService
 }
 
 // APIEndpoints provides individual access to API handlers for custom registration
 type APIEndpoints struct {
-	mgr      *mng.Manager
+	mgr      *core.Manager
 	basePath string
 }
 
 // NewRouter constructs a new Router with configurable basePath.
 // Example basePath: "/abc" results in /abc/start, /abc/stop, /abc/status.
-func NewRouter(mgr *mng.Manager, basePath string) *Router {
+func NewRouter(mgr *core.Manager, basePath string) *Router {
 	bp := sanitizeBase(basePath)
 	return &Router{mgr: mgr, basePath: bp}
 }
 
 // NewAPIEndpoints constructs APIEndpoints for individual handler registration.
 // This allows registering each API endpoint separately with custom middleware.
-func NewAPIEndpoints(mgr *mng.Manager, basePath string) *APIEndpoints {
+func NewAPIEndpoints(mgr *core.Manager, basePath string) *APIEndpoints {
 	bp := sanitizeBase(basePath)
 	return &APIEndpoints{mgr: mgr, basePath: bp}
 }
@@ -81,7 +80,7 @@ func (r *Router) Handler() http.Handler {
 // NewServer starts a standalone HTTP server on addr using this router.
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
-func NewServer(addr, basePath string, mgr *mng.Manager) (*http.Server, error) {
+func NewServer(addr, basePath string, mgr *core.Manager) (*http.Server, error) {
 	r := NewRouter(mgr, basePath)
 	server := &http.Server{
 		Addr:              addr,
@@ -117,7 +116,7 @@ func NewServer(addr, basePath string, mgr *mng.Manager) (*http.Server, error) {
 // NewTLSServer starts a standalone HTTPS server using TLS configuration.
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
-func NewTLSServer(serverConfig config.ServerConfig, mgr *mng.Manager) (*http.Server, error) {
+func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
 	r := NewRouter(mgr, serverConfig.BasePath)
 
 	// Setup TLS configuration
@@ -324,7 +323,7 @@ func parseProcessSelector(c *gin.Context) (*processSelector, error) {
 }
 
 func (r *Router) handleRegister(c *gin.Context) {
-	var spec process.Spec
+	var spec core.Spec
 	// ok: safe path checked
 	if err := c.ShouldBindJSON(&spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid JSON: " + err.Error()})
@@ -443,7 +442,7 @@ func (r *Router) handleStatus(c *gin.Context) {
 // Debug endpoints for troubleshooting
 
 type debugProcessInfo struct {
-	Status        process.Status `json:"status"`
+	Status        core.Status `json:"status"`
 	InternalState string         `json:"internal_state"`
 	HealthCheck   string         `json:"health_check"`
 }
@@ -470,7 +469,7 @@ func (r *Router) handleDebugProcesses(c *gin.Context) {
 	writeJSON(c, http.StatusOK, debugInfos)
 }
 
-func getHealthStatus(status process.Status) string {
+func getHealthStatus(status core.Status) string {
 	if !status.Running {
 		return "not_running"
 	}

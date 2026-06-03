@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr"
 )
 
 // Start Method-style handlers bound to a command with an embedded manager
@@ -174,7 +174,7 @@ func (c *command) registerLocally(f RegisterFlags) error {
 	}
 
 	// Create process spec
-	spec := process.Spec{
+	spec := provisr.Spec{
 		Name:        f.Name,
 		Command:     f.Command,
 		WorkDir:     f.WorkDir,

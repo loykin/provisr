@@ -12,10 +12,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
-	cronpkg "github.com/loykin/provisr/internal/cronjob"
-	"github.com/loykin/provisr/internal/detector"
-	"github.com/loykin/provisr/internal/process"
-	"github.com/loykin/provisr/internal/process_group"
+	"github.com/loykin/provisr/core"
 )
 
 type Config struct {
@@ -35,9 +32,9 @@ type Config struct {
 
 	// Computed/aggregated fields
 	GlobalEnv  []string
-	Specs      []process.Spec
-	GroupSpecs []process_group.ServiceGroup
-	CronJobs   []cronpkg.CronJobSpec
+	Specs      []core.Spec
+	GroupSpecs []core.ServiceGroup
+	CronJobs   []core.CronJob
 
 	configPath string
 }
@@ -179,12 +176,12 @@ func decodeTo[T any](m map[string]any) (T, error) {
 
 // decodeProcessEntry decodes and validates a ProcessConfig entry (process or cronjob).
 // ctx is used to improve error messages with the source (e.g., filename or "inline processes").
-func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.CronJobSpec, error) {
-	var zero process.Spec
+func decodeProcessEntry(pc ProcessConfig, ctx string) (core.Spec, *core.CronJob, error) {
+	var zero core.Spec
 	typ := strings.ToLower(strings.TrimSpace(pc.Type))
 	switch typ {
 	case "", "process":
-		sp, err := decodeTo[process.Spec](pc.Spec)
+		sp, err := decodeTo[core.Spec](pc.Spec)
 		if err != nil {
 			return zero, nil, fmt.Errorf("decode process spec in %s: %w", ctx, err)
 		}
@@ -196,7 +193,7 @@ func decodeProcessEntry(pc ProcessConfig, ctx string) (process.Spec, *cronpkg.Cr
 		}
 		return sp, nil, nil
 	case "cron", "cronjob":
-		jb, err := decodeTo[cronpkg.CronJobSpec](pc.Spec)
+		jb, err := decodeTo[core.CronJob](pc.Spec)
 		if err != nil {
 			return zero, nil, fmt.Errorf("decode cronjob spec in %s: %w", ctx, err)
 		}
@@ -227,8 +224,8 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	// Initialize aggregated fields
-	config.Specs = make([]process.Spec, 0)
-	config.CronJobs = []cronpkg.CronJobSpec{}
+	config.Specs = make([]core.Spec, 0)
+	config.CronJobs = []core.CronJob{}
 
 	// 1) Inline processes: discriminated union decoding (refactored)
 	for _, pc := range config.Processes {
@@ -333,8 +330,8 @@ func parseConfigFile(configPath string, out interface{}) error {
 
 // loadProgramEntries loads program entries from the programs directory using the same
 // discriminated-union format as inline [[processes]] blocks: {type, spec}.
-// Supported file extensions: toml, yaml/yml, json. No legacy plain process.Spec files supported.
-func loadProgramEntries(programsDir string) ([]process.Spec, []cronpkg.CronJobSpec, error) {
+// Supported file extensions: toml, yaml/yml, json. No legacy plain core.Spec files supported.
+func loadProgramEntries(programsDir string) ([]core.Spec, []core.CronJob, error) {
 	infos, err := os.ReadDir(programsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -350,8 +347,8 @@ func loadProgramEntries(programsDir string) ([]process.Spec, []cronpkg.CronJobSp
 		supported[e] = struct{}{}
 	}
 
-	var specs []process.Spec
-	var jobs []cronpkg.CronJobSpec
+	var specs []core.Spec
+	var jobs []core.CronJob
 	for _, de := range infos {
 		if de.IsDir() {
 			continue
@@ -445,7 +442,7 @@ func applyGlobalLogDefaults(cfg *Config) error {
 	globalStdout := makeAbs(cfg.Log.Stdout)
 	globalStderr := makeAbs(cfg.Log.Stderr)
 
-	apply := func(sp *process.Spec) {
+	apply := func(sp *core.Spec) {
 		// Only set path fields when the spec hasn't set any of them
 		noPathsSet := sp.Log.File.Dir == "" && sp.Log.File.StdoutPath == "" && sp.Log.File.StderrPath == ""
 		if noPathsSet {
@@ -493,13 +490,13 @@ func applyGlobalLogDefaults(cfg *Config) error {
 	return nil
 }
 
-func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_group.ServiceGroup, error) {
-	specMap := make(map[string]process.Spec, len(specs))
+func buildGroups(groupConfigs []GroupConfig, specs []core.Spec) ([]core.ServiceGroup, error) {
+	specMap := make(map[string]core.Spec, len(specs))
 	for _, spec := range specs {
 		specMap[spec.Name] = spec
 	}
 
-	groups := make([]process_group.ServiceGroup, 0, len(groupConfigs))
+	groups := make([]core.ServiceGroup, 0, len(groupConfigs))
 	for _, gc := range groupConfigs {
 		if gc.Name == "" {
 			return nil, fmt.Errorf("group requires name")
@@ -508,7 +505,7 @@ func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_gr
 			return nil, fmt.Errorf("group %s requires members", gc.Name)
 		}
 
-		memberSpecs := make([]process.Spec, 0, len(gc.Members))
+		memberSpecs := make([]core.Spec, 0, len(gc.Members))
 		for _, memberName := range gc.Members {
 			spec, exists := specMap[memberName]
 			if !exists {
@@ -517,7 +514,7 @@ func buildGroups(groupConfigs []GroupConfig, specs []process.Spec) ([]process_gr
 			memberSpecs = append(memberSpecs, spec)
 		}
 
-		groups = append(groups, process_group.ServiceGroup{
+		groups = append(groups, core.ServiceGroup{
 			Name:    gc.Name,
 			Members: memberSpecs,
 		})
@@ -557,24 +554,24 @@ func loadEnvFile(filePath string) (map[string]string, error) {
 }
 
 // convertDetectorConfigs converts DetectorConfig slice to actual Detector interfaces
-func convertDetectorConfigs(spec *process.Spec) error {
+func convertDetectorConfigs(spec *core.Spec) error {
 	if len(spec.DetectorConfigs) == 0 {
 		return nil
 	}
 
-	spec.Detectors = make([]detector.Detector, len(spec.DetectorConfigs))
+	spec.Detectors = make([]core.Detector, len(spec.DetectorConfigs))
 	for i, config := range spec.DetectorConfigs {
 		switch config.Type {
 		case "pidfile":
 			if config.Path == "" {
 				return fmt.Errorf("pidfile detector requires 'path' field")
 			}
-			spec.Detectors[i] = &detector.PIDFileDetector{PIDFile: config.Path}
+			spec.Detectors[i] = &core.PIDFileDetector{PIDFile: config.Path}
 		case "command":
 			if config.Command == "" {
 				return fmt.Errorf("command detector requires 'command' field")
 			}
-			spec.Detectors[i] = &detector.CommandDetector{Command: config.Command}
+			spec.Detectors[i] = &core.CommandDetector{Command: config.Command}
 		default:
 			return fmt.Errorf("unknown detector type: %s", config.Type)
 		}

@@ -1,6 +1,6 @@
-// Package history provides aliases so internal code can reference types from
-// core/history without changing all import paths. External code should import
-// github.com/loykin/provisr/core/history directly.
+// Package history re-exports the Sink interface and event types from
+// github.com/loykin/provisr/core/history. It exists for backward
+// compatibility — new code should import the core/history package directly.
 package history
 
 import corehistory "github.com/loykin/provisr/core/history"

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/loykin/provisr/internal/process"
+	"github.com/loykin/provisr/core"
 )
 
 func TestLoadConfig_Minimal(t *testing.T) {
@@ -249,7 +249,7 @@ func TestDecodeTo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := decodeTo[process.Spec](tt.input)
+			result, err := decodeTo[core.Spec](tt.input)
 
 			if tt.expectErr {
 				if err == nil {
@@ -526,7 +526,7 @@ func TestApplyGlobalLogDefaults_Coverage(t *testing.T) {
 			MaxAgeDays: 30,
 			Compress:   true,
 		},
-		Specs: []process.Spec{
+		Specs: []core.Spec{
 			{Name: "test1", Command: "echo test1"},
 			{Name: "test2", Command: "echo test2"},
 		},
@@ -546,7 +546,7 @@ func TestApplyGlobalLogDefaults_Coverage(t *testing.T) {
 }
 
 func TestBuildGroups_Coverage(t *testing.T) {
-	specs := []process.Spec{
+	specs := []core.Spec{
 		{Name: "proc1", Command: "echo 1"},
 		{Name: "proc2", Command: "echo 2"},
 	}
@@ -621,14 +621,14 @@ func TestBuildGroups_Coverage(t *testing.T) {
 func TestConvertDetectorConfigs(t *testing.T) {
 	tests := []struct {
 		name         string
-		spec         *process.Spec
+		spec         *core.Spec
 		expectErr    bool
 		errContains  string
 		numDetectors int
 	}{
 		{
 			name: "no detector configs",
-			spec: &process.Spec{
+			spec: &core.Spec{
 				DetectorConfigs: nil,
 			},
 			expectErr:    false,
@@ -636,16 +636,16 @@ func TestConvertDetectorConfigs(t *testing.T) {
 		},
 		{
 			name: "empty detector configs",
-			spec: &process.Spec{
-				DetectorConfigs: []process.DetectorConfig{},
+			spec: &core.Spec{
+				DetectorConfigs: []core.DetectorConfig{},
 			},
 			expectErr:    false,
 			numDetectors: 0,
 		},
 		{
 			name: "pidfile detector",
-			spec: &process.Spec{
-				DetectorConfigs: []process.DetectorConfig{
+			spec: &core.Spec{
+				DetectorConfigs: []core.DetectorConfig{
 					{Type: "pidfile", Path: "/tmp/test.pid"},
 				},
 			},
@@ -654,8 +654,8 @@ func TestConvertDetectorConfigs(t *testing.T) {
 		},
 		{
 			name: "command detector",
-			spec: &process.Spec{
-				DetectorConfigs: []process.DetectorConfig{
+			spec: &core.Spec{
+				DetectorConfigs: []core.DetectorConfig{
 					{Type: "command", Command: "pgrep test"},
 				},
 			},
@@ -664,8 +664,8 @@ func TestConvertDetectorConfigs(t *testing.T) {
 		},
 		{
 			name: "multiple detectors",
-			spec: &process.Spec{
-				DetectorConfigs: []process.DetectorConfig{
+			spec: &core.Spec{
+				DetectorConfigs: []core.DetectorConfig{
 					{Type: "pidfile", Path: "/tmp/test.pid"},
 					{Type: "command", Command: "pgrep test"},
 				},
@@ -675,8 +675,8 @@ func TestConvertDetectorConfigs(t *testing.T) {
 		},
 		{
 			name: "unsupported detector type",
-			spec: &process.Spec{
-				DetectorConfigs: []process.DetectorConfig{
+			spec: &core.Spec{
+				DetectorConfigs: []core.DetectorConfig{
 					{Type: "unsupported", Path: "/tmp/test.pid"},
 				},
 			},
