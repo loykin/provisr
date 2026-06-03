@@ -75,4 +75,10 @@ func (d PIDFileDetector) Describe() string {
 	return fmt.Sprintf("pidfile:%s", d.PIDFile)
 }
 
+// PIDDetector detects by a provided PID number.
+type PIDDetector struct{ PID int }
+
+func (d PIDDetector) Alive() (bool, error) { return pidAlive(d.PID), nil }
+func (d PIDDetector) Describe() string     { return fmt.Sprintf("pid:%d", d.PID) }
+
 // getProcStartUnix is already implemented in procstart_windows.go
