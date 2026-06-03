@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/loykin/provisr/internal/history"
+	corehistory "github.com/loykin/provisr/core/history"
 	"github.com/loykin/provisr/internal/history/opensearch"
 	"github.com/loykin/provisr/internal/history/postgres"
 	"github.com/loykin/provisr/internal/history/sqlite"
@@ -22,7 +22,7 @@ import (
 // ClickHouse is not built into the main module. Use
 // github.com/loykin/provisr/history/clickhouse and pass the result to
 // manager.SetHistorySinks().
-func NewSinkFromDSN(dsn string) (history.Sink, error) {
+func NewSinkFromDSN(dsn string) (corehistory.Sink, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		return nil, errors.New("empty DSN")
@@ -49,7 +49,7 @@ func NewSinkFromDSN(dsn string) (history.Sink, error) {
 	return nil, errors.New("unsupported DSN format: " + dsn)
 }
 
-func parseOpenSearchDSN(dsn string) (history.Sink, error) {
+func parseOpenSearchDSN(dsn string) (corehistory.Sink, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err

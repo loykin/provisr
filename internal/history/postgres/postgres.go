@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/loykin/provisr/internal/history"
+	corehistory "github.com/loykin/provisr/core/history"
 )
 
 // Sink writes history events to PostgreSQL database.
@@ -51,7 +51,7 @@ func (s *Sink) ensureSchema(ctx context.Context) error {
 	return err
 }
 
-func (s *Sink) Send(ctx context.Context, e history.Event) error {
+func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
 	rec := e.Record
 	occur := e.OccurredAt.UTC()
 

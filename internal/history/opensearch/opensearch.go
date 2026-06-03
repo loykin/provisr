@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/loykin/provisr/internal/history"
+	corehistory "github.com/loykin/provisr/core/history"
 )
 
 // Sink sends events to OpenSearch via HTTP.
@@ -25,7 +25,7 @@ func New(baseURL, index string) *Sink {
 	return &Sink{client: c, baseURL: strings.TrimRight(baseURL, "/"), index: index}
 }
 
-func (s *Sink) Send(ctx context.Context, e history.Event) error {
+func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
 	u := fmt.Sprintf("%s/%s/_doc", s.baseURL, s.index)
 	b, _ := json.Marshal(e)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
