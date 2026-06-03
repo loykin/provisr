@@ -6,7 +6,7 @@
 ![CodeQL](https://github.com/loykin/provisr/actions/workflows/codeql.yml/badge.svg)
 [![Trivy](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/loykin/provisr/gh-pages/shields/trivy.json&cacheSeconds=60)](https://raw.githubusercontent.com/loykin/provisr/gh-pages/shields/trivy.json)
 
-A minimal supervisord-like process manager written in Go.
+A minimal supervisord-like process manager written in Go — usable both as a standalone daemon and as an embeddable Go library.
 
 ## Features
 
@@ -14,12 +14,52 @@ A minimal supervisord-like process manager written in Go.
 - **Auto-restart**: Configurable retry logic with intervals and failure detection
 - **Lifecycle hooks**: Kubernetes-style hooks (pre_start, post_start, pre_stop, post_stop) with failure modes
 - **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism and retry logic
+- **Job dependencies (DAG)**: `DependsOn` field lets jobs wait for upstream jobs before starting
 - **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks
 - **Process groups**: Manage related processes together with scaling support
 - **HTTP API**: RESTful API with JSON I/O, embeddable in Gin/Echo applications
 - **Metrics**: Prometheus metrics for monitoring processes, jobs, and cronjobs
+- **Output streaming**: Inject `io.Writer` into `Spec.Log.File.StdoutWriter` / `StderrWriter` for real-time output capture
 - **Configuration**: TOML/YAML/JSON config with hot reload and reconciliation
 - **Security**: TLS support, input validation, and secure PID management
+- **Lightweight core**: `github.com/loykin/provisr/core` for embedding without gin, jwt, or database deps
+
+## Using as a Library
+
+provisr is split into modules so you can pull in only what you need:
+
+| Module | Use case | Extra deps |
+|--------|----------|------------|
+| `github.com/loykin/provisr/core` | Embed process/job control only | prometheus, cron, gopsutil |
+| `github.com/loykin/provisr` | Full orchestrator (HTTP API, auth, config, history) | gin, jwt, sqlite, postgres |
+| `github.com/loykin/provisr/history/clickhouse` | ClickHouse history backend | clickhouse-go |
+
+### Lightweight embedding (core only)
+
+```go
+import "github.com/loykin/provisr/core"
+
+mgr := core.New()
+mgr.Register(core.Spec{Name: "notebook", Command: "jupyter notebook --no-browser"})
+mgr.Start("notebook")
+```
+
+```shell
+go get github.com/loykin/provisr/core
+```
+
+### Full orchestrator
+
+```go
+import "github.com/loykin/provisr"
+
+mgr := provisr.New()
+// HTTP API, config loading, history backends, auth — all available
+```
+
+```shell
+go get github.com/loykin/provisr
+```
 
 ## Quick Start
 
@@ -351,6 +391,22 @@ Jobs are used for one-time task execution with support for:
 | `restart_policy`             | string   | "Never" or "OnFailure" (default: "Never")         |
 | `active_deadline_seconds`    | int64    | Job timeout in seconds                            |
 | `ttl_seconds_after_finished` | int32    | Auto-cleanup delay                                |
+| `depends_on`                 | []string | Jobs that must succeed before this job starts     |
+
+### Job Dependencies (DAG)
+
+Use `DependsOn` to form a dependency graph — a job waits for all named jobs to succeed before starting:
+
+```go
+jobMgr.CreateJob(provisr.JobSpec{Name: "stage-a", Command: "python stage_a.py"})
+jobMgr.CreateJob(provisr.JobSpec{
+    Name:      "stage-b",
+    Command:   "python stage_b.py",
+    DependsOn: []string{"stage-a"},  // waits for stage-a to succeed
+})
+```
+
+If an upstream job fails, all downstream jobs are immediately marked failed.
 
 ### CronJobs
 
@@ -652,7 +708,6 @@ package main
 import (
     "time"
     "github.com/loykin/provisr"
-    "github.com/loykin/provisr/internal/process"
 )
 
 func main() {
@@ -661,39 +716,39 @@ func main() {
     spec := provisr.Spec{
         Name:    "web-app",
         Command: "python app.py",
-        Lifecycle: process.LifecycleHooks{
-            PreStart: []process.Hook{
+        Lifecycle: provisr.LifecycleHooks{
+            PreStart: []provisr.Hook{
                 {
                     Name:        "setup-env",
                     Command:     "source /app/setup.sh",
-                    FailureMode: process.FailureModeFail,
-                    RunMode:     process.RunModeBlocking,
+                    FailureMode: provisr.FailureModeFail,
+                    RunMode:     provisr.RunModeBlocking,
                     Timeout:     30 * time.Second,
                 },
             },
-            PostStart: []process.Hook{
+            PostStart: []provisr.Hook{
                 {
                     Name:        "notify-started",
                     Command:     "curl -X POST http://notifications/app-started",
-                    FailureMode: process.FailureModeIgnore,
-                    RunMode:     process.RunModeAsync,
+                    FailureMode: provisr.FailureModeIgnore,
+                    RunMode:     provisr.RunModeAsync,
                 },
             },
-            PreStop: []process.Hook{
+            PreStop: []provisr.Hook{
                 {
                     Name:        "graceful-shutdown",
                     Command:     "curl -X POST http://localhost:8080/shutdown",
-                    FailureMode: process.FailureModeIgnore,
-                    RunMode:     process.RunModeBlocking,
+                    FailureMode: provisr.FailureModeIgnore,
+                    RunMode:     provisr.RunModeBlocking,
                     Timeout:     15 * time.Second,
                 },
             },
-            PostStop: []process.Hook{
+            PostStop: []provisr.Hook{
                 {
                     Name:        "cleanup",
                     Command:     "rm -rf /tmp/app-cache",
-                    FailureMode: process.FailureModeIgnore,
-                    RunMode:     process.RunModeBlocking,
+                    FailureMode: provisr.FailureModeIgnore,
+                    RunMode:     provisr.RunModeBlocking,
                 },
             },
         },
@@ -818,14 +873,43 @@ c := client.New(config)
 Embed provisr into existing Gin or Echo applications:
 
 ```go
-// Basic integration - register all endpoints
-endpoints := server.NewAPIEndpoints(mgr, "/api")
+import "github.com/loykin/provisr"
+
+mgr := provisr.New()
+
+// Basic integration - register all endpoints under a Gin router group
+endpoints := provisr.NewAPIEndpoints(mgr, "/api")
 endpoints.RegisterAll(r.Group("/api"))
 
 // Individual endpoints with custom middleware
 apiGroup := r.Group("/api")
 apiGroup.GET("/status", loggingMiddleware(), endpoints.StatusHandler())
 apiGroup.POST("/start", authMiddleware(), endpoints.StartHandler())
+
+// Or mount as a plain net/http handler (works with Echo, stdlib mux, etc.)
+router := provisr.NewRouter(mgr, "/api")
+http.Handle("/api/", router.Handler())
+```
+
+### Output streaming
+
+Capture process stdout/stderr at runtime without polling log files:
+
+```go
+pr, pw := io.Pipe()
+
+mgr.Register(provisr.Spec{
+    Name:    "notebook",
+    Command: "jupyter notebook --no-browser",
+    Log: provisr.LogConfig{
+        File: provisr.LogFileConfig{
+            StdoutWriter: pw,
+        },
+    },
+})
+
+// Read output in a goroutine
+go io.Copy(os.Stdout, pr)
 ```
 
 See `examples/embedded_http_gin` and `examples/embedded_http_echo` for complete examples.
