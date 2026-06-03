@@ -171,6 +171,14 @@ func (j *Job) Done() <-chan struct{} {
 	return j.completionCh
 }
 
+// FailWithReason marks the job as failed with the given reason and message.
+// Safe to call from any goroutine; acquires the job lock internally.
+func (j *Job) FailWithReason(reason, message string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.setFailed(reason, message)
+}
+
 // GetSpec returns the job specification
 func (j *Job) GetSpec() Spec {
 	j.mu.RLock()
