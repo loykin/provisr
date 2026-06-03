@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
-	"github.com/loykin/provisr/internal/process"
 )
 
 // Example demonstrating different failure modes in lifecycle hooks
@@ -20,13 +19,13 @@ func main() {
 	failProcessSpec := provisr.Spec{
 		Name:    "fail-process",
 		Command: "echo 'This process should not start'",
-		Lifecycle: process.LifecycleHooks{
-			PreStart: []process.Hook{
+		Lifecycle: provisr.LifecycleHooks{
+			PreStart: []provisr.Hook{
 				{
 					Name:        "failing-setup",
 					Command:     "echo 'Setup failing...' && exit 1", // This will fail
-					FailureMode: process.FailureModeFail,             // Stop process start on failure
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeFail,             // Stop process start on failure
+					RunMode:     provisr.RunModeBlocking,
 				},
 			},
 		},
@@ -48,21 +47,21 @@ func main() {
 	ignoreProcessSpec := provisr.Spec{
 		Name:    "ignore-process",
 		Command: "sh -c 'echo \"Process started despite hook failure\"; sleep 2'",
-		Lifecycle: process.LifecycleHooks{
-			PreStart: []process.Hook{
+		Lifecycle: provisr.LifecycleHooks{
+			PreStart: []provisr.Hook{
 				{
 					Name:        "optional-setup",
 					Command:     "echo 'Optional setup failing...' && exit 1", // This will fail
-					FailureMode: process.FailureModeIgnore,                    // Continue despite failure
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeIgnore,                    // Continue despite failure
+					RunMode:     provisr.RunModeBlocking,
 				},
 			},
-			PostStop: []process.Hook{
+			PostStop: []provisr.Hook{
 				{
 					Name:        "optional-cleanup",
 					Command:     "echo 'Optional cleanup failing...' && exit 1", // This will also fail
-					FailureMode: process.FailureModeIgnore,                      // Continue despite failure
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeIgnore,                      // Continue despite failure
+					RunMode:     provisr.RunModeBlocking,
 				},
 			},
 		},
@@ -94,13 +93,13 @@ func main() {
 	retryProcessSpec := provisr.Spec{
 		Name:    "retry-process",
 		Command: "sh -c 'echo \"Process with retry hooks\"; sleep 3'",
-		Lifecycle: process.LifecycleHooks{
-			PreStart: []process.Hook{
+		Lifecycle: provisr.LifecycleHooks{
+			PreStart: []provisr.Hook{
 				{
 					Name:        "flaky-setup",
 					Command:     "echo 'Attempting flaky setup...' && if [ $RANDOM -gt 16384 ]; then exit 1; else echo 'Setup succeeded'; fi",
-					FailureMode: process.FailureModeRetry, // Retry once on failure
-					RunMode:     process.RunModeBlocking,
+					FailureMode: provisr.FailureModeRetry, // Retry once on failure
+					RunMode:     provisr.RunModeBlocking,
 					Timeout:     5 * time.Second,
 				},
 			},
@@ -131,20 +130,20 @@ func main() {
 	asyncProcessSpec := provisr.Spec{
 		Name:    "async-process",
 		Command: "sh -c 'echo \"Process with async hooks\"; sleep 2'",
-		Lifecycle: process.LifecycleHooks{
-			PostStart: []process.Hook{
+		Lifecycle: provisr.LifecycleHooks{
+			PostStart: []provisr.Hook{
 				{
 					Name:        "slow-notification",
 					Command:     "sh -c 'echo \"Starting slow notification...\"; sleep 3; echo \"Notification sent\"'",
-					FailureMode: process.FailureModeIgnore,
-					RunMode:     process.RunModeAsync, // Don't block process start
+					FailureMode: provisr.FailureModeIgnore,
+					RunMode:     provisr.RunModeAsync, // Don't block process start
 					Timeout:     10 * time.Second,
 				},
 				{
 					Name:        "quick-log",
 					Command:     "echo 'Quick log entry created'",
-					FailureMode: process.FailureModeIgnore,
-					RunMode:     process.RunModeBlocking, // Block briefly for logging
+					FailureMode: provisr.FailureModeIgnore,
+					RunMode:     provisr.RunModeBlocking, // Block briefly for logging
 				},
 			},
 		},

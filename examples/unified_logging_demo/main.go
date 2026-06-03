@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/loykin/provisr/internal/logger"
+	"github.com/loykin/provisr/pkg/logger"
 )
 
 func main() {
@@ -68,11 +68,11 @@ func main() {
 
 	slog.Info("=== Demo Complete ===")
 	slog.Info("Key benefits of unified logging:")
-	slog.Info("  ✅ Single configuration for all logging")
-	slog.Info("  ✅ slog as the standard foundation")
-	slog.Info("  ✅ Colored terminal output")
-	slog.Info("  ✅ Consistent structured logging")
-	slog.Info("  ✅ Process file logging integration")
+	slog.Info("  Single configuration for all logging")
+	slog.Info("  slog as the standard foundation")
+	slog.Info("  Colored terminal output")
+	slog.Info("  Consistent structured logging")
+	slog.Info("  Process file logging integration")
 
 	// Cleanup
 	if unifiedCfg.File.Dir != "" {
