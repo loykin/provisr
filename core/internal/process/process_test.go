@@ -295,6 +295,49 @@ func TestProcessDetectAliveParallel(t *testing.T) {
 	}
 }
 
+func TestSnapshotWithStopFlag_InitialState(t *testing.T) {
+	p := New(Spec{Name: "p", Command: "sleep 1"})
+	st, stopping := p.SnapshotWithStopFlag()
+	if stopping {
+		t.Error("stopping should be false before SetStopRequested")
+	}
+	if st.Running {
+		t.Error("process should not be running before start")
+	}
+}
+
+func TestSnapshotWithStopFlag_AfterSetStopRequested(t *testing.T) {
+	p := New(Spec{Name: "p", Command: "sleep 1"})
+	p.SetStopRequested(true)
+	_, stopping := p.SnapshotWithStopFlag()
+	if !stopping {
+		t.Error("stopping should be true after SetStopRequested(true)")
+	}
+}
+
+// TestSnapshotWithStopFlag_Race verifies no data race between concurrent
+// SnapshotWithStopFlag reads and SetStopRequested writes (run with -race).
+func TestSnapshotWithStopFlag_Race(t *testing.T) {
+	p := New(Spec{Name: "p", Command: "sleep 1"})
+	done := make(chan struct{})
+
+	go func() {
+		for i := 0; i < 1000; i++ {
+			p.SetStopRequested(i%2 == 0)
+		}
+		close(done)
+	}()
+
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			p.SnapshotWithStopFlag()
+		}
+	}
+}
+
 func BenchmarkDetectAlive(b *testing.B) {
 	spec := Spec{
 		Name:    "benchmark-process",

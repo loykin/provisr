@@ -21,7 +21,8 @@ type DetectorConfig struct {
 // All logging is now handled through slog-based structured logging.
 type Spec struct {
 	Name            string              `json:"name" mapstructure:"name"`
-	Command         string              `json:"command" mapstructure:"command"`                   // command to start the process (shell)
+	Command         string              `json:"command" mapstructure:"command"`                   // command to start the process (shell string); mutually exclusive with Args
+	Args            []string            `json:"args" mapstructure:"args"`                         // command as argv slice; when set, Command is ignored and no shell is invoked
 	WorkDir         string              `json:"work_dir" mapstructure:"work_dir"`                 // optional working dir
 	Env             []string            `json:"env" mapstructure:"env"`                           // optional extra env
 	PIDFile         string              `json:"pid_file" mapstructure:"pid_file"`                 // optional pidfile path; if set a PIDFileDetector will be used
@@ -45,8 +46,14 @@ func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Name) == "" {
 		return fmt.Errorf("process requires name")
 	}
-	if strings.TrimSpace(s.Command) == "" {
-		return fmt.Errorf("process %q requires command", s.Name)
+	if len(s.Args) == 0 && strings.TrimSpace(s.Command) == "" {
+		return fmt.Errorf("process %q requires command or args", s.Name)
+	}
+	if len(s.Args) > 0 && strings.TrimSpace(s.Command) != "" {
+		return fmt.Errorf("process %q: command and args are mutually exclusive", s.Name)
+	}
+	if len(s.Args) > 0 && s.Args[0] == "" {
+		return fmt.Errorf("process %q: args[0] must not be empty", s.Name)
 	}
 	// Detached mode must not configure file logging, because manager-supplied
 	// writers may hold the child process via open fds. Enforce mutual exclusion.
@@ -71,6 +78,10 @@ func (s *Spec) DeepCopy() *Spec {
 
 	copySpec := *s
 
+	if s.Args != nil {
+		copySpec.Args = append([]string(nil), s.Args...)
+	}
+
 	if s.Env != nil {
 		copySpec.Env = append([]string(nil), s.Env...)
 	}
@@ -88,11 +99,14 @@ func (s *Spec) DeepCopy() *Spec {
 	return &copySpec
 }
 
-// BuildCommand constructs an *exec.Cmd for the given spec.Command.
-// It avoids invoking a shell when not necessary, and it also respects
-// an explicit shell invocation already present in the command string
-// (e.g., "sh -c 'echo hi'"), avoiding double-wrapping with another shell.
+// BuildCommand constructs an *exec.Cmd for the given spec.
+// When Args is set, it is used directly without invoking a shell.
+// Otherwise Command (shell string) is parsed as before.
 func (s *Spec) BuildCommand() *exec.Cmd {
+	if len(s.Args) > 0 {
+		// #nosec G204
+		return exec.Command(s.Args[0], s.Args[1:]...)
+	}
 	cmdStr := strings.TrimSpace(s.Command)
 	if cmdStr == "" {
 		return getTrueCommand()

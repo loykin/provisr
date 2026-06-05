@@ -150,6 +150,24 @@ func TestSpec_Validate(t *testing.T) {
 			},
 			expectErr: false,
 		},
+		// Args field validation
+		{
+			name:      "valid spec with args only",
+			spec:      Spec{Name: "p", Args: []string{"sleep", "1"}},
+			expectErr: false,
+		},
+		{
+			name:        "args[0] empty string should fail",
+			spec:        Spec{Name: "p", Args: []string{"", "--flag"}},
+			expectErr:   true,
+			errContains: "args[0] must not be empty",
+		},
+		{
+			name:        "both command and args should fail",
+			spec:        Spec{Name: "p", Command: "echo hi", Args: []string{"sleep", "1"}},
+			expectErr:   true,
+			errContains: "mutually exclusive",
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,6 +243,23 @@ func TestSpec_DeepCopy(t *testing.T) {
 	}
 }
 
+func TestSpec_DeepCopy_Args(t *testing.T) {
+	original := &Spec{
+		Name: "p",
+		Args: []string{"sleep", "1"},
+	}
+	copy := original.DeepCopy()
+
+	if len(copy.Args) != len(original.Args) {
+		t.Fatalf("Args length mismatch: got %d, want %d", len(copy.Args), len(original.Args))
+	}
+
+	copy.Args[0] = "modified"
+	if original.Args[0] == "modified" {
+		t.Error("Modifying copy.Args affected original")
+	}
+}
+
 func TestSpec_DeepCopy_Nil(t *testing.T) {
 	var spec *Spec
 	deepCopy := spec.DeepCopy()
@@ -266,6 +301,30 @@ func TestBuildCommand_SimpleCommand(t *testing.T) {
 		if i >= len(cmd.Args) || cmd.Args[i] != arg {
 			t.Errorf("expected arg[%d] = %q, got %q", i, arg, cmd.Args[i])
 		}
+	}
+}
+
+func TestBuildCommand_Args(t *testing.T) {
+	s := Spec{Name: "p", Args: []string{"sleep", "99"}}
+	cmd := s.BuildCommand()
+
+	if cmd == nil {
+		t.Fatal("BuildCommand returned nil")
+	}
+	if !strings.HasSuffix(cmd.Path, "sleep") {
+		t.Errorf("expected sleep binary, got %q", cmd.Path)
+	}
+	if len(cmd.Args) != 2 || cmd.Args[1] != "99" {
+		t.Errorf("unexpected argv: %v", cmd.Args)
+	}
+}
+
+func TestBuildCommand_ArgsTakesPrecedenceOverCommand(t *testing.T) {
+	// Args wins over Command when both are somehow present (post-validation path)
+	s := Spec{Name: "p", Args: []string{"sleep", "99"}, Command: "echo hi"}
+	cmd := s.BuildCommand()
+	if !strings.HasSuffix(cmd.Path, "sleep") {
+		t.Errorf("expected Args to take precedence, got path %q", cmd.Path)
 	}
 }
 

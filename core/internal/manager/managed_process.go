@@ -61,6 +61,7 @@ const (
 	StateStarting
 	StateRunning
 	StateStopping
+	StateFailed
 )
 
 func (s processState) String() string {
@@ -73,6 +74,8 @@ func (s processState) String() string {
 		return "running"
 	case StateStopping:
 		return "stopping"
+	case StateFailed:
+		return "failed"
 	default:
 		return "unknown"
 	}
@@ -528,12 +531,15 @@ func (up *ManagedProcess) persistStop() {
 	up.mu.RLock()
 	now := time.Now().UTC()
 	sinks := append([]history.Sink(nil), up.history...)
-	st := up.proc.Snapshot()
+	st, stopRequested := up.proc.SnapshotWithStopFlag()
 	spec := up.proc.GetSpec()
 	up.mu.RUnlock()
 
-	// Minimal record for event consumers
-	rec := history.Record{Name: spec.Name, PID: st.PID, LastStatus: StateStopped.String(), UpdatedAt: now}
+	lastStatus := StateStopped.String()
+	if st.ExitErr != nil && !stopRequested {
+		lastStatus = StateFailed.String()
+	}
+	rec := history.Record{Name: spec.Name, PID: st.PID, LastStatus: lastStatus, UpdatedAt: now}
 	if b, err := json.Marshal(spec); err == nil {
 		rec.SpecJSON = string(b)
 	}
