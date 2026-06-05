@@ -311,7 +311,7 @@ func TestBuildCommand_Args(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("BuildCommand returned nil")
 	}
-	if !strings.HasSuffix(cmd.Path, "sleep") {
+	if !(cmd.Path == "sleep" || strings.HasSuffix(cmd.Path, "/sleep") || strings.HasSuffix(cmd.Path, "\\sleep.exe")) {
 		t.Errorf("expected sleep binary, got %q", cmd.Path)
 	}
 	if len(cmd.Args) != 2 || cmd.Args[1] != "99" {
@@ -323,7 +323,7 @@ func TestBuildCommand_ArgsTakesPrecedenceOverCommand(t *testing.T) {
 	// Args wins over Command when both are somehow present (post-validation path)
 	s := Spec{Name: "p", Args: []string{"sleep", "99"}, Command: "echo hi"}
 	cmd := s.BuildCommand()
-	if !strings.HasSuffix(cmd.Path, "sleep") {
+	if !(cmd.Path == "sleep" || strings.HasSuffix(cmd.Path, "/sleep") || strings.HasSuffix(cmd.Path, "\\sleep.exe")) {
 		t.Errorf("expected Args to take precedence, got path %q", cmd.Path)
 	}
 }
