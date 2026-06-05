@@ -38,12 +38,9 @@ jobs:
           echo "Running fuzz on ./internal/config"
           go test ./internal/config -run=^$ -fuzz=Fuzz -fuzztime=10m
           
-          echo "Running fuzz on ./internal/detector"
-          go test ./internal/detector -run=^$ -fuzz=Fuzz -fuzztime=10m
-          
-          echo "Running fuzz on ./internal/env"
-          go test ./internal/env -run=^$ -fuzz=Fuzz -fuzztime=10m
-          
+          echo "Running fuzz on ./core/internal/env"
+          go test ./core/internal/env -run=^$ -fuzz=Fuzz -fuzztime=10m
+
           # internal/server has multiple fuzz functions - run each separately
           echo "Running fuzz on ./internal/server (FuzzIsSafeName)"
           go test ./internal/server -run=^$ -fuzz=FuzzIsSafeName -fuzztime=2m
@@ -56,29 +53,29 @@ jobs:
 
           echo "Running fuzz on ./internal/server (FuzzCombinedValidation)"
           go test ./internal/server -run=^$ -fuzz=FuzzCombinedValidation -fuzztime=2m
-          
-          # internal/process has multiple fuzz functions - run each separately
-          echo "Running fuzz on ./internal/process (FuzzReadPIDFileWithMeta)"
-          go test ./internal/process -run=^$ -fuzz=FuzzReadPIDFileWithMeta -fuzztime=2m
-          
-          echo "Running fuzz on ./internal/process (FuzzBuildCommand)"
-          go test ./internal/process -run=^$ -fuzz=FuzzBuildCommand -fuzztime=3m
-          
-          echo "Running fuzz on ./internal/process (FuzzSpecValidation)"
-          go test ./internal/process -run=^$ -fuzz=FuzzSpecValidation -fuzztime=3m
-          
-          echo "Running fuzz on ./internal/process (FuzzParseExplicitShell)"
-          go test ./internal/process -run=^$ -fuzz=FuzzParseExplicitShell -fuzztime=2m
-          
-          # internal/manager fuzz functions
-          echo "Running fuzz on ./internal/manager (FuzzManagerConcurrentOperations)"
-          go test ./internal/manager -run=^$ -fuzz=FuzzManagerConcurrentOperations -fuzztime=5m
-          
-          echo "Running fuzz on ./internal/manager (FuzzProcessSpecValidation)"
-          go test ./internal/manager -run=^$ -fuzz=FuzzProcessSpecValidation -fuzztime=2m
-          
-          echo "Running fuzz on ./internal/manager (FuzzPatternMatching)"
-          go test ./internal/manager -run=^$ -fuzz=FuzzPatternMatching -fuzztime=2m
+
+          # core/internal/process has multiple fuzz functions - run each separately
+          echo "Running fuzz on ./core/internal/process (FuzzReadPIDFileWithMeta)"
+          go test ./core/internal/process -run=^$ -fuzz=FuzzReadPIDFileWithMeta -fuzztime=2m
+
+          echo "Running fuzz on ./core/internal/process (FuzzBuildCommand)"
+          go test ./core/internal/process -run=^$ -fuzz=FuzzBuildCommand -fuzztime=3m
+
+          echo "Running fuzz on ./core/internal/process (FuzzSpecValidation)"
+          go test ./core/internal/process -run=^$ -fuzz=FuzzSpecValidation -fuzztime=3m
+
+          echo "Running fuzz on ./core/internal/process (FuzzParseExplicitShell)"
+          go test ./core/internal/process -run=^$ -fuzz=FuzzParseExplicitShell -fuzztime=2m
+
+          # core/internal/manager fuzz functions
+          echo "Running fuzz on ./core/internal/manager (FuzzManagerConcurrentOperations)"
+          go test ./core/internal/manager -run=^$ -fuzz=FuzzManagerConcurrentOperations -fuzztime=5m
+
+          echo "Running fuzz on ./core/internal/manager (FuzzProcessSpecValidation)"
+          go test ./core/internal/manager -run=^$ -fuzz=FuzzProcessSpecValidation -fuzztime=2m
+
+          echo "Running fuzz on ./core/internal/manager (FuzzPatternMatching)"
+          go test ./core/internal/manager -run=^$ -fuzz=FuzzPatternMatching -fuzztime=2m
 
       - name: Build (sanity)
         run: go build ./...
@@ -91,4 +88,6 @@ jobs:
           path: |
             internal/**/testdata/fuzz/corpus
             internal/**/testdata/fuzz/crashers
+            core/internal/**/testdata/fuzz/corpus
+            core/internal/**/testdata/fuzz/crashers
           if-no-files-found: ignore
