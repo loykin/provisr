@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.46.0
-	github.com/loykin/provisr/core v0.0.0
+	github.com/loykin/provisr v0.0.0
 )
 
 require (
@@ -27,4 +27,4 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
-replace github.com/loykin/provisr/core => ../../core
+replace github.com/loykin/provisr => ../../

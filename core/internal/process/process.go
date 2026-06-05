@@ -277,6 +277,16 @@ func (r *Process) Snapshot() Status {
 	return s
 }
 
+// SnapshotWithStopFlag returns the current status and the stop-requested flag
+// atomically under a single lock acquisition, preventing a TOCTOU race between
+// the two values when determining whether an exit was unexpected.
+func (r *Process) SnapshotWithStopFlag() (Status, bool) {
+	r.mu.Lock()
+	s, stopping := r.status, r.stopping
+	r.mu.Unlock()
+	return s, stopping
+}
+
 func (r *Process) GetSpec() *Spec {
 	r.mu.Lock()
 	s := r.spec.DeepCopy()
