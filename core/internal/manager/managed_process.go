@@ -425,6 +425,11 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
+			if alive, _ := up.proc.DetectAlive(); alive {
+				up.setState(StateStopped)
+				up.persistStop()
+				return fmt.Errorf("process did not exit after SIGKILL")
+			}
 		}
 	}
 
