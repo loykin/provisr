@@ -1108,6 +1108,30 @@ func TestApplyConfig_RecoversFromPIDFile(t *testing.T) {
 	}
 }
 
+func TestApplyConfig_PIDFileIOErrorDoesNotStartProcess(t *testing.T) {
+	pidFile := t.TempDir() // Reading a directory as a PID file produces an OS-level I/O error.
+	spec := process.Spec{
+		Name:    "pidfile-io-error",
+		Command: "sleep 10",
+		PIDFile: pidFile,
+	}
+
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	if err := mgr.ApplyConfig([]process.Spec{spec}); err == nil {
+		t.Fatal("expected ApplyConfig to return the PID file I/O error")
+	}
+
+	st, err := mgr.Status(spec.Name)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.Running {
+		t.Fatalf("process started despite unreadable PID file: %+v", st)
+	}
+}
+
 // Test that ApplyConfig cleans up processes removed from config (stop + remove pidfile)
 func TestApplyConfig_CleansRemoved(t *testing.T) {
 	dir := t.TempDir()

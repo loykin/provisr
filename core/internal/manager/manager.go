@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/loykin/provisr/core/internal/env"
 	"github.com/loykin/provisr/core/history"
+	"github.com/loykin/provisr/core/internal/env"
 	"github.com/loykin/provisr/core/internal/metrics"
 	"github.com/loykin/provisr/core/internal/process"
 )
@@ -156,6 +156,34 @@ func (m *Manager) Start(name string) error {
 	}
 
 	return up.Start(*spec)
+}
+
+// Recover reads spec.PIDFile, marks the process Running if the recorded PID is
+// still alive, or Stopped if it is dead. The process is never restarted.
+// Call this once at startup to re-attach to processes that survived a provisr
+// restart without triggering unwanted restarts of already-dead processes.
+func (m *Manager) Recover(spec process.Spec) error {
+	up := m.ensureProcess(spec.Name)
+
+	if spec.PIDFile != "" {
+		pid, specFromFile, err := process.VerifyPIDFile(spec.PIDFile)
+		if err != nil {
+			return fmt.Errorf("recover %q: reading PID file: %w", spec.Name, err)
+		}
+		if pid > 0 {
+			s := specFromFile
+			if s == nil {
+				s = &spec
+			}
+			s.Name = spec.Name
+			up.Recover(*s, pid)
+			return nil
+		}
+	}
+
+	// No PID file, content invalid, or PID identity mismatch — register as stopped.
+	up.Recover(spec, 0)
+	return nil
 }
 
 // Stop stops a process without unregistering it
@@ -442,10 +470,17 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 
 		// Try recover from PID file if configured
 		if ds.PIDFile != "" {
-			if pid, specFromFile, err := process.ReadPIDFile(ds.PIDFile); err == nil && pid > 0 {
+			// VerifyPIDFile performs identity verification (start-time check).
+			// Missing or invalid content means there is no process to recover.
+			// I/O errors must abort to avoid starting a duplicate process when
+			// the existing PID file cannot be inspected.
+			pid, specFromFile, err := process.VerifyPIDFile(ds.PIDFile)
+			if err != nil {
+				return fmt.Errorf("apply config %q: reading PID file: %w", name, err)
+			}
+			if pid > 0 {
 				// Prefer spec from PID file if available (preserve historical details)
 				if specFromFile != nil {
-					// ensure instance-expanded name is set
 					specFromFile.Name = name
 					up.Recover(*specFromFile, pid)
 				} else {
