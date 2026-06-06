@@ -401,13 +401,20 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 	up.proc.SetStopRequested(true)
 
 	if err := up.proc.Stop(wait); err != nil {
-		up.setState(StateStopped) // Force state transition even on error
-		up.persistStop()
+		if alive, _ := up.proc.DetectAlive(); alive {
+			up.proc.SetStopRequested(false)
+			up.setState(StateRunning)
+		} else {
+			up.setState(StateStopped)
+			up.persistStop()
+		}
 		return fmt.Errorf("failed to stop process: %w", err)
 	}
 
 	// Poll until the OS process has actually exited; SIGTERM was sent but exit
 	// may be deferred. Force SIGKILL if the process outlives the wait window.
+	// wait == 0 gets a single alive check: SIGTERM was sent but we must not
+	// record StateStopped while the process is still alive.
 	if wait > 0 {
 		deadline := time.Now().Add(wait)
 		for time.Now().Before(deadline) {
@@ -416,20 +423,20 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
+	}
+	if alive, _ := up.proc.DetectAlive(); alive {
+		_ = up.proc.StopWithSignal(syscall.SIGKILL)
+		killDeadline := time.Now().Add(200 * time.Millisecond)
+		for time.Now().Before(killDeadline) {
+			if alive, _ := up.proc.DetectAlive(); !alive {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		if alive, _ := up.proc.DetectAlive(); alive {
-			_ = up.proc.StopWithSignal(syscall.SIGKILL)
-			killDeadline := time.Now().Add(200 * time.Millisecond)
-			for time.Now().Before(killDeadline) {
-				if alive, _ := up.proc.DetectAlive(); !alive {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if alive, _ := up.proc.DetectAlive(); alive {
-				up.setState(StateStopped)
-				up.persistStop()
-				return fmt.Errorf("process did not exit after SIGKILL")
-			}
+			up.proc.SetStopRequested(false)
+			up.setState(StateRunning)
+			return fmt.Errorf("process did not exit after SIGKILL")
 		}
 	}
 
