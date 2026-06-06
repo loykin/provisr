@@ -20,16 +20,15 @@ const (
 
 // killProcess terminates a Windows process by PID
 func killProcess(pid int, signal syscall.Signal) error {
-	if pid <= 0 {
-		// On Windows, invalid PIDs are common during rapid process termination
-		// Return success to avoid unnecessary error propagation
-		return nil
-	}
-
 	// Handle negative PID (process group on Unix) - on Windows, just use absolute value
 	actualPid := pid
 	if pid < 0 {
 		actualPid = -pid
+	}
+	if actualPid <= 0 {
+		// On Windows, invalid PIDs are common during rapid process termination.
+		// Return success to avoid unnecessary error propagation.
+		return nil
 	}
 
 	// For Windows, we only support SIGTERM and SIGKILL behavior
