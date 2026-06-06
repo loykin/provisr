@@ -2,6 +2,7 @@ package process
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -17,16 +18,17 @@ import (
 )
 
 type Process struct {
-	spec      Spec
-	cmd       *exec.Cmd
-	status    Status
-	mu        sync.Mutex
-	stopping  bool // true when Stop has been requested; suppress autorestart
-	outCloser io.WriteCloser
-	errCloser io.WriteCloser
-	pid       int   // Process ID for safe detection
-	exited    bool  // Track if process has exited
-	exitErr   error // Exit error if any
+	spec       Spec
+	cmd        *exec.Cmd
+	status     Status
+	mu         sync.Mutex
+	stopping   bool // true when Stop has been requested; suppress autorestart
+	outCloser  io.WriteCloser
+	errCloser  io.WriteCloser
+	pid        int    // Process ID for safe detection
+	generation uint64 // incremented on each TryStart; guards stale cmd.Wait() goroutines
+	exited     bool   // Track if process has exited
+	exitErr    error  // Exit error if any
 }
 
 func New(spec Spec) *Process { return &Process{spec: spec} }
@@ -106,8 +108,10 @@ func (r *Process) SeedPID(pid int) {
 	r.mu.Unlock()
 }
 
-func (r *Process) SetStarted(cmd *exec.Cmd) {
+func (r *Process) SetStarted(cmd *exec.Cmd) uint64 {
 	r.mu.Lock()
+	r.generation++
+	gen := r.generation
 	r.cmd = cmd
 	r.status.Name = r.spec.Name
 	r.status.Running = true
@@ -120,6 +124,7 @@ func (r *Process) SetStarted(cmd *exec.Cmd) {
 	r.exited = false
 	r.exitErr = nil
 	r.mu.Unlock()
+	return gen
 }
 
 // TryStart atomically starts the command and updates internal state and PID file.
@@ -130,14 +135,14 @@ func (r *Process) TryStart(cmd *exec.Cmd) error {
 		return err
 	}
 	// After successful start, record state and write PID file under lock-ordered ops.
-	r.SetStarted(cmd)
+	gen := r.SetStarted(cmd)
 	// Write PID file synchronously to ensure availability immediately after Start returns.
 	r.WritePIDFile()
 
-	go func() {
+	go func(gen uint64) {
 		err := cmd.Wait()
-		r.MarkExited(err)
-	}()
+		r.MarkExitedIfGeneration(gen, err)
+	}(gen)
 
 	return nil
 }
@@ -149,6 +154,23 @@ func (r *Process) MarkExited(err error) {
 	r.status.ExitErr = err
 
 	// Mark as exited for race-free detection
+	r.exited = true
+	r.exitErr = err
+	r.mu.Unlock()
+}
+
+// MarkExitedIfGeneration applies exit state only when the stored generation matches,
+// preventing a stale cmd.Wait() goroutine from clobbering a restarted process's state.
+// Using generation rather than PID avoids false matches from OS PID reuse.
+func (r *Process) MarkExitedIfGeneration(gen uint64, err error) {
+	r.mu.Lock()
+	if r.generation != gen {
+		r.mu.Unlock()
+		return
+	}
+	r.status.Running = false
+	r.status.StoppedAt = time.Now()
+	r.status.ExitErr = err
 	r.exited = true
 	r.exitErr = err
 	r.mu.Unlock()
@@ -431,7 +453,11 @@ func (r *Process) Kill() error {
 	}
 	pid := cmd.Process.Pid
 	if err := killProcess(-pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil // process already dead — goal achieved
+		}
 		slog.Warn("Failed to kill process", "pid", pid, "error", err)
+		return err
 	}
 	return nil
 }

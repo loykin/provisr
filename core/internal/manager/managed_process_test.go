@@ -452,3 +452,164 @@ func TestManagedProcessNoAutoRestart(t *testing.T) {
 
 	t.Logf("✓ Correctly did NOT auto-restart when AutoRestart=false")
 }
+
+// TestStopSIGTERMIgnoredFallsBackToSIGKILL verifies that ManagedProcess.Stop(wait)
+// force-kills a SIGTERM-ignoring process within the wait window and reports StateStopped.
+func TestStopSIGTERMIgnoredFallsBackToSIGKILL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal handling not applicable on Windows")
+	}
+
+	spec := process.Spec{
+		Name:    "sigterm-ignore-manager",
+		Command: "trap '' TERM; sleep 30",
+	}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	defer func() { _ = mp.Shutdown() }()
+
+	if err := mp.Start(spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if ok := waitUntilState(t, mp, "running", 5*time.Second); !ok {
+		t.Fatal("process did not reach running state")
+	}
+
+	// Stop with a short wait window; doStop must escalate to SIGKILL
+	if err := mp.Stop(500 * time.Millisecond); err != nil {
+		t.Fatalf("Stop returned unexpected error: %v", err)
+	}
+
+	st := mp.Status()
+	if st.Running {
+		t.Error("process still running after Stop()")
+	}
+	if st.State != "stopped" {
+		t.Errorf("expected state 'stopped', got %q", st.State)
+	}
+}
+
+// TestRapidStopStartNoStateCorruption verifies that rapid stop/start cycles do not
+// allow a stale cmd.Wait() goroutine to corrupt the new process's state.
+func TestRapidStopStartNoStateCorruption(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal handling not applicable on Windows")
+	}
+
+	spec := process.Spec{Name: "rapid-manager", Command: "sleep 30"}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	defer func() { _ = mp.Shutdown() }()
+
+	for i := 0; i < 3; i++ {
+		if err := mp.Start(spec); err != nil {
+			t.Fatalf("iteration %d: Start: %v", i, err)
+		}
+		if ok := waitUntilState(t, mp, "running", 5*time.Second); !ok {
+			t.Fatalf("iteration %d: process did not reach running state", i)
+		}
+		if err := mp.Stop(2 * time.Second); err != nil {
+			t.Fatalf("iteration %d: Stop: %v", i, err)
+		}
+	}
+
+	// After all cycles the process must be stopped, not corrupted into a false running state
+	st := mp.Status()
+	if st.Running {
+		t.Error("process reported running after final stop — stale goroutine may have corrupted state")
+	}
+	if st.State != "stopped" {
+		t.Errorf("expected state 'stopped', got %q", st.State)
+	}
+}
+
+func waitUntilState(t *testing.T, mp *ManagedProcess, want string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if mp.Status().State == want {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+// TestSetStartedResetsstopRequested verifies that SetStarted() clears the stopRequested
+// flag on each new start, so that auto-restart and failed labelling work correctly after
+// a normal stop/start cycle.
+// Note: the Stop-failure-while-alive branch (SetStopRequested(false) in doStop) requires
+// signal injection to test and is not covered here.
+// TestStopZeroWaitSIGTERMIgnoredFallsBackToSIGKILL verifies that Stop(0) escalates to
+// SIGKILL when the process ignores SIGTERM and ultimately records StateStopped.
+func TestStopZeroWaitSIGTERMIgnoredFallsBackToSIGKILL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal handling not applicable on Windows")
+	}
+
+	spec := process.Spec{
+		Name:    "stop-zero-sigterm-ignore",
+		Command: "trap '' TERM; sleep 30",
+	}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	defer func() { _ = mp.Shutdown() }()
+
+	if err := mp.Start(spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if ok := waitUntilState(t, mp, "running", 5*time.Second); !ok {
+		t.Fatal("process did not reach running state")
+	}
+
+	if err := mp.Stop(0); err != nil {
+		t.Fatalf("Stop(0) returned unexpected error: %v", err)
+	}
+
+	st := mp.Status()
+	if st.Running {
+		t.Error("process still running after Stop(0)")
+	}
+	if st.State != "stopped" {
+		t.Errorf("expected state 'stopped', got %q", st.State)
+	}
+}
+
+func TestSetStartedResetsStopRequested(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal handling not applicable on Windows")
+	}
+
+	spec := process.Spec{
+		Name:    "stop-req-reset",
+		Command: "sleep 30",
+	}
+	mp := NewManagedProcess(spec, mockEnvMerger)
+	defer func() { _ = mp.Shutdown() }()
+
+	if err := mp.Start(spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if ok := waitUntilState(t, mp, "running", 5*time.Second); !ok {
+		t.Fatal("process did not reach running state")
+	}
+
+	if err := mp.Stop(3 * time.Second); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// stopRequested is true after stop — expected
+	if !mp.proc.StopRequested() {
+		t.Error("stopRequested should be true after stop")
+	}
+
+	// Second start: SetStarted resets stopRequested to false
+	if err := mp.Start(spec); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if ok := waitUntilState(t, mp, "running", 5*time.Second); !ok {
+		t.Fatal("process did not restart")
+	}
+
+	if mp.proc.StopRequested() {
+		t.Error("stopRequested should be false after new start — auto-restart and failed labelling would be broken")
+	}
+}

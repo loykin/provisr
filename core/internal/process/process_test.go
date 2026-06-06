@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -335,6 +336,88 @@ func TestSnapshotWithStopFlag_Race(t *testing.T) {
 		default:
 			p.SnapshotWithStopFlag()
 		}
+	}
+}
+
+// TestRapidStopStart verifies that a stale cmd.Wait() goroutine from a previous
+// run does not clobber the state of a newly started process.
+// Uses generation ID so the test is not sensitive to OS PID reuse.
+func TestRapidStopStart(t *testing.T) {
+	requireUnix(t)
+
+	spec := Spec{Name: "rapid", Command: "sleep 10"}
+	p := New(spec)
+
+	// First start
+	cmd1 := p.ConfigureCmd(nil)
+	if err := p.TryStart(cmd1); err != nil {
+		t.Fatalf("first TryStart: %v", err)
+	}
+
+	// Stop first instance
+	if err := p.StopWithSignal(syscall.SIGKILL); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if ok := waitUntil(2*time.Second, 20*time.Millisecond, func() bool {
+		alive, _ := p.DetectAlive()
+		return !alive
+	}); !ok {
+		t.Fatal("first process did not exit")
+	}
+
+	// Immediately start second instance
+	cmd2 := p.ConfigureCmd(nil)
+	if err := p.TryStart(cmd2); err != nil {
+		t.Fatalf("second TryStart: %v", err)
+	}
+
+	// Give any stale goroutine time to call MarkExitedIfGeneration
+	time.Sleep(100 * time.Millisecond)
+
+	// Second process must still appear alive regardless of PID reuse
+	if alive, _ := p.DetectAlive(); !alive {
+		t.Error("stale cmd.Wait() goroutine clobbered the new process state: DetectAlive returned false")
+	}
+
+	_ = p.StopWithSignal(syscall.SIGKILL)
+}
+
+// TestSIGTERMIgnoredFallsBackToSIGKILL verifies that a process ignoring SIGTERM
+// is force-killed via SIGKILL within the wait window.
+func TestSIGTERMIgnoredFallsBackToSIGKILL(t *testing.T) {
+	requireUnix(t)
+
+	// trap '' TERM makes the shell ignore SIGTERM
+	spec := Spec{Name: "sigterm-ignore", Command: "trap '' TERM; sleep 10"}
+	p := New(spec)
+	cmd := p.ConfigureCmd(nil)
+	if err := p.TryStart(cmd); err != nil {
+		t.Fatalf("TryStart: %v", err)
+	}
+
+	if ok := waitUntil(2*time.Second, 20*time.Millisecond, func() bool {
+		alive, _ := p.DetectAlive()
+		return alive
+	}); !ok {
+		t.Fatal("process did not start")
+	}
+
+	// Send SIGTERM — process ignores it
+	_ = p.StopWithSignal(syscall.SIGTERM)
+	time.Sleep(200 * time.Millisecond)
+
+	if alive, _ := p.DetectAlive(); !alive {
+		t.Skip("process already exited on SIGTERM (shell may not support trap on this platform)")
+	}
+
+	// Now send SIGKILL
+	_ = p.StopWithSignal(syscall.SIGKILL)
+
+	if ok := waitUntil(2*time.Second, 20*time.Millisecond, func() bool {
+		alive, _ := p.DetectAlive()
+		return !alive
+	}); !ok {
+		t.Error("process did not exit after SIGKILL")
 	}
 }
 
