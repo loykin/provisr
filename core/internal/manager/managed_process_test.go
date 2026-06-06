@@ -1,7 +1,10 @@
 package manager
 
 import (
+	"fmt"
+	"os"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -612,4 +615,193 @@ func TestSetStartedResetsStopRequested(t *testing.T) {
 	if mp.proc.StopRequested() {
 		t.Error("stopRequested should be false after new start — auto-restart and failed labelling would be broken")
 	}
+}
+
+// --- Manager.Recover tests ---
+
+// TestManagerRecoverAliveProcess verifies that Recover marks a still-running
+// process as Running without restarting it.
+func TestManagerRecoverAliveProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signals")
+	}
+
+	dir := t.TempDir()
+	pidFile := dir + "/nb.pid"
+
+	spec := process.Spec{
+		Name:        "nb-recover",
+		Command:     "sleep 10",
+		PIDFile:     pidFile,
+		AutoRestart: false,
+	}
+
+	// Start the process so provisr writes the PID file.
+	mgr1 := NewManager()
+	if err := mgr1.Register(spec); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if ok := waitUntilManagerState(t, mgr1, spec.Name, "running", 3*time.Second); !ok {
+		t.Fatal("process did not reach running state")
+	}
+
+	// Simulate provisr restart: new Manager, call Recover.
+	mgr2 := NewManager()
+	if err := mgr2.Recover(spec); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	st, err := mgr2.Status(spec.Name)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if !st.Running {
+		t.Errorf("expected Running=true after Recover of alive process, got %+v", st)
+	}
+
+	// Cleanup
+	_ = mgr1.Stop(spec.Name, 3*time.Second)
+	_ = mgr2.Stop(spec.Name, 3*time.Second)
+}
+
+// TestManagerRecoverDeadProcess verifies that Recover marks a dead process as
+// Stopped and does not restart it.
+func TestManagerRecoverDeadProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signals")
+	}
+
+	dir := t.TempDir()
+	pidFile := dir + "/dead.pid"
+
+	spec := process.Spec{
+		Name:        "dead-recover",
+		Command:     "sleep 10",
+		PIDFile:     pidFile,
+		AutoRestart: false,
+	}
+
+	// Start then kill the process externally so provisr cannot remove the PID
+	// file. This reproduces the stale file left after a manager crash.
+	mgr1 := NewManager()
+	if err := mgr1.Register(spec); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if ok := waitUntilManagerState(t, mgr1, spec.Name, "running", 3*time.Second); !ok {
+		t.Fatal("process did not reach running state")
+	}
+
+	st, err := mgr1.Status(spec.Name)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	stalePIDFile, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := syscall.Kill(-st.PID, syscall.SIGKILL); err != nil {
+		t.Fatalf("external SIGKILL: %v", err)
+	}
+	if ok := waitUntilManagerState(t, mgr1, spec.Name, "stopped", 3*time.Second); !ok {
+		t.Fatal("externally killed process did not reach stopped state")
+	}
+	// A live manager observes cmd.Wait and removes the file. Restore the exact
+	// bytes captured before the kill to model a manager crash, where that
+	// cleanup callback never runs.
+	if err := os.WriteFile(pidFile, stalePIDFile, 0o600); err != nil {
+		t.Fatalf("restore stale PID file: %v", err)
+	}
+
+	// New Manager: Recover should mark Stopped, not restart.
+	mgr2 := NewManager()
+	if err := mgr2.Recover(spec); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Give health check a moment — it must NOT restart.
+	time.Sleep(200 * time.Millisecond)
+
+	st, err = mgr2.Status(spec.Name)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.Running {
+		t.Errorf("expected Running=false after Recover of dead process, got %+v", st)
+	}
+}
+
+// TestManagerRecoverNoPIDFile verifies that Recover with no PID file registers
+// the process as Stopped without error.
+func TestManagerRecoverNoPIDFile(t *testing.T) {
+	spec := process.Spec{
+		Name:    "no-pid-recover",
+		Command: "sleep 10",
+	}
+
+	mgr := NewManager()
+	if err := mgr.Recover(spec); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	st, err := mgr.Status(spec.Name)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.Running {
+		t.Errorf("expected Running=false when no PID file, got %+v", st)
+	}
+}
+
+// TestManagerRecoverPIDReused verifies that Recover treats a PID file as stale
+// when the recorded start_unix does not match the actual running process,
+// preventing incorrect adoption of an unrelated process that reused the PID.
+func TestManagerRecoverPIDReused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix process start-time detection")
+	}
+
+	dir := t.TempDir()
+	pidFile := dir + "/reused.pid"
+
+	// Write a PID file that points to this test process (which is definitely running)
+	// but with start_unix=1 — a value that can never match any real process started
+	// in the Unix era.  This simulates a PID that has been reused.
+	livePID := os.Getpid()
+	content := fmt.Sprintf("%d\n{}\n{\"start_unix\":1}\n", livePID)
+	if err := os.WriteFile(pidFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	spec := process.Spec{
+		Name:        "pid-reuse-recover",
+		Command:     "sleep 10",
+		PIDFile:     pidFile,
+		AutoRestart: false,
+	}
+
+	mgr := NewManager()
+	if err := mgr.Recover(spec); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	st, err := mgr.Status(spec.Name)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.Running {
+		t.Errorf("expected Running=false when PID is reused, got %+v", st)
+	}
+}
+
+func waitUntilManagerState(t *testing.T, mgr *Manager, name, want string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		st, err := mgr.Status(name)
+		if err == nil && st.State == want {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }

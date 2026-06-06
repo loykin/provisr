@@ -114,6 +114,7 @@ func (m *Manager) SetInstanceGroups(groups []ManagerInstanceGroup) {
 func (m *Manager) Register(s Spec) error          { return m.inner.Register(s) }
 func (m *Manager) RegisterN(s Spec) error         { return m.inner.RegisterN(s) }
 func (m *Manager) Start(name string) error        { return m.inner.Start(name) }
+func (m *Manager) Recover(s Spec) error           { return m.inner.Recover(s) }
 func (m *Manager) ApplyConfig(specs []Spec) error { return m.inner.ApplyConfig(specs) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
@@ -131,9 +132,9 @@ func (m *Manager) StopAll(base string, wait time.Duration) error { return m.inne
 func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
 	return m.inner.UnregisterAll(base, wait)
 }
-func (m *Manager) Status(name string) (Status, error)              { return m.inner.Status(name) }
-func (m *Manager) StatusAll(base string) ([]Status, error)         { return m.inner.StatusAll(base) }
-func (m *Manager) StatusMatch(pattern string) ([]Status, error)    { return m.inner.StatusMatch(pattern) }
+func (m *Manager) Status(name string) (Status, error)           { return m.inner.Status(name) }
+func (m *Manager) StatusAll(base string) ([]Status, error)      { return m.inner.StatusAll(base) }
+func (m *Manager) StatusMatch(pattern string) ([]Status, error) { return m.inner.StatusMatch(pattern) }
 func (m *Manager) InstanceGroupStatus(groupName string) (map[string][]Status, error) {
 	return m.inner.InstanceGroupStatus(groupName)
 }
