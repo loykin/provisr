@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 
@@ -699,8 +698,12 @@ func TestManagerRecoverDeadProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if err := syscall.Kill(-st.PID, syscall.SIGKILL); err != nil {
-		t.Fatalf("external SIGKILL: %v", err)
+	p, err := os.FindProcess(st.PID)
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := p.Kill(); err != nil {
+		t.Fatalf("external Kill: %v", err)
 	}
 	if ok := waitUntilManagerState(t, mgr1, spec.Name, "stopped", 3*time.Second); !ok {
 		t.Fatal("externally killed process did not reach stopped state")
