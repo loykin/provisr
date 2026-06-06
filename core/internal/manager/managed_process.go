@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/loykin/provisr/core/history"
@@ -148,16 +149,16 @@ func (up *ManagedProcess) Stop(wait time.Duration) error {
 // Status returns current status (lock-minimal)
 func (up *ManagedProcess) Status() process.Status {
 	up.mu.RLock()
-	//name := up.name
 	restarts := up.restarts
 	state := up.state
 	proc := up.proc
-	spec := proc.GetSpec()
 	up.mu.RUnlock()
 
 	if proc == nil {
 		return process.Status{}
 	}
+
+	spec := proc.GetSpec()
 
 	// Get process status (process handles its own locking)
 	status := proc.Snapshot()
@@ -403,6 +404,28 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 		up.setState(StateStopped) // Force state transition even on error
 		up.persistStop()
 		return fmt.Errorf("failed to stop process: %w", err)
+	}
+
+	// Poll until the OS process has actually exited; SIGTERM was sent but exit
+	// may be deferred. Force SIGKILL if the process outlives the wait window.
+	if wait > 0 {
+		deadline := time.Now().Add(wait)
+		for time.Now().Before(deadline) {
+			if alive, _ := up.proc.DetectAlive(); !alive {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if alive, _ := up.proc.DetectAlive(); alive {
+			_ = up.proc.StopWithSignal(syscall.SIGKILL)
+			killDeadline := time.Now().Add(200 * time.Millisecond)
+			for time.Now().Before(killDeadline) {
+				if alive, _ := up.proc.DetectAlive(); !alive {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
 	}
 
 	up.setState(StateStopped)
