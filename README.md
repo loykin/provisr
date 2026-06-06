@@ -10,7 +10,7 @@ Go process supervisor — embeddable library or standalone daemon, single binary
 
 ## Why provisr exists
 
-Two needs drove this project:
+provisr started from two needs:
 
 1. **An embeddable process supervision library for Go.** If you want start/stop/restart/health-check logic inside your own binary — not as a sidecar or external daemon — provisr/core is a library you can import directly.
 
