@@ -1,6 +1,7 @@
 package job
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,80 @@ func TestJobPhase_BasicValues(t *testing.T) {
 		if phase == "" {
 			t.Error("Expected phase to have a value")
 		}
+	}
+}
+
+func TestSpec_Args(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    Spec
+		wantErr string
+	}{
+		{
+			name:    "args only is valid",
+			spec:    Spec{Name: "job", Args: []string{"go", "run", "."}},
+			wantErr: "",
+		},
+		{
+			name:    "command only is valid",
+			spec:    Spec{Name: "job", Command: "echo hello"},
+			wantErr: "",
+		},
+		{
+			name:    "neither command nor args",
+			spec:    Spec{Name: "job"},
+			wantErr: "requires command or args",
+		},
+		{
+			name:    "command and args together",
+			spec:    Spec{Name: "job", Command: "echo hello", Args: []string{"echo", "hello"}},
+			wantErr: "mutually exclusive",
+		},
+		{
+			name:    "args[0] empty",
+			spec:    Spec{Name: "job", Args: []string{"", "arg"}},
+			wantErr: "args[0] must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.spec.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() error = %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSpec_ArgsToProcessSpec(t *testing.T) {
+	spec := Spec{
+		Name: "args-job",
+		Args: []string{"go", "test", "-v", "./..."},
+	}
+
+	ps := spec.ToProcessSpec()
+
+	if len(ps.Args) != 4 {
+		t.Fatalf("ToProcessSpec() Args len = %d, want 4", len(ps.Args))
+	}
+	if ps.Command != "" {
+		t.Errorf("ToProcessSpec() Command = %q, want empty when Args is set", ps.Command)
+	}
+
+	// verify deep copy
+	spec.Args[0] = "mutated"
+	if ps.Args[0] != "go" {
+		t.Error("ToProcessSpec() did not deep copy Args slice")
 	}
 }
 

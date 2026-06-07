@@ -11,7 +11,8 @@ import (
 // Spec defines a one-time job execution (similar to k8s Job)
 type Spec struct {
 	Name                    string                 `json:"name" mapstructure:"name"`
-	Command                 string                 `json:"command" mapstructure:"command"`
+	Command                 string                 `json:"command" mapstructure:"command"` // shell string; mutually exclusive with Args
+	Args                    []string               `json:"args" mapstructure:"args"`       // argv slice; when set, Command is ignored and no shell is invoked
 	WorkDir                 string                 `json:"work_dir" mapstructure:"work_dir"`
 	Env                     []string               `json:"env" mapstructure:"env"`
 	TTLSecondsAfterFinished *int32                 `json:"ttl_seconds_after_finished" mapstructure:"ttl_seconds_after_finished"` // Delete job after completion
@@ -98,8 +99,14 @@ func (j *Spec) Validate() error {
 	if strings.TrimSpace(j.Name) == "" {
 		return fmt.Errorf("job requires name")
 	}
-	if strings.TrimSpace(j.Command) == "" {
-		return fmt.Errorf("job %q requires command", j.Name)
+	if len(j.Args) == 0 && strings.TrimSpace(j.Command) == "" {
+		return fmt.Errorf("job %q requires command or args", j.Name)
+	}
+	if len(j.Args) > 0 && strings.TrimSpace(j.Command) != "" {
+		return fmt.Errorf("job %q: command and args are mutually exclusive", j.Name)
+	}
+	if len(j.Args) > 0 && j.Args[0] == "" {
+		return fmt.Errorf("job %q: args[0] must not be empty", j.Name)
 	}
 	for _, dep := range j.DependsOn {
 		if dep == j.Name {
@@ -147,10 +154,11 @@ func (j *Spec) ToProcessSpec() *process.Spec {
 	spec := &process.Spec{
 		Name:        j.Name,
 		Command:     j.Command,
+		Args:        append([]string(nil), j.Args...),
 		WorkDir:     j.WorkDir,
-		Env:         append([]string(nil), j.Env...), // Copy slice
-		AutoRestart: false,                           // Jobs don't auto-restart by default
-		Lifecycle:   j.Lifecycle.DeepCopy(),          // Copy lifecycle hooks
+		Env:         append([]string(nil), j.Env...),
+		AutoRestart: false,
+		Lifecycle:   j.Lifecycle.DeepCopy(),
 	}
 
 	// Configure restart policy
