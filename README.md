@@ -14,6 +14,14 @@ provisr started from two needs:
 
 2. **A lightweight standalone daemon with no runtime dependencies.** A single Go binary, no external runtime required, deployable anywhere Go binaries run.
 
+## When to use provisr
+
+provisr is not trying to replace host-level service managers like `systemd`.
+
+Its focus is application-owned process orchestration: letting a Go program spawn, monitor, retry, schedule, and coordinate child processes directly from inside the application.
+
+That makes it a better fit for app-level workers, AI/ML inference processes, batch jobs, and DAG-style pipelines where process control is part of the application logic rather than host configuration.
+
 ## Install
 
 ```shell
