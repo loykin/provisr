@@ -203,8 +203,8 @@ func decodeProcessEntry(pc ProcessConfig, ctx string) (core.Spec, *core.CronJob,
 		if strings.TrimSpace(jb.Name) == "" {
 			return zero, nil, fmt.Errorf("%s: cronjob requires name", ctx)
 		}
-		if strings.TrimSpace(jb.JobTemplate.Command) == "" {
-			return zero, nil, fmt.Errorf("%s: cronjob %q requires command", ctx, jb.Name)
+		if strings.TrimSpace(jb.JobTemplate.Command) == "" && len(jb.JobTemplate.Args) == 0 {
+			return zero, nil, fmt.Errorf("%s: cronjob %q requires command or args", ctx, jb.Name)
 		}
 		if strings.TrimSpace(jb.Schedule) == "" {
 			return zero, nil, fmt.Errorf("%s: cronjob %q requires schedule", ctx, jb.Name)
