@@ -37,14 +37,20 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// NewAuthServiceWithStore creates a new authentication service with defaults
-func NewAuthServiceWithStore(store Store) *AuthService {
+// NewAuthServiceWithStore creates a new authentication service with defaults,
+// generating a random JWT secret for this instance.
+func NewAuthServiceWithStore(store Store) (*AuthService, error) {
+	jwtSecret := make([]byte, 32)
+	if _, err := rand.Read(jwtSecret); err != nil {
+		return nil, fmt.Errorf("failed to generate JWT secret: %w", err)
+	}
+
 	return &AuthService{
 		store:      store,
-		jwtSecret:  []byte("default-secret-change-in-production"),
+		jwtSecret:  jwtSecret,
 		tokenTTL:   24 * time.Hour,
 		bcryptCost: bcrypt.DefaultCost,
-	}
+	}, nil
 }
 
 // NewAuthService creates a new authentication service

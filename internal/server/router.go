@@ -43,6 +43,41 @@ func NewRouter(mgr *core.Manager, basePath string) *Router {
 	return &Router{mgr: mgr, basePath: bp}
 }
 
+// newRouterWithAuth constructs a Router and, if authCfg is present and
+// enabled, wires up an AuthService so login/user/client endpoints are
+// mounted by Handler().
+func newRouterWithAuth(mgr *core.Manager, basePath string, authCfg *config.AuthConfig) (*Router, error) {
+	r := NewRouter(mgr, basePath)
+
+	if authCfg == nil || !authCfg.Enabled {
+		return r, nil
+	}
+
+	authService, err := auth.NewAuthService(auth.AuthConfig{
+		Store: auth.StoreConfig{
+			Type:         authCfg.Store.Type,
+			Path:         authCfg.Store.Path,
+			Host:         authCfg.Store.Host,
+			Port:         authCfg.Store.Port,
+			Database:     authCfg.Store.Database,
+			Username:     authCfg.Store.Username,
+			Password:     authCfg.Store.Password,
+			SSLMode:      authCfg.Store.SSLMode,
+			MaxOpenConns: authCfg.Store.MaxOpenConns,
+			MaxIdleConns: authCfg.Store.MaxIdleConns,
+		},
+		JWTSecret:  authCfg.JWTSecret,
+		TokenTTL:   authCfg.TokenTTL,
+		BcryptCost: authCfg.BcryptCost,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auth service: %w", err)
+	}
+
+	r.authService = authService
+	return r, nil
+}
+
 // NewAPIEndpoints constructs APIEndpoints for individual handler registration.
 // This allows registering each API endpoint separately with custom middleware.
 func NewAPIEndpoints(mgr *core.Manager, basePath string) *APIEndpoints {
@@ -77,13 +112,16 @@ func (r *Router) Handler() http.Handler {
 	return g
 }
 
-// NewServer starts a standalone HTTP server on addr using this router.
+// NewServer starts a standalone HTTP server using this router.
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
-func NewServer(addr, basePath string, mgr *core.Manager) (*http.Server, error) {
-	r := NewRouter(mgr, basePath)
+func NewServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
+	r, err := newRouterWithAuth(mgr, serverConfig.BasePath, serverConfig.Auth)
+	if err != nil {
+		return nil, err
+	}
 	server := &http.Server{
-		Addr:              addr,
+		Addr:              serverConfig.Listen,
 		Handler:           r.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -117,7 +155,10 @@ func NewServer(addr, basePath string, mgr *core.Manager) (*http.Server, error) {
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
 func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
-	r := NewRouter(mgr, serverConfig.BasePath)
+	r, err := newRouterWithAuth(mgr, serverConfig.BasePath, serverConfig.Auth)
+	if err != nil {
+		return nil, err
+	}
 
 	// Setup TLS configuration
 	tlsConfig, err := tlsutil.SetupTLS(serverConfig)

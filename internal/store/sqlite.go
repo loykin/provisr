@@ -27,7 +27,7 @@ func NewSQLiteStore(config Config) (*SQLiteStore, error) {
 		path = ":memory:" // In-memory database if no path specified
 	}
 
-	db, err := sql.Open("sqlite3", path+"?_journal=WAL&_timeout=5000&_fk=1")
+	db, err := sql.Open("sqlite", path+"?_journal=WAL&_timeout=5000&_fk=1")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}

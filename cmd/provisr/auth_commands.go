@@ -108,7 +108,10 @@ func (c *command) AuthUserCreate(f AuthUserCreateFlags, configPath string) error
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 
 	// Create user
 	_, err = authService.CreateUser(ctx, f.Username, f.Password, f.Email, f.Roles, nil)
@@ -130,7 +133,10 @@ func (c *command) AuthUserList(configPath string) error {
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	return cliHelper.ListUsers(ctx)
@@ -146,7 +152,10 @@ func (c *command) AuthUserDelete(f AuthUserDeleteFlags, configPath string) error
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	return cliHelper.DeleteUser(ctx, f.Username)
@@ -162,7 +171,10 @@ func (c *command) AuthUserPassword(f AuthUserPasswordFlags, configPath string) e
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	return cliHelper.ResetUserPassword(ctx, f.Username, f.NewPassword)
@@ -178,7 +190,10 @@ func (c *command) AuthClientCreate(f AuthClientCreateFlags, configPath string) e
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	_, err = cliHelper.CreateAPIClient(ctx, f.Name, f.Scopes)
@@ -195,7 +210,10 @@ func (c *command) AuthClientList(configPath string) error {
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	return cliHelper.ListClients(ctx)
@@ -211,7 +229,10 @@ func (c *command) AuthClientDelete(f AuthClientDeleteFlags, configPath string) e
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	return cliHelper.DeleteClient(ctx, f.ClientID)
@@ -227,7 +248,10 @@ func (c *command) AuthTest(f AuthTestFlags, configPath string) error {
 	}
 	defer func() { _ = authStore.Close() }()
 
-	authService := auth.NewAuthServiceWithStore(authStore)
+	authService, err := auth.NewAuthServiceWithStore(authStore)
+	if err != nil {
+		return fmt.Errorf("failed to create auth service: %w", err)
+	}
 	cliHelper := auth.NewCLIHelper(authService)
 
 	// Convert method string to AuthMethod
