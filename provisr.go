@@ -119,8 +119,8 @@ func NewSinkFromDSN(dsn string) (HistorySink, error) {
 // --- HTTP server / router facades ---
 
 // NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
-func NewHTTPServer(addr, basePath string, m *Manager) (*http.Server, error) {
-	return iapi.NewServer(addr, basePath, m)
+func NewHTTPServer(serverConfig ServerConfig, m *Manager) (*http.Server, error) {
+	return iapi.NewServer(serverConfig, m)
 }
 
 // NewTLSServer starts an HTTPS server with TLS configuration from server config.

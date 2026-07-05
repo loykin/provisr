@@ -651,7 +651,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 			return fmt.Errorf("failed to create HTTPS server: %w", err)
 		}
 	} else {
-		server, err = provisr.NewHTTPServer(cfg.Server.Listen, cfg.Server.BasePath, mgr)
+		server, err = provisr.NewHTTPServer(*cfg.Server, mgr)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP server: %w", err)
 		}
