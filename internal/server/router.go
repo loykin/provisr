@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/loykin/provisr/core"
 	"github.com/loykin/provisr/internal/auth"
 	"github.com/loykin/provisr/internal/config"
+	"github.com/loykin/provisr/internal/history/sqlite"
 	tlsutil "github.com/loykin/provisr/internal/tls"
 )
 
@@ -24,10 +27,17 @@ import (
 // If name provided, returns single status.
 // basePath may be empty or start with '/'; no trailing slash.
 
+// historyReader is satisfied by history sinks that support reading events back
+// (currently only the sqlite-backed sink).
+type historyReader interface {
+	List(ctx context.Context, name string, limit int) ([]sqlite.Record, error)
+}
+
 type Router struct {
-	mgr         *core.Manager
-	basePath    string
-	authService *auth.AuthService
+	mgr           *core.Manager
+	basePath      string
+	authService   *auth.AuthService
+	historyReader historyReader
 }
 
 // APIEndpoints provides individual access to API handlers for custom registration
@@ -43,11 +53,23 @@ func NewRouter(mgr *core.Manager, basePath string) *Router {
 	return &Router{mgr: mgr, basePath: bp}
 }
 
-// newRouterWithAuth constructs a Router and, if authCfg is present and
-// enabled, wires up an AuthService so login/user/client endpoints are
-// mounted by Handler().
-func newRouterWithAuth(mgr *core.Manager, basePath string, authCfg *config.AuthConfig) (*Router, error) {
+// newRouterFromConfig constructs a Router and wires up an AuthService
+// (if authCfg is present and enabled) and a history reader (if historyCfg
+// enables in-store history) so their endpoints are mounted by Handler().
+func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.AuthConfig, historyCfg *config.HistoryConfig) (*Router, error) {
 	r := NewRouter(mgr, basePath)
+
+	if historyCfg != nil && historyCfg.Enabled && (historyCfg.InStore == nil || *historyCfg.InStore) {
+		dsn := historyCfg.StoreDSN
+		if dsn == "" {
+			dsn = "sqlite:///provisr-history.db"
+		}
+		sink, err := sqlite.New(dsn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open history store: %w", err)
+		}
+		r.historyReader = sink
+	}
 
 	if authCfg == nil || !authCfg.Enabled {
 		return r, nil
@@ -103,6 +125,11 @@ func (r *Router) Handler() http.Handler {
 	group.GET("/metrics/history", r.handleProcessMetricsHistory)
 	group.GET("/metrics/group", r.handleProcessMetricsGroup)
 
+	// Add history endpoint if a history reader is available
+	if r.historyReader != nil {
+		group.GET("/history", r.handleHistory)
+	}
+
 	// Add auth endpoints if auth service is available
 	if r.authService != nil {
 		authAPI := NewAuthAPI(r.authService)
@@ -116,7 +143,7 @@ func (r *Router) Handler() http.Handler {
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
 func NewServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
-	r, err := newRouterWithAuth(mgr, serverConfig.BasePath, serverConfig.Auth)
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +182,7 @@ func NewServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Serve
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
 func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
-	r, err := newRouterWithAuth(mgr, serverConfig.BasePath, serverConfig.Auth)
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History)
 	if err != nil {
 		return nil, err
 	}
@@ -508,6 +535,30 @@ func (r *Router) handleDebugProcesses(c *gin.Context) {
 	}
 
 	writeJSON(c, http.StatusOK, debugInfos)
+}
+
+// handleHistory returns recorded process lifecycle events (start/stop), newest
+// first. Query params: name (optional, filters to one process), limit
+// (optional, default 100, max 500).
+func (r *Router) handleHistory(c *gin.Context) {
+	name := c.Query("name")
+	limit := 100
+	if v := c.Query("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: "limit must be a number"})
+			return
+		}
+		limit = n
+	}
+
+	rows, err := r.historyReader.List(c.Request.Context(), name, limit)
+	if err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, rows)
 }
 
 func getHealthStatus(status core.Status) string {
