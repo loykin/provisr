@@ -32,3 +32,23 @@ jobs:
           *.log
           auth.db
           scripts/
+
+  history-store-integration:
+    name: History sinks (testcontainers)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7.0.0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: OpenSearch sink (dbstore Pool[*opensearchapi.Client])
+      run: go test -v -tags integration -timeout=300s ./internal/history/opensearch/...
+
+    - name: ClickHouse sink (dbstore Pool[*sqlx.DB])
+      working-directory: history/clickhouse
+      run: go test -v -tags integration -timeout=300s ./...

@@ -47,6 +47,7 @@ type GroupConfig struct {
 type HistoryConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`
 	InStore         *bool  `mapstructure:"in_store"`
+	StoreDSN        string `mapstructure:"store_dsn"`
 	OpenSearchURL   string `mapstructure:"opensearch_url"`
 	OpenSearchIndex string `mapstructure:"opensearch_index"`
 	ClickHouseURL   string `mapstructure:"clickhouse_url"`
@@ -85,6 +86,10 @@ type ServerConfig struct {
 	TLSMinVersion string      `mapstructure:"tls_min_version"`
 	TLSMaxVersion string      `mapstructure:"tls_max_version"`
 	Auth          *AuthConfig `mapstructure:"auth"`
+	// History is populated from the top-level [history] section during
+	// LoadConfig so the HTTP server can expose it via the /history endpoint
+	// without requiring a duplicate [server.history] section.
+	History *HistoryConfig `mapstructure:"-"`
 }
 
 type TLSConfig struct {
@@ -221,6 +226,10 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	if err := parseConfigFile(configPath, config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	if config.Server != nil {
+		config.Server.History = config.History
 	}
 
 	// Initialize aggregated fields

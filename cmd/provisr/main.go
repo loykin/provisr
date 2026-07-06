@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
+	"github.com/loykin/provisr/internal/history/opensearch"
 	"github.com/spf13/cobra"
 )
 
@@ -572,6 +573,39 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		}
 	}
 	mgr.SetInstanceGroups(managerGroups)
+
+	// Setup history sinks from config
+	if cfg.History != nil && cfg.History.Enabled {
+		var sinks []provisr.HistorySink
+
+		inStore := cfg.History.InStore == nil || *cfg.History.InStore
+		if inStore {
+			dsn := cfg.History.StoreDSN
+			if dsn == "" {
+				dsn = "sqlite:///provisr-history.db"
+			}
+			sink, err := provisr.NewSinkFromDSN(dsn)
+			if err != nil {
+				fmt.Printf("Warning: failed to setup history store: %v\n", err)
+			} else {
+				sinks = append(sinks, sink)
+			}
+		}
+
+		if cfg.History.OpenSearchURL != "" {
+			sink, err := opensearch.New(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex)
+			if err != nil {
+				fmt.Printf("Warning: failed to setup OpenSearch history sink: %v\n", err)
+			} else {
+				sinks = append(sinks, sink)
+			}
+		}
+
+		if len(sinks) > 0 {
+			mgr.SetHistorySinks(sinks...)
+			fmt.Printf("History tracking enabled (%d sink(s))\n", len(sinks))
+		}
+	}
 
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {
