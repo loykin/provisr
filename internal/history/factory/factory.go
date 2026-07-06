@@ -62,5 +62,5 @@ func parseOpenSearchDSN(dsn string) (corehistory.Sink, error) {
 		index = "process-history"
 	}
 
-	return opensearch.New(baseURL, index), nil
+	return opensearch.New(baseURL, index)
 }

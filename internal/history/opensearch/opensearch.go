@@ -5,38 +5,122 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
-	"time"
+
+	"github.com/opensearch-project/opensearch-go/v4"
+	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
+
+	"github.com/loykin/dbstore"
 
 	corehistory "github.com/loykin/provisr/core/history"
 )
 
-// Sink sends events to OpenSearch via HTTP.
-// It constructs URL as: baseURL + "/" + index + "/_doc" and POSTs JSON body.
+const source = "primary"
+
+// Sink sends events to OpenSearch via dbstore, using the official
+// OpenSearch Go client. Documents are created with a client-generated ID
+// (OccurredAt/name/pid), since there is no dedicated auto-ID create request
+// in opensearchapi — see dbstore's own opensearch_repo_test.go for the same
+// pattern.
 type Sink struct {
-	client  *http.Client
-	baseURL string
-	index   string
+	dbstore.BaseRepo[*opensearchapi.Client]
+	pool  *dbstore.Pool[*opensearchapi.Client]
+	index string
 }
 
-func New(baseURL, index string) *Sink {
-	c := &http.Client{Timeout: 5 * time.Second}
-	return &Sink{client: c, baseURL: strings.TrimRight(baseURL, "/"), index: index}
+// driverAdapter implements dbstore.DriverBuilder[*opensearchapi.Client].
+// It intentionally has no ApplyPoolConfig: PoolConfigApplier is an optional
+// capability, and none of PoolConfig's fields (MaxOpenConns, ...) apply to
+// an HTTP client.
+type driverAdapter struct{}
+
+func (driverAdapter) Open(cfg dbstore.DriverConfig) (*opensearchapi.Client, error) {
+	return opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{Addresses: []string{cfg.DSN}},
+	})
+}
+
+// New opens a connection to OpenSearch at baseURL and returns a Sink that
+// writes events to index.
+func New(baseURL, index string) (*Sink, error) {
+	registry := dbstore.NewDriverRegistry[*opensearchapi.Client]()
+	registry.Register("opensearch", driverAdapter{})
+	pool := dbstore.NewPool(registry)
+	if err := pool.Register(source, dbstore.DriverConfig{
+		Driver: "opensearch",
+		DSN:    strings.TrimRight(baseURL, "/"),
+	}); err != nil {
+		return nil, fmt.Errorf("opensearch: register pool: %w", err)
+	}
+
+	executor := dbstore.NewExecutor(pool)
+	return &Sink{BaseRepo: dbstore.NewBaseRepo(source, executor), pool: pool, index: index}, nil
 }
 
 func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
-	u := fmt.Sprintf("%s/%s/_doc", s.baseURL, s.index)
-	b, _ := json.Marshal(e)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
+	return s.Run(ctx, func(ctx context.Context, c *opensearchapi.Client) error {
+		body, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		id := fmt.Sprintf("%d-%s-%d", e.OccurredAt.UnixNano(), e.Record.Name, e.Record.PID)
+		_, err = c.Document.Create(ctx, opensearchapi.DocumentCreateReq{
+			Index:      s.index,
+			DocumentID: id,
+			Body:       bytes.NewReader(body),
+		})
 		return err
+	})
+}
+
+// List returns recent history events, newest first. If name is empty,
+// events for all processes are returned. limit is capped at 500 (defaults
+// to 100). Requires the index to have refreshed since the last write —
+// OpenSearch search results are near-real-time, not immediately consistent.
+func (s *Sink) List(ctx context.Context, name string, limit int) ([]corehistory.Event, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("opensearch sink status %d", resp.StatusCode)
+
+	query := map[string]any{"match_all": map[string]any{}}
+	if name != "" {
+		query = map[string]any{"match": map[string]any{"record.name": name}}
 	}
+	body, err := json.Marshal(map[string]any{
+		"size":  limit,
+		"sort":  []any{map[string]any{"occurred_at": map[string]any{"order": "desc"}}},
+		"query": query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var events []corehistory.Event
+	err = s.Run(ctx, func(ctx context.Context, c *opensearchapi.Client) error {
+		resp, err := c.Search(ctx, &opensearchapi.SearchReq{
+			Indices: []string{s.index},
+			Body:    bytes.NewReader(body),
+		})
+		if err != nil {
+			return err
+		}
+		events = make([]corehistory.Event, 0, len(resp.Hits.Hits))
+		for _, hit := range resp.Hits.Hits {
+			var e corehistory.Event
+			if err := json.Unmarshal(hit.Source, &e); err != nil {
+				return err
+			}
+			events = append(events, e)
+		}
+		return nil
+	})
+	return events, err
+}
+
+func (s *Sink) Close() error {
+	s.pool.RemoveAll()
 	return nil
 }
+
+// compile-time check that Sink satisfies corehistory.Sink
+var _ corehistory.Sink = (*Sink)(nil)
