@@ -84,7 +84,11 @@ func (s *Sink) List(ctx context.Context, name string, limit int) ([]corehistory.
 
 	query := map[string]any{"match_all": map[string]any{}}
 	if name != "" {
-		query = map[string]any{"match": map[string]any{"record.name": name}}
+		// term (not match) against the auto-generated .keyword sub-field:
+		// "match" analyzes both sides, and since the standard analyzer
+		// splits on "-", "svc-a" and "svc-b" both tokenize to ["svc", ...]
+		// and a match query would OR across tokens, matching either name.
+		query = map[string]any{"term": map[string]any{"record.name.keyword": name}}
 	}
 	body, err := json.Marshal(map[string]any{
 		"size":  limit,
