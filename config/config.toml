@@ -112,45 +112,32 @@ interval = "5s"
 # Maximum number of historical metrics to keep per process
 max_history = 100
 
-# Authentication configuration
-[auth]
-# Enable authentication for the API server
-enabled = true
-# Database path for storing users and client credentials
-database_path = "auth.db"
-# Database type: "sqlite" or "postgresql"
-database_type = "sqlite"
-# PostgreSQL connection string (only used when database_type = "postgresql")
-# database_url = "postgres://user:password@localhost/provisr_auth?sslmode=disable"
-
-# JWT configuration
-[auth.jwt]
-# Secret key for signing JWT tokens (change this in production!)
-secret = "your-secret-key-change-this-in-production"
-# Token expiration time
-expires_in = "24h"
-
-# Default admin user (created automatically if no users exist)
-[auth.admin]
-# Enable auto-creation of admin user on first startup
-auto_create = true
-# Default admin username
-username = "admin"
-# Default admin password (change this immediately!)
-password = "admin"
-# Admin email (optional)
-email = "admin@localhost"
-
-# Authentication configuration
-[auth]
+# Authentication configuration for the HTTP API server (mounts /auth/login,
+# /auth/users, /auth/clients when enabled). Users/clients are managed via
+# `provisr auth user create` etc, not auto-provisioned from this file.
+[server.auth]
 # Enable authentication for the API server
 enabled = false
-# Database path for storing users and client credentials
-database_path = "auth.db"
+# Secret key for signing JWT tokens. Leave unset to generate a random secret
+# on each startup (fine for a single long-running server; tokens won't
+# survive a restart). Set explicitly if you need tokens to remain valid
+# across restarts, or when running multiple server instances.
+# jwt_secret = "change-this-in-production"
+# Token expiration time (default: 24h)
+# token_ttl = "24h"
+
+[server.auth.store]
 # Database type: "sqlite" or "postgresql"
-database_type = "sqlite"
-# PostgreSQL connection string (only used when database_type = "postgresql")
-# database_url = "postgres://user:password@localhost/provisr_auth?sslmode=disable"
+type = "sqlite"
+# SQLite database path
+path = "auth.db"
+# PostgreSQL connection fields (only used when type = "postgresql")
+# host = "localhost"
+# port = 5432
+# database = "provisr_auth"
+# username = "provisr"
+# password = "change-me"
+# ssl_mode = "disable"
 
 # JWT configuration
 [auth.jwt]

@@ -1,8 +1,16 @@
-.PHONY: build test test-unit test-integration clean
+.PHONY: build test test-unit test-integration clean ui
 
 # Build the provisr binary
 build:
 	go build -o provisr ./cmd/provisr
+
+# Build the web UI and embed it into internal/ui/dist for go:embed.
+# Run this and commit internal/ui/dist after any frontend change.
+ui:
+	cd frontend && npm run build
+	rm -rf internal/ui/dist
+	cp -r frontend/dist internal/ui/dist
+	@echo "UI built. Commit internal/ui/dist/ to include it in the binary."
 
 # Run all tests
 test: test-unit test-integration

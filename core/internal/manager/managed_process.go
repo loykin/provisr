@@ -147,6 +147,19 @@ func (up *ManagedProcess) Stop(wait time.Duration) error {
 }
 
 // Status returns current status (lock-minimal)
+// LogsSince returns captured stdout/stderr lines for this process since the
+// given offset, plus the offset to pass as `since` on the next poll.
+func (up *ManagedProcess) LogsSince(since uint64, limit int) ([]process.LogLine, uint64) {
+	up.mu.RLock()
+	proc := up.proc
+	up.mu.RUnlock()
+
+	if proc == nil {
+		return nil, since
+	}
+	return proc.LogsSince(since, limit)
+}
+
 func (up *ManagedProcess) Status() process.Status {
 	up.mu.RLock()
 	restarts := up.restarts

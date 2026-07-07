@@ -561,7 +561,6 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	mgr := provisr.New()
 
 	// Apply global environment
-	// Set global environment - 직접 필드 접근
 	mgr.SetGlobalEnv(cfg.GlobalEnv)
 
 	// Convert and set group definitions
