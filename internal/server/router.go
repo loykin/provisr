@@ -15,6 +15,7 @@ import (
 	"github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/history/sqlite"
 	tlsutil "github.com/loykin/provisr/internal/tls"
+	"github.com/loykin/provisr/internal/ui"
 )
 
 // Router provides embeddable HTTP handlers for managing processes.
@@ -124,6 +125,7 @@ func (r *Router) Handler() http.Handler {
 	group.GET("/metrics", r.handleProcessMetrics)
 	group.GET("/metrics/history", r.handleProcessMetricsHistory)
 	group.GET("/metrics/group", r.handleProcessMetricsGroup)
+	group.GET("/processes/:name/logs", r.handleProcessLogs)
 
 	// Add history endpoint if a history reader is available
 	if r.historyReader != nil {
@@ -135,6 +137,11 @@ func (r *Router) Handler() http.Handler {
 		authAPI := NewAuthAPI(r.authService)
 		authAPI.RegisterAuthEndpoints(group)
 	}
+
+	// Serve the embedded web UI (built via `make ui`) at /ui, single binary.
+	uiHandler := http.StripPrefix("/ui", ui.Handler())
+	g.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/ui/") })
+	g.Any("/ui/*proxyPath", gin.WrapH(uiHandler))
 
 	return g
 }
@@ -559,6 +566,50 @@ func (r *Router) handleHistory(c *gin.Context) {
 	}
 
 	writeJSON(c, http.StatusOK, rows)
+}
+
+// logsSinceResp is the response body for the live-tail polling endpoint.
+type logsSinceResp struct {
+	Lines []core.LogLine `json:"lines"`
+	Next  uint64         `json:"next"`
+}
+
+// handleProcessLogs returns captured stdout/stderr lines for a process
+// since the given offset, for polling-based live tail. Query params:
+// since (optional, default 0), limit (optional, default 200, max 1000).
+func (r *Router) handleProcessLogs(c *gin.Context) {
+	name := c.Param("name")
+
+	var since uint64
+	if v := c.Query("since"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: "since must be a non-negative number"})
+			return
+		}
+		since = n
+	}
+
+	limit := 200
+	if v := c.Query("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: "limit must be a number"})
+			return
+		}
+		limit = n
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	lines, next, err := r.mgr.LogsSince(name, since, limit)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, logsSinceResp{Lines: lines, Next: next})
 }
 
 func getHealthStatus(status core.Status) string {

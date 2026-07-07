@@ -33,6 +33,9 @@ type Spec = process.Spec
 // Status describes the runtime state of a managed process.
 type Status = process.Status
 
+// LogLine is a single captured stdout/stderr line, used by the live-tail API.
+type LogLine = process.LogLine
+
 // DetectorConfig is a serializable detector definition embedded in a Spec.
 type DetectorConfig = process.DetectorConfig
 
@@ -132,7 +135,10 @@ func (m *Manager) StopAll(base string, wait time.Duration) error { return m.inne
 func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
 	return m.inner.UnregisterAll(base, wait)
 }
-func (m *Manager) Status(name string) (Status, error)           { return m.inner.Status(name) }
+func (m *Manager) Status(name string) (Status, error) { return m.inner.Status(name) }
+func (m *Manager) LogsSince(name string, since uint64, limit int) ([]LogLine, uint64, error) {
+	return m.inner.LogsSince(name, since, limit)
+}
 func (m *Manager) StatusAll(base string) ([]Status, error)      { return m.inner.StatusAll(base) }
 func (m *Manager) StatusMatch(pattern string) ([]Status, error) { return m.inner.StatusMatch(pattern) }
 func (m *Manager) InstanceGroupStatus(groupName string) (map[string][]Status, error) {

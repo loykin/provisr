@@ -233,6 +233,21 @@ func (m *Manager) Status(name string) (process.Status, error) {
 	return up.Status(), nil
 }
 
+// LogsSince returns captured stdout/stderr lines for name since the given
+// offset, plus the offset to pass as `since` on the next poll.
+func (m *Manager) LogsSince(name string, since uint64, limit int) ([]process.LogLine, uint64, error) {
+	m.mu.RLock()
+	up := m.processes[name]
+	m.mu.RUnlock()
+
+	if up == nil {
+		return nil, since, fmt.Errorf("process %s not found", name)
+	}
+
+	lines, next := up.LogsSince(since, limit)
+	return lines, next, nil
+}
+
 // StopAll stops all processes matching a base name pattern
 func (m *Manager) StopAll(base string, wait time.Duration) error {
 	var processes []*ManagedProcess

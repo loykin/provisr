@@ -1,6 +1,38 @@
+import { useEffect, useRef } from 'react'
+import { useProcessLogs } from './queries'
 import type { ProcessStatus } from './types'
 
-export function ProcessDetailBody({ status }: { status: ProcessStatus }) {
+function LogTail({ name }: { name: string }) {
+  const { data: lines, error } = useProcessLogs(name, true)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [lines])
+
+  return (
+    <div className="mt-4">
+      <div className="mb-1 text-sm font-medium text-muted-foreground">Live output</div>
+      <div
+        ref={scrollRef}
+        className="h-64 overflow-y-auto rounded-(--radius) border border-border bg-black p-3 font-mono text-xs text-neutral-200"
+      >
+        {error && <p className="text-destructive">Failed to load logs.</p>}
+        {!error && (!lines || lines.length === 0) && (
+          <p className="text-neutral-500">No output yet.</p>
+        )}
+        {lines?.map((line) => (
+          <div key={line.offset} className={line.stream === 'stderr' ? 'text-red-400' : undefined}>
+            {line.text}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function ProcessDetailBody({ name, status }: { name: string; status: ProcessStatus }) {
   return (
     <>
       <div className="grid grid-cols-2 gap-4 rounded-(--radius) border border-border bg-card p-4 text-sm">
@@ -22,10 +54,7 @@ export function ProcessDetailBody({ status }: { status: ProcessStatus }) {
         </div>
       </div>
 
-      <div className="mt-4 rounded-(--radius) border border-dashed border-border p-4 text-sm text-muted-foreground">
-        Live stdout/stderr tailing isn&apos;t available yet — the backend SSE
-        endpoint hasn&apos;t been built (see the &quot;live tail&quot; task in test.md).
-      </div>
+      <LogTail name={name} />
     </>
   )
 }

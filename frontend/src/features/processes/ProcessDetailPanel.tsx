@@ -3,12 +3,12 @@ import { PanelTemplate } from '@loykin/designkit'
 import { useSidePanel } from '@loykin/side-panel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useProcessStatus } from './useProcessStatus'
+import { useProcessStatus } from './queries'
 import { ProcessDetailBody } from './ProcessDetailBody'
 
 export function ProcessDetailPanel({ name }: { name: string }) {
   const { close } = useSidePanel()
-  const { status, error } = useProcessStatus(name)
+  const { data: status, error } = useProcessStatus(name)
 
   const closeBtn = (
     <Button variant="ghost" size="icon-sm" onClick={() => void close()}>
@@ -19,7 +19,9 @@ export function ProcessDetailPanel({ name }: { name: string }) {
   if (!status) {
     return (
       <PanelTemplate title="Loading…" actions={closeBtn}>
-        <p className="text-sm text-muted-foreground">{error ?? 'Loading…'}</p>
+        <p className="text-sm text-muted-foreground">
+          {error ? 'Failed to load process status.' : 'Loading…'}
+        </p>
       </PanelTemplate>
     )
   }
@@ -31,7 +33,7 @@ export function ProcessDetailPanel({ name }: { name: string }) {
       status={<Badge variant={status.running ? 'default' : 'secondary'}>{status.state}</Badge>}
       actions={closeBtn}
     >
-      <ProcessDetailBody status={status} />
+      <ProcessDetailBody name={name} status={status} />
     </PanelTemplate>
   )
 }

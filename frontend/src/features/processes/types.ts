@@ -8,3 +8,14 @@ export interface ProcessStatus {
   restarts: number
   state: string
 }
+
+export interface LogLine {
+  offset: number
+  stream: 'stdout' | 'stderr'
+  text: string
+}
+
+export interface LogsSinceResponse {
+  lines: LogLine[]
+  next: number
+}

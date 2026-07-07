@@ -29,9 +29,17 @@ type Process struct {
 	generation uint64 // incremented on each TryStart; guards stale cmd.Wait() goroutines
 	exited     bool   // Track if process has exited
 	exitErr    error  // Exit error if any
+	logs       *logRingBuffer
 }
 
-func New(spec Spec) *Process { return &Process{spec: spec} }
+func New(spec Spec) *Process { return &Process{spec: spec, logs: newLogRingBuffer(defaultLogBufferCapacity)} }
+
+// LogsSince returns captured stdout/stderr lines with offset >= since
+// (oldest first, capped at limit if positive), plus the offset to pass as
+// `since` on the next poll. Used by the live-tail HTTP API.
+func (r *Process) LogsSince(since uint64, limit int) ([]LogLine, uint64) {
+	return r.logs.since(since, limit)
+}
 
 // UpdateSpec replaces the internal spec under lock.
 func (r *Process) UpdateSpec(s Spec) {
@@ -63,28 +71,26 @@ func (r *Process) ConfigureCmd(mergedEnv []string) *exec.Cmd {
 		slog.Warn("Detached processes do not support logging")
 	}
 
-	if !spec.Detached && (spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" || spec.Log.File.StdoutWriter != nil || spec.Log.File.StderrWriter != nil) {
-		if spec.Log.File.Dir != "" {
-			if err := os.MkdirAll(spec.Log.File.Dir, 0o750); err != nil {
-				slog.Warn("Failed to create log directory", "dir", spec.Log.File.Dir, "error", err)
+	// Detached processes don't get their stdio wired up at all — provisr
+	// doesn't own their pipes, so there's nothing to tail.
+	if !spec.Detached {
+		var ow, ew io.WriteCloser
+		if spec.Log.File.Dir != "" || spec.Log.File.StdoutPath != "" || spec.Log.File.StderrPath != "" || spec.Log.File.StdoutWriter != nil || spec.Log.File.StderrWriter != nil {
+			if spec.Log.File.Dir != "" {
+				if err := os.MkdirAll(spec.Log.File.Dir, 0o750); err != nil {
+					slog.Warn("Failed to create log directory", "dir", spec.Log.File.Dir, "error", err)
+				}
 			}
+			// Use unified config for both structured logging and file writers
+			outW, errW, _ := spec.Log.ProcessWriters(spec.Name)
+			r.EnsureLogClosers(outW, errW)
+			ow, ew = r.OutErrClosers()
 		}
-		// Use unified config for both structured logging and file writers
-		outW, errW, _ := spec.Log.ProcessWriters(spec.Name)
-		r.EnsureLogClosers(outW, errW)
-		ow, ew := r.OutErrClosers()
-		if ow != nil {
-			cmd.Stdout = ow
-		} else {
-			// Use io.Discard to avoid opening file handles for /dev/null
-			cmd.Stdout = io.Discard
-		}
-		if ew != nil {
-			cmd.Stderr = ew
-		} else {
-			// Use io.Discard to avoid opening file handles for /dev/null
-			cmd.Stderr = io.Discard
-		}
+
+		// Always tee stdout/stderr into the in-memory ring buffer (live
+		// tail), in addition to file-based logging when configured.
+		cmd.Stdout = newLineTeeWriter(r.logs, "stdout", ow)
+		cmd.Stderr = newLineTeeWriter(r.logs, "stderr", ew)
 	}
 	return cmd
 }

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 var (
@@ -70,522 +72,7 @@ type AuthStore interface {
 	ClientStore
 }
 
-// SQLiteAuthStore implements AuthStore for SQLite
-type SQLiteAuthStore struct {
-	*SQLiteStore
-}
-
-// PostgreSQLAuthStore implements AuthStore for PostgreSQL
-type PostgreSQLAuthStore struct {
-	*PostgreSQLStore
-}
-
-// NewSQLiteAuthStore creates a new SQLite auth store
-func NewSQLiteAuthStore(config Config) (*SQLiteAuthStore, error) {
-	baseStore, err := NewSQLiteStore(config)
-	if err != nil {
-		return nil, err
-	}
-
-	store := &SQLiteAuthStore{SQLiteStore: baseStore}
-
-	if err := store.createTables(); err != nil {
-		_ = baseStore.Close()
-		return nil, fmt.Errorf("failed to create auth tables: %w", err)
-	}
-
-	return store, nil
-}
-
-// NewPostgreSQLAuthStore creates a new PostgreSQL auth store
-func NewPostgreSQLAuthStore(config Config) (*PostgreSQLAuthStore, error) {
-	baseStore, err := NewPostgreSQLStore(config)
-	if err != nil {
-		return nil, err
-	}
-
-	store := &PostgreSQLAuthStore{PostgreSQLStore: baseStore}
-
-	if err := store.createTables(); err != nil {
-		_ = baseStore.Close()
-		return nil, fmt.Errorf("failed to create auth tables: %w", err)
-	}
-
-	return store, nil
-}
-
-// createTables creates the auth tables for SQLite
-func (s *SQLiteAuthStore) createTables() error {
-	prefix := s.GetTablePrefix()
-	schemas := []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %susers (
-			id TEXT PRIMARY KEY,
-			username TEXT UNIQUE NOT NULL,
-			password_hash TEXT NOT NULL,
-			email TEXT,
-			roles TEXT,
-			metadata TEXT,
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL,
-			active BOOLEAN NOT NULL DEFAULT 1
-		)`, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%susers_username ON %susers(username)`, prefix, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%susers_active ON %susers(active)`, prefix, prefix),
-
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %sclient_credentials (
-			id TEXT PRIMARY KEY,
-			client_id TEXT UNIQUE NOT NULL,
-			client_secret TEXT NOT NULL,
-			name TEXT NOT NULL,
-			scopes TEXT,
-			metadata TEXT,
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL,
-			active BOOLEAN NOT NULL DEFAULT 1
-		)`, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%sclients_client_id ON %sclient_credentials(client_id)`, prefix, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%sclients_active ON %sclient_credentials(active)`, prefix, prefix),
-	}
-
-	return s.CreateTables(schemas)
-}
-
-// createTables creates the auth tables for PostgreSQL
-func (s *PostgreSQLAuthStore) createTables() error {
-	prefix := s.GetTablePrefix()
-
-	// Create UUID extension
-	if err := s.CreateExtension("uuid-ossp"); err != nil {
-		return err
-	}
-
-	schemas := []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %susers (
-			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-			username VARCHAR(255) UNIQUE NOT NULL,
-			password_hash TEXT NOT NULL,
-			email VARCHAR(255),
-			roles JSONB,
-			metadata JSONB,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			active BOOLEAN NOT NULL DEFAULT TRUE
-		)`, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%susers_username ON %susers(username)`, prefix, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%susers_active ON %susers(active)`, prefix, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%susers_roles ON %susers USING GIN(roles)`, prefix, prefix),
-
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %sclient_credentials (
-			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-			client_id VARCHAR(255) UNIQUE NOT NULL,
-			client_secret TEXT NOT NULL,
-			name VARCHAR(255) NOT NULL,
-			scopes JSONB,
-			metadata JSONB,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			active BOOLEAN NOT NULL DEFAULT TRUE
-		)`, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%sclients_client_id ON %sclient_credentials(client_id)`, prefix, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%sclients_active ON %sclient_credentials(active)`, prefix, prefix),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%sclients_scopes ON %sclient_credentials USING GIN(scopes)`, prefix, prefix),
-	}
-
-	return s.CreateTables(schemas)
-}
-
-// User operations for SQLite
-
-func (s *SQLiteAuthStore) CreateUser(ctx context.Context, user *User) error {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	rolesJSON, _ := json.Marshal(user.Roles)
-	metadataJSON, _ := json.Marshal(user.Metadata)
-
-	query := fmt.Sprintf(`INSERT INTO %susers (id, username, password_hash, email, roles, metadata, created_at, updated_at, active)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, prefix)
-
-	_, err := db.ExecContext(ctx, query,
-		user.ID, user.Username, user.PasswordHash, user.Email,
-		string(rolesJSON), string(metadataJSON),
-		user.CreatedAt, user.UpdatedAt, user.Active)
-
-	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return ErrUserAlreadyExists
-		}
-		return fmt.Errorf("failed to create user: %w", err)
-	}
-
-	return nil
-}
-
-func (s *SQLiteAuthStore) GetUser(ctx context.Context, id string) (*User, error) {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	query := fmt.Sprintf(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
-			  FROM %susers WHERE id = ?`, prefix)
-
-	return s.scanUser(db.QueryRowContext(ctx, query, id))
-}
-
-func (s *SQLiteAuthStore) GetUserByUsername(ctx context.Context, username string) (*User, error) {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	query := fmt.Sprintf(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
-			  FROM %susers WHERE username = ? AND active = 1`, prefix)
-
-	return s.scanUser(db.QueryRowContext(ctx, query, username))
-}
-
-func (s *SQLiteAuthStore) UpdateUser(ctx context.Context, user *User) error {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	rolesJSON, _ := json.Marshal(user.Roles)
-	metadataJSON, _ := json.Marshal(user.Metadata)
-	user.UpdatedAt = time.Now().UTC()
-
-	query := fmt.Sprintf(`UPDATE %susers SET username = ?, password_hash = ?, email = ?, roles = ?, metadata = ?, updated_at = ?, active = ?
-			  WHERE id = ?`, prefix)
-
-	result, err := db.ExecContext(ctx, query,
-		user.Username, user.PasswordHash, user.Email,
-		string(rolesJSON), string(metadataJSON),
-		user.UpdatedAt, user.Active, user.ID)
-
-	if err != nil {
-		return fmt.Errorf("failed to update user: %w", err)
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	if affected == 0 {
-		return ErrUserNotFound
-	}
-
-	return nil
-}
-
-func (s *SQLiteAuthStore) DeleteUser(ctx context.Context, id string) error {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	query := fmt.Sprintf(`DELETE FROM %susers WHERE id = ?`, prefix)
-
-	result, err := db.ExecContext(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to delete user: %w", err)
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	if affected == 0 {
-		return ErrUserNotFound
-	}
-
-	return nil
-}
-
-func (s *SQLiteAuthStore) ListUsers(ctx context.Context, offset, limit int) ([]*User, int, error) {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	// Get total count
-	var total int
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %susers`, prefix)
-	if err := db.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("failed to get user count: %w", err)
-	}
-
-	// Get users with pagination
-	query := fmt.Sprintf(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
-			  FROM %susers ORDER BY created_at DESC LIMIT ? OFFSET ?`, prefix)
-
-	rows, err := db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list users: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var users []*User
-	for rows.Next() {
-		user, err := s.scanUserFromRows(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		users = append(users, user)
-	}
-
-	return users, total, nil
-}
-
-// scanUser scans a user from a single row
-func (s *SQLiteAuthStore) scanUser(row *sql.Row) (*User, error) {
-	var user User
-	var rolesJSON, metadataJSON sql.NullString
-
-	err := row.Scan(
-		&user.ID, &user.Username, &user.PasswordHash, &user.Email,
-		&rolesJSON, &metadataJSON,
-		&user.CreatedAt, &user.UpdatedAt, &user.Active,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrUserNotFound
-		}
-		return nil, fmt.Errorf("failed to scan user: %w", err)
-	}
-
-	if rolesJSON.Valid {
-		_ = json.Unmarshal([]byte(rolesJSON.String), &user.Roles)
-	}
-	if metadataJSON.Valid {
-		_ = json.Unmarshal([]byte(metadataJSON.String), &user.Metadata)
-	}
-
-	return &user, nil
-}
-
-// scanUserFromRows scans a user from multiple rows
-func (s *SQLiteAuthStore) scanUserFromRows(rows *sql.Rows) (*User, error) {
-	var user User
-	var rolesJSON, metadataJSON sql.NullString
-
-	err := rows.Scan(
-		&user.ID, &user.Username, &user.PasswordHash, &user.Email,
-		&rolesJSON, &metadataJSON,
-		&user.CreatedAt, &user.UpdatedAt, &user.Active,
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan user: %w", err)
-	}
-
-	if rolesJSON.Valid {
-		_ = json.Unmarshal([]byte(rolesJSON.String), &user.Roles)
-	}
-	if metadataJSON.Valid {
-		_ = json.Unmarshal([]byte(metadataJSON.String), &user.Metadata)
-	}
-
-	return &user, nil
-}
-
-// User operations for PostgreSQL (similar to SQLite but with PostgreSQL-specific queries)
-
-func (s *PostgreSQLAuthStore) CreateUser(ctx context.Context, user *User) error {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	rolesJSON, _ := json.Marshal(user.Roles)
-	metadataJSON, _ := json.Marshal(user.Metadata)
-
-	query := fmt.Sprintf(`INSERT INTO %susers (id, username, password_hash, email, roles, metadata, created_at, updated_at, active)
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, prefix)
-
-	_, err := db.ExecContext(ctx, query,
-		user.ID, user.Username, user.PasswordHash, user.Email,
-		rolesJSON, metadataJSON,
-		user.CreatedAt, user.UpdatedAt, user.Active)
-
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
-			return ErrUserAlreadyExists
-		}
-		return fmt.Errorf("failed to create user: %w", err)
-	}
-
-	return nil
-}
-
-func (s *PostgreSQLAuthStore) GetUser(ctx context.Context, id string) (*User, error) {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	query := fmt.Sprintf(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
-			  FROM %susers WHERE id = $1`, prefix)
-
-	return s.scanUser(db.QueryRowContext(ctx, query, id))
-}
-
-func (s *PostgreSQLAuthStore) GetUserByUsername(ctx context.Context, username string) (*User, error) {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	query := fmt.Sprintf(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
-			  FROM %susers WHERE username = $1 AND active = TRUE`, prefix)
-
-	return s.scanUser(db.QueryRowContext(ctx, query, username))
-}
-
-func (s *PostgreSQLAuthStore) UpdateUser(ctx context.Context, user *User) error {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	rolesJSON, _ := json.Marshal(user.Roles)
-	metadataJSON, _ := json.Marshal(user.Metadata)
-	user.UpdatedAt = time.Now().UTC()
-
-	query := fmt.Sprintf(`UPDATE %susers SET username = $1, password_hash = $2, email = $3, roles = $4, metadata = $5, updated_at = $6, active = $7
-			  WHERE id = $8`, prefix)
-
-	result, err := db.ExecContext(ctx, query,
-		user.Username, user.PasswordHash, user.Email,
-		rolesJSON, metadataJSON,
-		user.UpdatedAt, user.Active, user.ID)
-
-	if err != nil {
-		return fmt.Errorf("failed to update user: %w", err)
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	if affected == 0 {
-		return ErrUserNotFound
-	}
-
-	return nil
-}
-
-func (s *PostgreSQLAuthStore) DeleteUser(ctx context.Context, id string) error {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	query := fmt.Sprintf(`DELETE FROM %susers WHERE id = $1`, prefix)
-
-	result, err := db.ExecContext(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to delete user: %w", err)
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	if affected == 0 {
-		return ErrUserNotFound
-	}
-
-	return nil
-}
-
-func (s *PostgreSQLAuthStore) ListUsers(ctx context.Context, offset, limit int) ([]*User, int, error) {
-	db := s.GetDB()
-	prefix := s.GetTablePrefix()
-
-	// Get total count
-	var total int
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %susers`, prefix)
-	if err := db.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("failed to get user count: %w", err)
-	}
-
-	// Get users with pagination
-	query := fmt.Sprintf(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
-			  FROM %susers ORDER BY created_at DESC LIMIT $1 OFFSET $2`, prefix)
-
-	rows, err := db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list users: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var users []*User
-	for rows.Next() {
-		user, err := s.scanUserFromRows(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		users = append(users, user)
-	}
-
-	return users, total, nil
-}
-
-// scanUser for PostgreSQL
-func (s *PostgreSQLAuthStore) scanUser(row *sql.Row) (*User, error) {
-	var user User
-	var rolesJSON, metadataJSON []byte
-
-	err := row.Scan(
-		&user.ID, &user.Username, &user.PasswordHash, &user.Email,
-		&rolesJSON, &metadataJSON,
-		&user.CreatedAt, &user.UpdatedAt, &user.Active,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrUserNotFound
-		}
-		return nil, fmt.Errorf("failed to scan user: %w", err)
-	}
-
-	if len(rolesJSON) > 0 {
-		_ = json.Unmarshal(rolesJSON, &user.Roles)
-	}
-	if len(metadataJSON) > 0 {
-		_ = json.Unmarshal(metadataJSON, &user.Metadata)
-	}
-
-	return &user, nil
-}
-
-// scanUserFromRows for PostgreSQL
-func (s *PostgreSQLAuthStore) scanUserFromRows(rows *sql.Rows) (*User, error) {
-	var user User
-	var rolesJSON, metadataJSON []byte
-
-	err := rows.Scan(
-		&user.ID, &user.Username, &user.PasswordHash, &user.Email,
-		&rolesJSON, &metadataJSON,
-		&user.CreatedAt, &user.UpdatedAt, &user.Active,
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan user: %w", err)
-	}
-
-	if len(rolesJSON) > 0 {
-		_ = json.Unmarshal(rolesJSON, &user.Roles)
-	}
-	if len(metadataJSON) > 0 {
-		_ = json.Unmarshal(metadataJSON, &user.Metadata)
-	}
-
-	return &user, nil
-}
-
-// Client operations would be implemented similarly...
-// (For brevity, I'll add a note that client operations follow the same pattern)
-
-// Register auth store types
-func init() {
-	RegisterStoreType("sqlite_auth", func(config Config) (Store, error) {
-		return NewSQLiteAuthStore(config)
-	})
-	RegisterStoreType("postgresql_auth", func(config Config) (Store, error) {
-		return NewPostgreSQLAuthStore(config)
-	})
-	RegisterStoreType("postgres_auth", func(config Config) (Store, error) {
-		return NewPostgreSQLAuthStore(config)
-	})
-}
-
+// NewAuthStore creates a new auth store based on the configuration
 func NewAuthStore(config Config) (AuthStore, error) {
 	switch config.Type {
 	case "sqlite", "":
@@ -595,4 +82,162 @@ func NewAuthStore(config Config) (AuthStore, error) {
 	default:
 		return nil, fmt.Errorf("unsupported auth store type: %s", config.Type)
 	}
+}
+
+func isUniqueViolation(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") || strings.Contains(msg, "duplicate key")
+}
+
+// userRow mirrors the users table for scanning; Roles/Metadata are stored
+// as JSON text (TEXT on SQLite, JSONB on PostgreSQL) and converted to/from
+// User's typed fields at the boundary.
+type userRow struct {
+	ID           string         `db:"id"`
+	Username     string         `db:"username"`
+	PasswordHash string         `db:"password_hash"`
+	Email        sql.NullString `db:"email"`
+	Roles        sql.NullString `db:"roles"`
+	Metadata     sql.NullString `db:"metadata"`
+	CreatedAt    time.Time      `db:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at"`
+	Active       bool           `db:"active"`
+}
+
+func (r userRow) toUser() *User {
+	u := &User{
+		ID:           r.ID,
+		Username:     r.Username,
+		PasswordHash: r.PasswordHash,
+		Email:        r.Email.String,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
+		Active:       r.Active,
+	}
+	if r.Roles.Valid {
+		_ = json.Unmarshal([]byte(r.Roles.String), &u.Roles)
+	}
+	if r.Metadata.Valid {
+		_ = json.Unmarshal([]byte(r.Metadata.String), &u.Metadata)
+	}
+	return u
+}
+
+func (s *authStore) CreateUser(ctx context.Context, user *User) error {
+	rolesJSON, _ := json.Marshal(user.Roles)
+	metadataJSON, _ := json.Marshal(user.Metadata)
+
+	return s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		query := db.Rebind(`INSERT INTO users (id, username, password_hash, email, roles, metadata, created_at, updated_at, active)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		_, err := db.ExecContext(ctx, query,
+			user.ID, user.Username, user.PasswordHash, user.Email,
+			string(rolesJSON), string(metadataJSON),
+			user.CreatedAt, user.UpdatedAt, user.Active)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrUserAlreadyExists
+			}
+			return fmt.Errorf("failed to create user: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *authStore) GetUser(ctx context.Context, id string) (*User, error) {
+	var row userRow
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		query := db.Rebind(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
+			FROM users WHERE id = ?`)
+		return db.GetContext(ctx, &row, query, id)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	return row.toUser(), nil
+}
+
+func (s *authStore) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	var row userRow
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		query := db.Rebind(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
+			FROM users WHERE username = ? AND active = true`)
+		return db.GetContext(ctx, &row, query, username)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	return row.toUser(), nil
+}
+
+func (s *authStore) UpdateUser(ctx context.Context, user *User) error {
+	rolesJSON, _ := json.Marshal(user.Roles)
+	metadataJSON, _ := json.Marshal(user.Metadata)
+	user.UpdatedAt = time.Now().UTC()
+
+	return s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		query := db.Rebind(`UPDATE users SET username = ?, password_hash = ?, email = ?, roles = ?, metadata = ?, updated_at = ?, active = ?
+			WHERE id = ?`)
+		result, err := db.ExecContext(ctx, query,
+			user.Username, user.PasswordHash, user.Email,
+			string(rolesJSON), string(metadataJSON),
+			user.UpdatedAt, user.Active, user.ID)
+		if err != nil {
+			return fmt.Errorf("failed to update user: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get affected rows: %w", err)
+		}
+		if affected == 0 {
+			return ErrUserNotFound
+		}
+		return nil
+	})
+}
+
+func (s *authStore) DeleteUser(ctx context.Context, id string) error {
+	return s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		query := db.Rebind(`DELETE FROM users WHERE id = ?`)
+		result, err := db.ExecContext(ctx, query, id)
+		if err != nil {
+			return fmt.Errorf("failed to delete user: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get affected rows: %w", err)
+		}
+		if affected == 0 {
+			return ErrUserNotFound
+		}
+		return nil
+	})
+}
+
+func (s *authStore) ListUsers(ctx context.Context, offset, limit int) ([]*User, int, error) {
+	var total int
+	var rows []userRow
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		if err := db.GetContext(ctx, &total, `SELECT COUNT(*) FROM users`); err != nil {
+			return fmt.Errorf("failed to get user count: %w", err)
+		}
+		query := db.Rebind(`SELECT id, username, password_hash, email, roles, metadata, created_at, updated_at, active
+			FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+		return db.SelectContext(ctx, &rows, query, limit, offset)
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	users := make([]*User, len(rows))
+	for i, row := range rows {
+		users[i] = row.toUser()
+	}
+	return users, total, nil
 }
