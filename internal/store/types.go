@@ -26,8 +26,7 @@ type Config struct {
 	ConnMaxAge   time.Duration `toml:"conn_max_age,omitempty" yaml:"conn_max_age,omitempty" json:"conn_max_age,omitempty"`
 
 	// Additional options
-	TablePrefix string            `toml:"table_prefix,omitempty" yaml:"table_prefix,omitempty" json:"table_prefix,omitempty"`
-	Options     map[string]string `toml:"options,omitempty" yaml:"options,omitempty" json:"options,omitempty"`
+	Options map[string]string `toml:"options,omitempty" yaml:"options,omitempty" json:"options,omitempty"`
 }
 
 // Store represents a generic data store interface
