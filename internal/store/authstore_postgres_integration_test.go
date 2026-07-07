@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // TestPostgreSQLAuthStore_UserAndClientCRUD mirrors the SQLite unit test,
@@ -18,10 +20,25 @@ import (
 func TestPostgreSQLAuthStore_UserAndClientCRUD(t *testing.T) {
 	ctx := context.Background()
 
+	// The postgres image logs "database system is ready to accept
+	// connections" once for its own initdb bootstrap (a temporary server
+	// that then shuts down) and again for the real server — waiting for
+	// only the first occurrence (the module's default) can let the test
+	// connect during that shutdown window, seen as a flaky "connection
+	// reset by peer" in CI.
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
 		tcpostgres.WithDatabase("testdb"),
 		tcpostgres.WithUsername("user"),
 		tcpostgres.WithPassword("pass"),
+		testcontainers.WithWaitStrategy(
+			wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(60*time.Second),
+				wait.ForListeningPort("5432/tcp").
+					WithStartupTimeout(60*time.Second),
+			),
+		),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ctr.Terminate(ctx) })

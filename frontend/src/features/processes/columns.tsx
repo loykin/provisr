@@ -1,5 +1,5 @@
 import type { DataGridColumnDef } from '@loykin/gridkit'
-import { Badge } from '@/components/ui/badge'
+import { ProcessStateBadge } from './ProcessStateBadge'
 import type { ProcessStatus } from './types'
 
 function uptime(status: ProcessStatus): string {
@@ -18,9 +18,7 @@ export const columns: DataGridColumnDef<ProcessStatus>[] = [
   {
     accessorKey: 'state',
     header: 'State',
-    cell: ({ row }) => (
-      <Badge variant={row.original.running ? 'default' : 'secondary'}>{row.original.state}</Badge>
-    ),
+    cell: ({ row }) => <ProcessStateBadge state={row.original.state} />,
   },
   { accessorKey: 'pid', header: 'PID' },
   { id: 'uptime', header: 'Uptime', cell: ({ row }) => uptime(row.original) },
