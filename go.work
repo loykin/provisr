@@ -3,5 +3,3 @@ go 1.26.4
 use .
 
 use ./examples
-
-use ./history/clickhouse

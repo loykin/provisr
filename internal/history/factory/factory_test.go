@@ -2,7 +2,6 @@ package factory
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -19,7 +18,7 @@ func TestFactoryDSNTypes(t *testing.T) {
 	}{
 		{"Empty DSN", "", true, false},
 		{"Invalid scheme", "invalid://test", true, false},
-		{"ClickHouse DSN returns module error", "clickhouse://localhost:8123?table=events", true, false},
+		{"ClickHouse DSN", "clickhouse://localhost:9000?table=events", false, true},
 		{"OpenSearch DSN", "opensearch://localhost:9200/process-logs", false, true},
 		{"PostgreSQL DSN", "postgres://user:pass@localhost:5432/db?sslmode=disable", false, true},
 		{"PostgreSQL DSN alt", "postgresql://user:pass@localhost:5432/db", false, true},
@@ -58,15 +57,6 @@ func TestFactoryDSNTypes(t *testing.T) {
 	}
 }
 
-func TestClickHouseDSNReturnsModuleError(t *testing.T) {
-	_, err := NewSinkFromDSN("clickhouse://localhost:9000")
-	if err == nil {
-		t.Fatal("expected error for clickhouse DSN")
-	}
-	if !strings.Contains(err.Error(), "separate module") {
-		t.Errorf("expected module-separation error, got: %v", err)
-	}
-}
 
 func TestParseOpenSearchDSN(t *testing.T) {
 	tests := []struct {

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -315,7 +316,10 @@ func (m *Manager) StatusMatch(pattern string) ([]process.Status, error) {
 	return m.StatusAll(pattern)
 }
 
-// StatusAll returns status for all processes matching a pattern
+// StatusAll returns status for all processes matching a pattern, sorted by
+// name. Go's map iteration order is randomized per call, so without this
+// sort the same query would return processes in a different order every
+// time — visible as rows shuffling position on every poll in the UI.
 func (m *Manager) StatusAll(base string) ([]process.Status, error) {
 	statuses := make([]process.Status, 0) // Initialize as empty slice instead of nil
 
@@ -326,6 +330,8 @@ func (m *Manager) StatusAll(base string) ([]process.Status, error) {
 		}
 	}
 	m.mu.RUnlock()
+
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
 
 	return statuses, nil
 }

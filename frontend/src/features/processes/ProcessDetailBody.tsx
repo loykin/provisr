@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useProcessLogs } from './queries'
+import { renderAnsiLine } from '@/lib/ansi'
 import type { ProcessStatus } from './types'
 
 function LogTail({ name }: { name: string }) {
@@ -24,7 +25,7 @@ function LogTail({ name }: { name: string }) {
         )}
         {lines?.map((line) => (
           <div key={line.offset} className={line.stream === 'stderr' ? 'text-red-400' : undefined}>
-            {line.text}
+            {renderAnsiLine(line.text)}
           </div>
         ))}
       </div>

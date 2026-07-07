@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	corehistory "github.com/loykin/provisr/core/history"
+	"github.com/loykin/provisr/internal/history/clickhouse"
 	"github.com/loykin/provisr/internal/history/opensearch"
 	"github.com/loykin/provisr/internal/history/postgres"
 	"github.com/loykin/provisr/internal/history/sqlite"
@@ -13,15 +14,13 @@ import (
 
 // NewSinkFromDSN creates a history sink based on DSN format.
 // Supported formats:
+//   - "clickhouse://user:pass@host:port/database?table=process_history"
+//     (table defaults to "process_history"; the table must already exist)
 //   - "opensearch://host:port/index"
 //   - "postgres://user:pass@host:port/db?sslmode=disable"
 //   - "postgresql://user:pass@host:port/db?sslmode=disable"
 //   - "sqlite:///path/to/file.db" or "sqlite://:memory:"
 //   - "/path/to/file.db" (defaults to SQLite)
-//
-// ClickHouse is not built into the main module. Use
-// github.com/loykin/provisr/history/clickhouse and pass the result to
-// manager.SetHistorySinks().
 func NewSinkFromDSN(dsn string) (corehistory.Sink, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
@@ -31,7 +30,7 @@ func NewSinkFromDSN(dsn string) (corehistory.Sink, error) {
 	lower := strings.ToLower(dsn)
 
 	if strings.HasPrefix(lower, "clickhouse://") {
-		return nil, errors.New("clickhouse is a separate module; import github.com/loykin/provisr/history/clickhouse")
+		return parseClickHouseDSN(dsn)
 	}
 
 	if strings.HasPrefix(lower, "opensearch://") || strings.HasPrefix(lower, "elasticsearch://") {
@@ -47,6 +46,23 @@ func NewSinkFromDSN(dsn string) (corehistory.Sink, error) {
 	}
 
 	return nil, errors.New("unsupported DSN format: " + dsn)
+}
+
+func parseClickHouseDSN(dsn string) (corehistory.Sink, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	q := u.Query()
+	table := q.Get("table")
+	if table == "" {
+		table = "process_history"
+	}
+	q.Del("table")
+	u.RawQuery = q.Encode()
+
+	return clickhouse.New(u.String(), table)
 }
 
 func parseOpenSearchDSN(dsn string) (corehistory.Sink, error) {

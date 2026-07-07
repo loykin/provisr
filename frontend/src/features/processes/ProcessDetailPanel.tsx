@@ -1,10 +1,10 @@
 import { X } from 'lucide-react'
 import { PanelTemplate } from '@loykin/designkit'
 import { useSidePanel } from '@loykin/side-panel'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useProcessStatus } from './queries'
 import { ProcessDetailBody } from './ProcessDetailBody'
+import { ProcessStateBadge } from './ProcessStateBadge'
 
 export function ProcessDetailPanel({ name }: { name: string }) {
   const { close } = useSidePanel()
@@ -30,7 +30,7 @@ export function ProcessDetailPanel({ name }: { name: string }) {
     <PanelTemplate
       eyebrow="Process"
       title={name}
-      status={<Badge variant={status.running ? 'default' : 'secondary'}>{status.state}</Badge>}
+      status={<ProcessStateBadge state={status.state} />}
       actions={closeBtn}
     >
       <ProcessDetailBody name={name} status={status} />

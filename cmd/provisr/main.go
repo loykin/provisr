@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
+	"github.com/loykin/provisr/internal/history/clickhouse"
 	"github.com/loykin/provisr/internal/history/opensearch"
 	"github.com/spf13/cobra"
 )
@@ -595,6 +596,19 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 			sink, err := opensearch.New(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex)
 			if err != nil {
 				fmt.Printf("Warning: failed to setup OpenSearch history sink: %v\n", err)
+			} else {
+				sinks = append(sinks, sink)
+			}
+		}
+
+		if cfg.History.ClickHouseURL != "" {
+			table := cfg.History.ClickHouseTable
+			if table == "" {
+				table = "process_history"
+			}
+			sink, err := clickhouse.New(cfg.History.ClickHouseURL, table)
+			if err != nil {
+				fmt.Printf("Warning: failed to setup ClickHouse history sink: %v\n", err)
 			} else {
 				sinks = append(sinks, sink)
 			}

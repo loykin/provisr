@@ -1,9 +1,9 @@
 import { useParams, useNavigate } from '@tanstack/react-router'
 import { DetailBodyTemplate, PageTopBar } from '@loykin/designkit'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useProcessStatus } from '@/features/processes/queries'
 import { ProcessDetailBody } from '@/features/processes/ProcessDetailBody'
+import { ProcessStateBadge } from '@/features/processes/ProcessStateBadge'
 
 export default function ProcessDetailPage() {
   const { name } = useParams({ from: '/processes/$name' })
@@ -23,12 +23,14 @@ export default function ProcessDetailPage() {
       }
       eyebrow="Process"
       title={name}
-      status={
-        status ? (
-          <Badge variant={status.running ? 'default' : 'secondary'}>{status.state}</Badge>
-        ) : undefined
+      status={status ? <ProcessStateBadge state={status.state} /> : undefined}
+      description={
+        error
+          ? status
+            ? 'Connection lost — showing last known status.'
+            : 'Failed to load process status.'
+          : undefined
       }
-      description={error ? 'Failed to load process status.' : undefined}
     >
       {status && <ProcessDetailBody name={name} status={status} />}
     </DetailBodyTemplate>
