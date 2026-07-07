@@ -157,7 +157,9 @@ func (s *authStore) Close() error {
 }
 
 func (s *authStore) Ping(ctx context.Context) error {
-	return s.db.PingContext(ctx)
+	return s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		return db.PingContext(ctx)
+	})
 }
 
 // BeginTx starts a new transaction. Kept for Store interface compatibility;

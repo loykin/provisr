@@ -136,8 +136,8 @@ github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjS
 github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
 github.com/lib/pq v1.12.3 h1:tTWxr2YLKwIvK90ZXEw8GP7UFHtcbTtty8zsI+YjrfQ=
 github.com/lib/pq v1.12.3/go.mod h1:/p+8NSbOcwzAEI7wiMXFlgydTwcgTr3OSKMsD2BitpA=
-github.com/loykin/dbstore v0.0.0-dev.1 h1:j6DPEy6i7drSmjWURSwYPBnxtaJaQ+ib/eyBluDn4dA=
-github.com/loykin/dbstore v0.0.0-dev.1/go.mod h1:54W4XEwxnNXKJwyGDbf2i4gdC5VwKB7x/nryLptYt+A=
+github.com/loykin/dbstore v0.0.0-dev.2 h1:I3bxwejyUbNsvfAB8EQrPRMlPD9wZvn/oC+KN6pqesY=
+github.com/loykin/dbstore v0.0.0-dev.2/go.mod h1:54W4XEwxnNXKJwyGDbf2i4gdC5VwKB7x/nryLptYt+A=
 github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e h1:Q6MvJtQK/iRcRtzAscm/zF23XxJlbECiGPyRicsX+Ak=
 github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e/go.mod h1:autxFIvghDt3jPTLoqZ9OZ7s9qTGNAWmYCjVFWPX/zg=
 github.com/magiconair/properties v1.8.10 h1:s31yESBquKXCV9a/ScB3ESkOjUYYv+X0rg8SYxI99mE=
