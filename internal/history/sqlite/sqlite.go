@@ -118,22 +118,39 @@ func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
 	})
 }
 
-// List returns the most recent history rows, newest first. If name is empty,
-// rows for all processes are returned. limit is capped at 500 (defaults to 100).
-func (s *Sink) List(ctx context.Context, name string, limit int) ([]Record, error) {
+// List returns history rows newest-first, paginated by limit/offset. If name
+// is empty, rows for all processes are returned. limit is capped at 500
+// (defaults to 100); offset must be >= 0.
+func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]Record, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	var rows []Record
 	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
 		if name == "" {
 			return db.SelectContext(ctx, &rows,
-				`SELECT timestamp, pid, name, status, error FROM process_history ORDER BY timestamp DESC LIMIT ?`, limit)
+				`SELECT timestamp, pid, name, status, error FROM process_history ORDER BY timestamp DESC LIMIT ? OFFSET ?`, limit, offset)
 		}
 		return db.SelectContext(ctx, &rows,
-			`SELECT timestamp, pid, name, status, error FROM process_history WHERE name = ? ORDER BY timestamp DESC LIMIT ?`, name, limit)
+			`SELECT timestamp, pid, name, status, error FROM process_history WHERE name = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`, name, limit, offset)
 	})
 	return rows, err
+}
+
+// Count returns the total number of history rows, optionally filtered by
+// name, so callers can compute page counts for List.
+func (s *Sink) Count(ctx context.Context, name string) (int, error) {
+	var total int
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		if name == "" {
+			return db.GetContext(ctx, &total, `SELECT COUNT(*) FROM process_history`)
+		}
+		return db.GetContext(ctx, &total, `SELECT COUNT(*) FROM process_history WHERE name = ?`, name)
+	})
+	return total, err
 }
 
 func (s *Sink) Close() error {

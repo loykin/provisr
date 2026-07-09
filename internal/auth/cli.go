@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"time"
 )
@@ -38,6 +40,35 @@ func (cli *CLIHelper) CreateInitialAdmin(ctx context.Context, username, password
 
 	fmt.Printf("Initial admin user '%s' created successfully\n", username)
 	return nil
+}
+
+// EnsureInitialAdmin creates an admin user with a random password if the
+// store has no users at all yet, so enabling [server.auth] on a fresh store
+// doesn't lock every operator out until someone with separate shell access
+// runs `provisr auth user create`. Returns created=false (and no error) if
+// users already exist — this is a no-op after the first successful boot.
+// The generated password is never stored or logged anywhere except the
+// single return value; the caller is responsible for displaying it once.
+func (cli *CLIHelper) EnsureInitialAdmin(ctx context.Context, username string) (password string, created bool, err error) {
+	users, _, err := cli.authService.store.ListUsers(ctx, 0, 1)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to check existing users: %w", err)
+	}
+	if len(users) > 0 {
+		return "", false, nil
+	}
+
+	passwordBytes := make([]byte, 18)
+	if _, err := rand.Read(passwordBytes); err != nil {
+		return "", false, fmt.Errorf("failed to generate initial admin password: %w", err)
+	}
+	password = base64.RawURLEncoding.EncodeToString(passwordBytes)
+
+	if _, err := cli.authService.CreateUser(ctx, username, password, "", []string{"admin"}, nil); err != nil {
+		return "", false, fmt.Errorf("failed to create initial admin user: %w", err)
+	}
+
+	return password, true, nil
 }
 
 // CreateAPIClient creates a client credential for API access

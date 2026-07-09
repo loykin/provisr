@@ -31,9 +31,11 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const ProcessesPage = lazy(() => import('@/pages/ProcessesPage'))
+const ProcessRegisterPage = lazy(() => import('@/pages/ProcessRegisterPage'))
 const ProcessDetailPage = lazy(() => import('@/pages/ProcessDetailPage'))
 const HistoryPage = lazy(() => import('@/pages/HistoryPage'))
 const JobsPage = lazy(() => import('@/pages/JobsPage'))
+const CronJobRegisterPage = lazy(() => import('@/pages/CronJobRegisterPage'))
 
 const navItems = [
   { id: 'processes', label: 'Processes', icon: Server, to: '/processes' },
@@ -44,7 +46,7 @@ const navItems = [
 function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, authEnabled, logout } = useAuth()
 
   return (
     <>
@@ -71,10 +73,14 @@ function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem className="flex items-center justify-between px-2 py-1 text-sm">
-            <span className="text-muted-foreground">{user?.username}</span>
-            <Button variant="ghost" size="sm" onClick={logout}>
-              Sign out
-            </Button>
+            <span className="text-muted-foreground">
+              {authEnabled ? user?.username : 'auth disabled'}
+            </span>
+            {authEnabled && (
+              <Button variant="ghost" size="sm" onClick={logout}>
+                Sign out
+              </Button>
+            )}
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
@@ -86,7 +92,12 @@ function RoutedContent() {
   const { user } = useAuth()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
 
-  if (!user) {
+  // undefined: the initial /auth/status check hasn't resolved yet — avoid
+  // flashing the login screen for users who won't need one.
+  if (user === undefined) {
+    return <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
+  }
+  if (user === null) {
     if (pathname !== '/login') return <Navigate to="/login" replace />
     return <Outlet />
   }
@@ -146,6 +157,12 @@ const processesRoute = createRoute({
   component: ProcessesPage,
 })
 
+const processRegisterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'processes/new',
+  component: ProcessRegisterPage,
+})
+
 const processDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'processes/$name',
@@ -164,13 +181,21 @@ const jobsRoute = createRoute({
   component: JobsPage,
 })
 
+const jobsRegisterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'jobs/new',
+  component: CronJobRegisterPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   processesRoute,
+  processRegisterRoute,
   processDetailRoute,
   historyRoute,
   jobsRoute,
+  jobsRegisterRoute,
 ])
 
 export const router = createRouter({ routeTree, basepath: '/ui' })

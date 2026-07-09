@@ -1,7 +1,8 @@
 import { X } from 'lucide-react'
-import { PanelTemplate } from '@loykin/designkit'
+import { DataBodyTemplate, PanelTemplate } from '@loykin/designkit'
 import { useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
+import { CronJobActions } from './CronJobActions'
 import { useCronJob, useCronJobHistory } from './queries'
 
 function formatTime(value?: string): string {
@@ -30,41 +31,38 @@ export function CronJobDetailPanel({ name }: { name: string }) {
   }
 
   return (
-    <PanelTemplate eyebrow="Cron job" title={name} actions={closeBtn}>
-      <div className="grid grid-cols-2 gap-4 rounded-(--radius) border border-border bg-card p-4 text-sm">
-        <div>
-          <div className="text-muted-foreground">Schedule</div>
-          <div className="font-mono">{job.schedule}</div>
+    <PanelTemplate
+      eyebrow="Cron job"
+      title={name}
+      actions={
+        <div className="flex items-center gap-2">
+          <CronJobActions job={job} />
+          {closeBtn}
         </div>
-        <div>
-          <div className="text-muted-foreground">Status</div>
-          <div>{job.suspend ? 'Suspended' : 'Active'}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Concurrency policy</div>
-          <div>{job.concurrency_policy || 'Allow'}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Currently running</div>
-          <div>{job.status.active?.length ?? 0}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Last scheduled</div>
-          <div>{formatTime(job.status.last_schedule_time)}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Last successful</div>
-          <div>{formatTime(job.status.last_successful_time)}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Next run</div>
-          <div>{formatTime(job.next_schedule)}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Command</div>
-          <div className="font-mono">{job.job_template.command}</div>
-        </div>
-      </div>
+      }
+    >
+      <DataBodyTemplate.Group layout="stacked">
+        <DataBodyTemplate.Field label="Schedule">
+          <span className="font-mono">{job.schedule}</span>
+        </DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Status">{job.suspend ? 'Suspended' : 'Active'}</DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Concurrency policy">
+          {job.concurrency_policy || 'Allow'}
+        </DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Currently running">
+          {job.status.active?.length ?? 0}
+        </DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Last scheduled">
+          {formatTime(job.status.last_schedule_time)}
+        </DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Last successful">
+          {formatTime(job.status.last_successful_time)}
+        </DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Next run">{formatTime(job.next_schedule)}</DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Command">
+          <span className="font-mono">{job.job_template.command}</span>
+        </DataBodyTemplate.Field>
+      </DataBodyTemplate.Group>
 
       <div className="mt-4">
         <div className="mb-1 text-sm font-medium text-muted-foreground">Recent runs</div>

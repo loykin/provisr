@@ -1,15 +1,24 @@
-.PHONY: build test test-unit test-integration clean ui
+.PHONY: build build-frontend build-backend test test-unit test-integration clean ui
 
-# Build the provisr binary
-build:
-	go build -o provisr ./cmd/provisr
-
-# Build the web UI and embed it into internal/ui/dist for go:embed.
-# Run this and commit internal/ui/dist after any frontend change.
-ui:
+# Build the web UI and copy it into internal/ui/dist for go:embed. Always
+# runs as part of `build` so the binary never silently embeds a stale UI.
+build-frontend:
 	cd frontend && npm run build
 	rm -rf internal/ui/dist
 	cp -r frontend/dist internal/ui/dist
+
+# Build the provisr binary only. Assumes internal/ui/dist is already
+# current (either just built by build-frontend, or committed as-is) —
+# use this directly for a fast Go-only edit/test loop.
+build-backend:
+	go build -o provisr ./cmd/provisr
+
+# Build frontend then backend, so the binary always embeds the current UI.
+build: build-frontend build-backend
+
+# Alias for build-frontend, kept for the "run this after any frontend
+# change and commit internal/ui/dist" workflow documented in README.
+ui: build-frontend
 	@echo "UI built. Commit internal/ui/dist/ to include it in the binary."
 
 # Run all tests
@@ -20,7 +29,7 @@ test-unit:
 	go test -v ./...
 
 # Run integration tests
-test-integration: build
+test-integration: build-backend
 	./scripts/simple-test.sh
 
 # Clean up build artifacts and test files

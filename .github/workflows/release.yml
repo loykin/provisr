@@ -6,8 +6,43 @@ on:
       - 'v*'
 
 jobs:
+  build-frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      # Built fresh here rather than trusting the committed internal/ui/dist:
+      # a tag can be pushed on any commit, not just one that went through
+      # ci.yml's "internal/ui/dist is up to date" check on main. Built once
+      # and shared via artifact so the 5-way OS/arch matrix below doesn't
+      # each redundantly rebuild the same frontend.
+      - name: Upload built UI
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ui-dist
+          path: frontend/dist
+          if-no-files-found: error
+
   build:
     name: Build binaries
+    needs: build-frontend
     runs-on: ubuntu-latest
     env:
       CGO_ENABLED: 0
@@ -28,6 +63,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.0
+
+      - name: Download built UI
+        uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: internal/ui/dist
 
       - name: Set up Go
         uses: actions/setup-go@v5
