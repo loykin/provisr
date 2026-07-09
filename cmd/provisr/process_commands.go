@@ -126,7 +126,7 @@ func (c *command) stopViaAPI(f StopFlags, apiClient *APIClient) error {
 }
 
 // Register registers a new process by creating a program file
-func (c *command) Register(f RegisterFlags) error {
+func (c *command) Register(f RegisterFlags, configPath string) error {
 	if f.APIUrl != "" {
 		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
 		if !apiClient.IsReachable() {
@@ -136,7 +136,7 @@ func (c *command) Register(f RegisterFlags) error {
 	}
 
 	// Local registration - create program file
-	return c.registerLocally(f)
+	return c.registerLocally(f, configPath)
 }
 
 // registerViaAPI registers a process via the daemon API
@@ -161,9 +161,9 @@ func (c *command) registerViaAPI(f RegisterFlags, apiClient *APIClient) error {
 }
 
 // registerLocally creates a program file in the programs directory
-func (c *command) registerLocally(f RegisterFlags) error {
+func (c *command) registerLocally(f RegisterFlags, configPath string) error {
 	// Get programs directory from config
-	programsDir, err := c.getProgramsDirectory()
+	programsDir, err := c.getProgramsDirectory(configPath)
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func (c *command) registerLocally(f RegisterFlags) error {
 	}
 
 	// Convert spec to JSON-friendly format
-	programData := map[string]interface{}{
+	specData := map[string]interface{}{
 		"name":         spec.Name,
 		"command":      spec.Command,
 		"work_dir":     spec.WorkDir,
@@ -203,11 +203,21 @@ func (c *command) registerLocally(f RegisterFlags) error {
 	}
 
 	if f.LogDir != "" {
-		programData["log"] = map[string]interface{}{
+		specData["log"] = map[string]interface{}{
 			"file": map[string]interface{}{
 				"dir": f.LogDir,
 			},
 		}
+	}
+
+	// Wrap in the {type, spec} discriminated-union shape the daemon's
+	// loadProgramEntries actually expects (the same shape as inline
+	// [[processes]] blocks in config.toml) — writing bare fields here used
+	// to make the daemon fail to load this file (and therefore fail to
+	// start at all) the next time it read the programs directory.
+	programData := map[string]interface{}{
+		"type": "process",
+		"spec": specData,
 	}
 
 	// Write JSON file
@@ -225,7 +235,7 @@ func (c *command) registerLocally(f RegisterFlags) error {
 }
 
 // Unregister removes a process by deleting its program file
-func (c *command) Unregister(f UnregisterFlags) error {
+func (c *command) Unregister(f UnregisterFlags, configPath string) error {
 	if f.APIUrl != "" {
 		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
 		if !apiClient.IsReachable() {
@@ -235,7 +245,7 @@ func (c *command) Unregister(f UnregisterFlags) error {
 	}
 
 	// Local unregistration - delete program file
-	return c.unregisterLocally(f)
+	return c.unregisterLocally(f, configPath)
 }
 
 // unregisterViaAPI unregisters a process via the daemon API
@@ -244,14 +254,14 @@ func (c *command) unregisterViaAPI(f UnregisterFlags, apiClient *APIClient) erro
 }
 
 // unregisterLocally removes a program file from the programs directory
-func (c *command) unregisterLocally(f UnregisterFlags) error {
+func (c *command) unregisterLocally(f UnregisterFlags, configPath string) error {
 	// Check if process is defined in config.toml
-	if c.isProcessInConfigFile(f.Name) {
+	if c.isProcessInConfigFile(f.Name, configPath) {
 		return fmt.Errorf("cannot unregister process '%s': it is defined in config.toml", f.Name)
 	}
 
 	// Get programs directory from config
-	programsDir, err := c.getProgramsDirectory()
+	programsDir, err := c.getProgramsDirectory(configPath)
 	if err != nil {
 		return err
 	}
@@ -281,7 +291,7 @@ func (c *command) unregisterLocally(f UnregisterFlags) error {
 }
 
 // RegisterFile registers a process from an existing JSON file
-func (c *command) RegisterFile(f RegisterFileFlags) error {
+func (c *command) RegisterFile(f RegisterFileFlags, configPath string) error {
 	if f.APIUrl != "" {
 		apiClient := NewAPIClient(f.APIUrl, f.APITimeout)
 		if !apiClient.IsReachable() {
@@ -291,7 +301,7 @@ func (c *command) RegisterFile(f RegisterFileFlags) error {
 	}
 
 	// Local file registration
-	return c.registerFileLocally(f)
+	return c.registerFileLocally(f, configPath)
 }
 
 // registerFileViaAPI registers a process from file via the daemon API
@@ -305,8 +315,10 @@ func (c *command) registerFileViaAPI(f RegisterFileFlags, apiClient *APIClient) 
 	return apiClient.RegisterProcess(spec)
 }
 
-// registerFileLocally copies a JSON file to the programs directory
-func (c *command) registerFileLocally(f RegisterFileFlags) error {
+// registerFileLocally validates a JSON file and writes it (wrapped in the
+// {type, spec} shape the daemon's loadProgramEntries expects) to the
+// programs directory.
+func (c *command) registerFileLocally(f RegisterFileFlags, configPath string) error {
 	// Validate and parse the JSON file first
 	spec, err := c.parseProcessFile(f.FilePath)
 	if err != nil {
@@ -320,7 +332,7 @@ func (c *command) registerFileLocally(f RegisterFileFlags) error {
 	}
 
 	// Get programs directory
-	programsDir, err := c.getProgramsDirectory()
+	programsDir, err := c.getProgramsDirectory(configPath)
 	if err != nil {
 		return err
 	}
@@ -338,13 +350,21 @@ func (c *command) registerFileLocally(f RegisterFileFlags) error {
 		return fmt.Errorf("process '%s' is already registered", processName)
 	}
 
-	// Copy the file to programs directory
-	sourceData, err := os.ReadFile(f.FilePath)
+	// Wrap in the {type, spec} discriminated-union shape the daemon's
+	// loadProgramEntries actually expects — a bare copy of the source file
+	// (which per this command's own documented example is a flat object)
+	// used to make the daemon fail to load this file, and therefore fail
+	// to start at all, the next time it read the programs directory.
+	programData := map[string]interface{}{
+		"type": "process",
+		"spec": spec,
+	}
+	jsonData, err := json.MarshalIndent(programData, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to read source file: %w", err)
+		return fmt.Errorf("failed to marshal program data: %w", err)
 	}
 
-	if err := os.WriteFile(targetFile, sourceData, 0o644); err != nil {
+	if err := os.WriteFile(targetFile, jsonData, 0o644); err != nil {
 		return fmt.Errorf("failed to write program file: %w", err)
 	}
 
@@ -439,10 +459,14 @@ func (c *command) validateProcessSpec(spec map[string]interface{}) error {
 	return nil
 }
 
-// getProgramsDirectory returns the programs directory path from config
-func (c *command) getProgramsDirectory() (string, error) {
-	// Try to find config file in current directory first
-	configPath := "config.toml"
+// getProgramsDirectory returns the programs directory path from config.
+// configPath is normally the --config flag value; when empty (flag not
+// given), it falls back to "config.toml" in the current directory, same as
+// before this took an explicit parameter.
+func (c *command) getProgramsDirectory(configPath string) (string, error) {
+	if configPath == "" {
+		configPath = "config.toml"
+	}
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// If not found, use default programs directory
 		cwd, err := os.Getwd()
@@ -499,9 +523,13 @@ func (c *command) readProgramsDirectoryFromConfig(configPath string) (string, er
 	return "programs", nil
 }
 
-// isProcessInConfigFile checks if a process is defined in the main config.toml file
-func (c *command) isProcessInConfigFile(processName string) bool {
-	configPath := "config.toml"
+// isProcessInConfigFile checks if a process is defined in the main config.toml file.
+// configPath is normally the --config flag value; when empty it falls back
+// to "config.toml" in the current directory.
+func (c *command) isProcessInConfigFile(processName, configPath string) bool {
+	if configPath == "" {
+		configPath = "config.toml"
+	}
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return false
 	}

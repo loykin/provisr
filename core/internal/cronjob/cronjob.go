@@ -79,7 +79,14 @@ func NewCronJob(spec CronJobSpec, mgr *manager.Manager) *CronJob {
 func (c *CronJob) Start() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.startLocked()
+}
 
+// startLocked is Start's implementation for callers that already hold
+// c.mu in write mode (sync.RWMutex isn't reentrant, so Resume — which holds
+// the lock while deciding whether to (re)start — must use this instead of
+// calling Start and deadlocking).
+func (c *CronJob) startLocked() error {
 	if c.isScheduled {
 		return fmt.Errorf("cronjob %s is already scheduled", c.spec.Name)
 	}
@@ -100,7 +107,7 @@ func (c *CronJob) Start() error {
 	c.scheduler.Start()
 
 	// Update next schedule metric
-	nextSchedule := c.GetNextSchedule()
+	nextSchedule := c.nextScheduleLocked()
 	if !nextSchedule.IsZero() {
 		metrics.SetCronJobNextSchedule(c.spec.Name, float64(nextSchedule.Unix()))
 	}
@@ -203,7 +210,7 @@ func (c *CronJob) executeJob() {
 	go c.monitorJob(jobName, j)
 
 	// Update next schedule metric after job starts
-	nextSchedule := c.GetNextSchedule()
+	nextSchedule := c.nextScheduleLocked()
 	if !nextSchedule.IsZero() {
 		metrics.SetCronJobNextSchedule(c.spec.Name, float64(nextSchedule.Unix()))
 	}
@@ -335,7 +342,14 @@ func (c *CronJob) IsScheduled() bool {
 func (c *CronJob) GetNextSchedule() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return c.nextScheduleLocked()
+}
 
+// nextScheduleLocked is GetNextSchedule's implementation for callers that
+// already hold c.mu (in either read or write mode) — sync.RWMutex isn't
+// reentrant, so Start/executeJob (which hold the write lock for their whole
+// body) must use this instead of calling GetNextSchedule and deadlocking.
+func (c *CronJob) nextScheduleLocked() time.Time {
 	if c.isScheduled {
 		entries := c.scheduler.Entries()
 		for _, entry := range entries {
@@ -346,6 +360,13 @@ func (c *CronJob) GetNextSchedule() time.Time {
 	}
 
 	return time.Time{}
+}
+
+// TriggerNow runs the job template immediately, out of band from the cron
+// schedule (still subject to the same concurrency policy as a normal
+// firing). Runs asynchronously; check GetHistory/GetStatus for the result.
+func (c *CronJob) TriggerNow() {
+	go c.executeJob()
 }
 
 // Suspend pauses the cronjob execution
@@ -373,7 +394,7 @@ func (c *CronJob) Resume() error {
 	c.spec.Suspend = &suspend
 
 	if !c.isScheduled {
-		return c.Start()
+		return c.startLocked()
 	}
 
 	return nil

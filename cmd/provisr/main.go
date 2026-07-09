@@ -96,9 +96,9 @@ func buildRoot(mgr *provisr.Manager) (*cobra.Command, func()) {
 
 	// Add subcommands
 	root.AddCommand(
-		createRegisterCommand(provisrCommand, registerFlags),
-		createRegisterFileCommand(provisrCommand, registerFileFlags),
-		createUnregisterCommand(provisrCommand, unregisterFlags),
+		createRegisterCommand(provisrCommand, registerFlags, globalFlags),
+		createRegisterFileCommand(provisrCommand, registerFileFlags, globalFlags),
+		createUnregisterCommand(provisrCommand, unregisterFlags, globalFlags),
 		createStartCommand(provisrCommand, processFlags),
 		createStatusCommand(provisrCommand, processFlags),
 		createStopCommand(provisrCommand, processFlags),
@@ -140,7 +140,7 @@ Examples:
 }
 
 // createRegisterCommand creates the register subcommand
-func createRegisterCommand(provisrCommand command, registerFlags *RegisterFlags) *cobra.Command {
+func createRegisterCommand(provisrCommand command, registerFlags *RegisterFlags, globalFlags *GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register a new process",
@@ -159,7 +159,7 @@ Examples:
 				AutoStart:  registerFlags.AutoStart,
 				APIUrl:     registerFlags.APIUrl,
 				APITimeout: registerFlags.APITimeout,
-			})
+			}, globalFlags.ConfigPath)
 		},
 	}
 
@@ -186,7 +186,7 @@ Examples:
 }
 
 // createRegisterFileCommand creates the register-file subcommand
-func createRegisterFileCommand(provisrCommand command, registerFileFlags *RegisterFileFlags) *cobra.Command {
+func createRegisterFileCommand(provisrCommand command, registerFileFlags *RegisterFileFlags, globalFlags *GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register-file",
 		Short: "Register a process from JSON file",
@@ -214,7 +214,7 @@ JSON file format example:
 				FilePath:   registerFileFlags.FilePath,
 				APIUrl:     registerFileFlags.APIUrl,
 				APITimeout: registerFileFlags.APITimeout,
-			})
+			}, globalFlags.ConfigPath)
 		},
 	}
 
@@ -234,7 +234,7 @@ JSON file format example:
 }
 
 // createUnregisterCommand creates the unregister subcommand
-func createUnregisterCommand(provisrCommand command, unregisterFlags *UnregisterFlags) *cobra.Command {
+func createUnregisterCommand(provisrCommand command, unregisterFlags *UnregisterFlags, globalFlags *GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unregister",
 		Short: "Unregister a process",
@@ -250,7 +250,7 @@ Examples:
 				Name:       unregisterFlags.Name,
 				APIUrl:     unregisterFlags.APIUrl,
 				APITimeout: unregisterFlags.APITimeout,
-			})
+			}, globalFlags.ConfigPath)
 		},
 	}
 
@@ -671,19 +671,17 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		fmt.Printf("Warning: failed to apply config: %v\n", err)
 	}
 
-	// Start cron scheduler (if any cron jobs are defined)
-	var cronScheduler *provisr.CronScheduler
+	// Always create the cron scheduler (even with zero initial jobs) so the
+	// HTTP /cronjobs* endpoints can register jobs on a running daemon, not
+	// just at startup from config.
+	cronScheduler := provisr.NewCronScheduler(mgr)
+	for _, j := range cfg.CronJobs {
+		jb := provisr.CronJob(j) // Direct assignment since they're the same type
+		if err := cronScheduler.Add(jb); err != nil {
+			return fmt.Errorf("failed to add cron job %s: %w", j.Name, err)
+		}
+	}
 	if len(cfg.CronJobs) > 0 {
-		cronScheduler = provisr.NewCronScheduler(mgr)
-		for _, j := range cfg.CronJobs {
-			jb := provisr.CronJob(j) // Direct assignment since they're the same type
-			if err := cronScheduler.Add(jb); err != nil {
-				return fmt.Errorf("failed to add cron job %s: %w", j.Name, err)
-			}
-		}
-		if err := cronScheduler.Start(); err != nil {
-			return fmt.Errorf("failed to start cron scheduler: %w", err)
-		}
 		fmt.Printf("Started cron scheduler with %d job(s)\n", len(cfg.CronJobs))
 	}
 
@@ -693,12 +691,12 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled {
 		protocol = "HTTPS"
-		server, err = provisr.NewTLSServer(*cfg.Server, mgr)
+		server, err = provisr.NewTLSServer(*cfg.Server, mgr, cronScheduler)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTPS server: %w", err)
 		}
 	} else {
-		server, err = provisr.NewHTTPServer(*cfg.Server, mgr)
+		server, err = provisr.NewHTTPServer(*cfg.Server, mgr, cronScheduler)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP server: %w", err)
 		}

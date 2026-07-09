@@ -90,6 +90,11 @@ type ServerConfig struct {
 	// LoadConfig so the HTTP server can expose it via the /history endpoint
 	// without requiring a duplicate [server.history] section.
 	History *HistoryConfig `mapstructure:"-"`
+	// ProgramsDirectory is populated from the top-level programs_directory
+	// setting during LoadConfig (resolved to an absolute path) so the HTTP
+	// server can persist processes registered/updated via the API as program
+	// files, the same way `provisr register` does for the CLI.
+	ProgramsDirectory string `mapstructure:"-"`
 }
 
 type TLSConfig struct {
@@ -266,6 +271,10 @@ func LoadConfig(configPath string) (*Config, error) {
 	} else {
 		// Default: "programs" directory next to the main config file
 		programsDir = filepath.Join(filepath.Dir(configPath), "programs")
+	}
+
+	if config.Server != nil {
+		config.Server.ProgramsDirectory = programsDir
 	}
 
 	if specs, jobs, err := loadProgramEntries(programsDir); err != nil {

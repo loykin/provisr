@@ -1,4 +1,5 @@
 import type { DataGridColumnDef } from '@loykin/gridkit'
+import { ProcessActions } from './ProcessActions'
 import { ProcessStateBadge } from './ProcessStateBadge'
 import type { ProcessStatus } from './types'
 
@@ -23,4 +24,9 @@ export const columns: DataGridColumnDef<ProcessStatus>[] = [
   { accessorKey: 'pid', header: 'PID' },
   { id: 'uptime', header: 'Uptime', cell: ({ row }) => uptime(row.original) },
   { accessorKey: 'restarts', header: 'Restarts' },
+  {
+    id: 'actions',
+    header: '',
+    cell: ({ row }) => <ProcessActions status={row.original} />,
+  },
 ]

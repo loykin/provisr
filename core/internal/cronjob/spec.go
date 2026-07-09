@@ -76,9 +76,12 @@ func (s *CronJobSpec) Validate() error {
 		return fmt.Errorf("invalid cron schedule %q: %w", s.Schedule, err)
 	}
 
-	// Validate concurrency policy
+	// Validate concurrency policy. Empty is accepted here (meaning "unset")
+	// since callers may validate before GetDefaults runs — e.g. config
+	// loading validates immediately after decoding, and CreateCronJob
+	// validates before constructing the CronJob that applies defaults.
 	switch ConcurrencyPolicy(s.ConcurrencyPolicy) {
-	case ConcurrencyPolicyAllow, ConcurrencyPolicyForbid, ConcurrencyPolicyReplace:
+	case "", ConcurrencyPolicyAllow, ConcurrencyPolicyForbid, ConcurrencyPolicyReplace:
 		// Valid
 	default:
 		return fmt.Errorf("invalid concurrency policy %q", s.ConcurrencyPolicy)

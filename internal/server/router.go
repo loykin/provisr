@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +43,8 @@ type Router struct {
 	basePath      string
 	authService   *auth.AuthService
 	historyReader historyReader
+	programsDir   string
+	cronScheduler *core.CronScheduler
 }
 
 // APIEndpoints provides individual access to API handlers for custom registration
@@ -57,8 +63,10 @@ func NewRouter(mgr *core.Manager, basePath string) *Router {
 // newRouterFromConfig constructs a Router and wires up an AuthService
 // (if authCfg is present and enabled) and a history reader (if historyCfg
 // enables in-store history) so their endpoints are mounted by Handler().
-func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.AuthConfig, historyCfg *config.HistoryConfig) (*Router, error) {
+func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.AuthConfig, historyCfg *config.HistoryConfig, programsDir string, cronScheduler *core.CronScheduler) (*Router, error) {
 	r := NewRouter(mgr, basePath)
+	r.programsDir = programsDir
+	r.cronScheduler = cronScheduler
 
 	if historyCfg != nil && historyCfg.Enabled && (historyCfg.InStore == nil || *historyCfg.InStore) {
 		dsn := historyCfg.StoreDSN
@@ -108,28 +116,66 @@ func NewAPIEndpoints(mgr *core.Manager, basePath string) *APIEndpoints {
 	return &APIEndpoints{mgr: mgr, basePath: bp}
 }
 
+// noopMiddleware passes every request through unchanged; used when no
+// AuthService is configured so process routes behave exactly as before.
+func noopMiddleware(c *gin.Context) { c.Next() }
+
 // Handler returns an http.Handler powered by gin that can be mounted in any server/mux.
 func (r *Router) Handler() http.Handler {
 	g := gin.New()
 	g.Use(gin.Recovery())
 	group := g.Group(r.basePath)
-	group.POST("/register", r.handleRegister)
-	group.POST("/start", r.handleStart)
-	group.POST("/stop", r.handleStop)
-	group.POST("/unregister", r.handleUnregister)
-	group.GET("/status", r.handleStatus)
-	group.GET("/group/status", r.handleGroupStatus)
-	group.POST("/group/start", r.handleGroupStart)
-	group.POST("/group/stop", r.handleGroupStop)
-	group.GET("/debug/processes", r.handleDebugProcesses)
-	group.GET("/metrics", r.handleProcessMetrics)
-	group.GET("/metrics/history", r.handleProcessMetricsHistory)
-	group.GET("/metrics/group", r.handleProcessMetricsGroup)
-	group.GET("/processes/:name/logs", r.handleProcessLogs)
+
+	authGin := gin.HandlerFunc(noopMiddleware)
+	readPerm := gin.HandlerFunc(noopMiddleware)
+	writePerm := gin.HandlerFunc(noopMiddleware)
+	if r.authService != nil {
+		mw := auth.NewMiddleware(r.authService, true)
+		authGin = mw.GinAuth()
+		readPerm = mw.GinRequirePermission("process", "read")
+		writePerm = mw.GinRequirePermission("process", "write")
+	}
+
+	group.POST("/register", authGin, writePerm, r.handleRegister)
+	group.POST("/update", authGin, writePerm, r.handleUpdate)
+	group.POST("/start", authGin, writePerm, r.handleStart)
+	group.POST("/stop", authGin, writePerm, r.handleStop)
+	group.POST("/unregister", authGin, writePerm, r.handleUnregister)
+	group.GET("/status", authGin, readPerm, r.handleStatus)
+	group.GET("/group/status", authGin, readPerm, r.handleGroupStatus)
+	group.POST("/group/start", authGin, writePerm, r.handleGroupStart)
+	group.POST("/group/stop", authGin, writePerm, r.handleGroupStop)
+	group.GET("/debug/processes", authGin, readPerm, r.handleDebugProcesses)
+	group.GET("/metrics", authGin, readPerm, r.handleProcessMetrics)
+	group.GET("/metrics/history", authGin, readPerm, r.handleProcessMetricsHistory)
+	group.GET("/metrics/group", authGin, readPerm, r.handleProcessMetricsGroup)
+	group.GET("/processes/:name/logs", authGin, readPerm, r.handleProcessLogs)
+	group.GET("/processes/:name/spec", authGin, readPerm, r.handleGetSpec)
 
 	// Add history endpoint if a history reader is available
 	if r.historyReader != nil {
-		group.GET("/history", r.handleHistory)
+		group.GET("/history", authGin, readPerm, r.handleHistory)
+	}
+
+	// Add cronjob endpoints if a scheduler is available. Gated on the "job"
+	// resource (same permission set as process read/write, see auth.HasPermission).
+	if r.cronScheduler != nil {
+		jobReadPerm := gin.HandlerFunc(noopMiddleware)
+		jobWritePerm := gin.HandlerFunc(noopMiddleware)
+		if r.authService != nil {
+			mw := auth.NewMiddleware(r.authService, true)
+			jobReadPerm = mw.GinRequirePermission("job", "read")
+			jobWritePerm = mw.GinRequirePermission("job", "write")
+		}
+		group.GET("/cronjobs", authGin, jobReadPerm, r.handleListCronJobs)
+		group.POST("/cronjobs", authGin, jobWritePerm, r.handleCreateCronJob)
+		group.GET("/cronjobs/:name", authGin, jobReadPerm, r.handleGetCronJob)
+		group.POST("/cronjobs/:name", authGin, jobWritePerm, r.handleUpdateCronJob)
+		group.DELETE("/cronjobs/:name", authGin, jobWritePerm, r.handleDeleteCronJob)
+		group.GET("/cronjobs/:name/history", authGin, jobReadPerm, r.handleCronJobHistory)
+		group.POST("/cronjobs/:name/suspend", authGin, jobWritePerm, r.handleSuspendCronJob)
+		group.POST("/cronjobs/:name/resume", authGin, jobWritePerm, r.handleResumeCronJob)
+		group.POST("/cronjobs/:name/trigger", authGin, jobWritePerm, r.handleTriggerCronJob)
 	}
 
 	// Add auth endpoints if auth service is available
@@ -149,8 +195,8 @@ func (r *Router) Handler() http.Handler {
 // NewServer starts a standalone HTTP server using this router.
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
-func NewServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
-	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History)
+func NewServer(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler) (*http.Server, error) {
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History, serverConfig.ProgramsDirectory, cronScheduler)
 	if err != nil {
 		return nil, err
 	}
@@ -188,8 +234,8 @@ func NewServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Serve
 // NewTLSServer starts a standalone HTTPS server using TLS configuration.
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
-func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager) (*http.Server, error) {
-	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History)
+func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler) (*http.Server, error) {
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History, serverConfig.ProgramsDirectory, cronScheduler)
 	if err != nil {
 		return nil, err
 	}
@@ -397,45 +443,120 @@ func parseProcessSelector(c *gin.Context) (*processSelector, error) {
 	}, nil
 }
 
-func (r *Router) handleRegister(c *gin.Context) {
-	var spec core.Spec
-	// ok: safe path checked
+// bindAndValidateSpec decodes a core.Spec from the request body and validates
+// its name and any path-like fields to avoid uncontrolled path usage. On
+// failure it writes the error response itself and returns ok=false.
+func bindAndValidateSpec(c *gin.Context) (spec core.Spec, ok bool) {
 	if err := c.ShouldBindJSON(&spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid JSON: " + err.Error()})
-		return
+		return spec, false
 	}
 	if spec.Name == "" {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "spec.name required"})
-		return
+		return spec, false
 	}
 	// Validate process name and any path-like fields to avoid uncontrolled path usage
 	if !isSafeName(spec.Name) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid spec.name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
-		return
+		return spec, false
 	}
 	if !isSafeAbsPath(spec.WorkDir) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid work_dir: must be absolute path without traversal"})
-		return
+		return spec, false
 	}
 	if !isSafeAbsPath(spec.PIDFile) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid pid_file: must be absolute path without traversal"})
-		return
+		return spec, false
 	}
 	if !isSafeAbsPath(spec.Log.File.Dir) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.dir: must be absolute path without traversal"})
-		return
+		return spec, false
 	}
 	if !isSafeAbsPath(spec.Log.File.StdoutPath) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stdoutPath: must be absolute path without traversal"})
-		return
+		return spec, false
 	}
 	if !isSafeAbsPath(spec.Log.File.StderrPath) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid log.stderrPath: must be absolute path without traversal"})
+		return spec, false
+	}
+	return spec, true
+}
+
+// writeProgramFile writes spec as a program file (the same discriminated-
+// union {type, spec} shape `loadProgramEntries` reads at boot) so a process
+// or cronjob registered/updated via the HTTP API survives a daemon restart,
+// the same way `provisr register`'s program files do. A no-op if no
+// programs directory is configured.
+func (r *Router) writeProgramFile(name, kind string, spec any) error {
+	if r.programsDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(r.programsDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create programs directory: %w", err)
+	}
+	doc := map[string]any{"type": kind, "spec": spec}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal program file: %w", err)
+	}
+	path := filepath.Join(r.programsDir, name+".json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write program file: %w", err)
+	}
+	return nil
+}
+
+// persistProgramFile writes a process spec as a program file. See writeProgramFile.
+func (r *Router) persistProgramFile(spec core.Spec) error {
+	return r.writeProgramFile(spec.Name, "process", spec)
+}
+
+// persistCronJobFile writes a cronjob spec as a program file. See writeProgramFile.
+func (r *Router) persistCronJobFile(spec core.CronJob) error {
+	return r.writeProgramFile(spec.Name, "cronjob", spec)
+}
+
+func (r *Router) handleRegister(c *gin.Context) {
+	spec, ok := bindAndValidateSpec(c)
+	if !ok {
 		return
 	}
-	// ok: safe path checked
+	// Persist before registering: a filesystem error here should not leave a
+	// process running that a restart would then fail to recreate silently.
+	if err := r.persistProgramFile(spec); err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+		return
+	}
 	if err := r.mgr.RegisterN(spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// handleUpdate replaces the spec of an already-registered process and
+// restarts it immediately under the new spec. query: wait=1s (optional).
+func (r *Router) handleUpdate(c *gin.Context) {
+	spec, ok := bindAndValidateSpec(c)
+	if !ok {
+		return
+	}
+	wait := 5 * time.Second
+	if w := c.Query("wait"); w != "" {
+		d, err := time.ParseDuration(w)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid wait duration: " + err.Error()})
+			return
+		}
+		wait = d
+	}
+	if err := r.mgr.Update(spec, wait); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	if err := r.persistProgramFile(spec); err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
 		return
 	}
 	writeJSON(c, http.StatusOK, okResp{OK: true})
@@ -518,8 +639,8 @@ func (r *Router) handleStatus(c *gin.Context) {
 
 type debugProcessInfo struct {
 	Status        core.Status `json:"status"`
-	InternalState string         `json:"internal_state"`
-	HealthCheck   string         `json:"health_check"`
+	InternalState string      `json:"internal_state"`
+	HealthCheck   string      `json:"health_check"`
 }
 
 func (r *Router) handleDebugProcesses(c *gin.Context) {
@@ -612,6 +733,195 @@ func (r *Router) handleProcessLogs(c *gin.Context) {
 	writeJSON(c, http.StatusOK, logsSinceResp{Lines: lines, Next: next})
 }
 
+// handleGetSpec returns the currently-registered spec for a process, e.g. so
+// a UI can prefill an edit form before calling POST /update.
+func (r *Router) handleGetSpec(c *gin.Context) {
+	name := c.Param("name")
+
+	spec, err := r.mgr.GetSpec(name)
+	if err != nil {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: err.Error()})
+		return
+	}
+
+	writeJSON(c, http.StatusOK, spec)
+}
+
+// cronJobResp is the wire shape for a single cronjob: the spec fields
+// flattened (via anonymous embedding) plus its live status and next run time.
+type cronJobResp struct {
+	core.CronJob
+	Status       core.CronJobStatus `json:"status"`
+	NextSchedule *time.Time         `json:"next_schedule,omitempty"`
+}
+
+func (r *Router) cronJobResponse(name string) (cronJobResp, bool) {
+	spec, ok := r.cronScheduler.Get(name)
+	if !ok {
+		return cronJobResp{}, false
+	}
+	status, _ := r.cronScheduler.Status(name)
+	resp := cronJobResp{CronJob: spec, Status: status}
+	if next, ok := r.cronScheduler.NextSchedule(name); ok && !next.IsZero() {
+		resp.NextSchedule = &next
+	}
+	return resp, true
+}
+
+// handleListCronJobs returns every registered cronjob with its live status,
+// sorted by name for a stable response order.
+func (r *Router) handleListCronJobs(c *gin.Context) {
+	specs := r.cronScheduler.List()
+	names := make([]string, 0, len(specs))
+	for name := range specs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	resp := make([]cronJobResp, 0, len(names))
+	for _, name := range names {
+		if cj, ok := r.cronJobResponse(name); ok {
+			resp = append(resp, cj)
+		}
+	}
+	writeJSON(c, http.StatusOK, resp)
+}
+
+// handleGetCronJob returns a single cronjob's spec, status, and next run time.
+func (r *Router) handleGetCronJob(c *gin.Context) {
+	name := c.Param("name")
+	cj, ok := r.cronJobResponse(name)
+	if !ok {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: fmt.Sprintf("cronjob %q not found", name)})
+		return
+	}
+	writeJSON(c, http.StatusOK, cj)
+}
+
+// handleCronJobHistory returns the recent run history (capped by the spec's
+// history limits) for a single cronjob.
+func (r *Router) handleCronJobHistory(c *gin.Context) {
+	name := c.Param("name")
+	history, ok := r.cronScheduler.History(name)
+	if !ok {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: fmt.Sprintf("cronjob %q not found", name)})
+		return
+	}
+	writeJSON(c, http.StatusOK, history)
+}
+
+// bindAndValidateCronJob decodes a core.CronJob from the request body and
+// validates its name. Schedule/job-template validation happens in
+// CronJobSpec.Validate(), called by CreateCronJob/UpdateCronJob.
+func bindAndValidateCronJob(c *gin.Context) (spec core.CronJob, ok bool) {
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid JSON: " + err.Error()})
+		return spec, false
+	}
+	if spec.Name == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "spec.name required"})
+		return spec, false
+	}
+	if !isSafeName(spec.Name) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid spec.name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return spec, false
+	}
+	// The job template's own Name is overwritten per-run (CreateJobFromTemplate
+	// generates "<cronjob>-<unix ts>"), but Spec.Validate() still requires it
+	// to be non-empty — default it to the cronjob's name so callers don't
+	// need to know about this quirk.
+	if spec.JobTemplate.Name == "" {
+		spec.JobTemplate.Name = spec.Name
+	}
+	return spec, true
+}
+
+// handleCreateCronJob registers and schedules a new cronjob.
+func (r *Router) handleCreateCronJob(c *gin.Context) {
+	spec, ok := bindAndValidateCronJob(c)
+	if !ok {
+		return
+	}
+	// Persist before scheduling, same rationale as handleRegister.
+	if err := r.persistCronJobFile(spec); err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+		return
+	}
+	if err := r.cronScheduler.Add(spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// handleUpdateCronJob replaces an already-registered cronjob's spec,
+// stopping the old schedule and starting the new one immediately.
+func (r *Router) handleUpdateCronJob(c *gin.Context) {
+	name := c.Param("name")
+	spec, ok := bindAndValidateCronJob(c)
+	if !ok {
+		return
+	}
+	spec.Name = name
+	if err := r.cronScheduler.Update(name, spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	if err := r.persistCronJobFile(spec); err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// handleDeleteCronJob stops and removes a cronjob, and its program file if any.
+func (r *Router) handleDeleteCronJob(c *gin.Context) {
+	name := c.Param("name")
+	if err := r.cronScheduler.Delete(name); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	_ = r.removeProgramFile(name)
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// handleSuspendCronJob pauses a cronjob's schedule without removing it.
+func (r *Router) handleSuspendCronJob(c *gin.Context) {
+	name := c.Param("name")
+	if err := r.cronScheduler.Suspend(name); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	if spec, ok := r.cronScheduler.Get(name); ok {
+		_ = r.persistCronJobFile(spec)
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// handleResumeCronJob re-schedules a previously-suspended cronjob.
+func (r *Router) handleResumeCronJob(c *gin.Context) {
+	name := c.Param("name")
+	if err := r.cronScheduler.Resume(name); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	if spec, ok := r.cronScheduler.Get(name); ok {
+		_ = r.persistCronJobFile(spec)
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// handleTriggerCronJob runs a cronjob's job template immediately, out of
+// band from its schedule.
+func (r *Router) handleTriggerCronJob(c *gin.Context) {
+	name := c.Param("name")
+	if err := r.cronScheduler.Trigger(name); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
 func getHealthStatus(status core.Status) string {
 	if !status.Running {
 		return "not_running"
@@ -670,7 +980,29 @@ func (r *Router) handleUnregister(c *gin.Context) {
 		return
 	}
 
+	// Best-effort: remove a program file persisted by /register or /update
+	// for this exact name, so an unregistered process doesn't silently come
+	// back on the next daemon restart. Only handled for the single-name
+	// selector; base/wildcard unregisters don't know which program files (if
+	// any) correspond to the matched processes.
+	if selector.name != "" {
+		_ = r.removeProgramFile(selector.name)
+	}
+
 	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+// removeProgramFile deletes the program file for name, if any. A no-op if no
+// programs directory is configured or no such file exists.
+func (r *Router) removeProgramFile(name string) error {
+	if r.programsDir == "" {
+		return nil
+	}
+	path := filepath.Join(r.programsDir, name+".json")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove program file: %w", err)
+	}
+	return nil
 }
 
 func (r *Router) handleGroupStatus(c *gin.Context) {

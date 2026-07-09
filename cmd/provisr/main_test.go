@@ -172,7 +172,7 @@ func TestCreateRegisterCommand(t *testing.T) {
 	cmd := command{mgr: mgr}
 	registerFlags := &RegisterFlags{}
 
-	registerCmd := createRegisterCommand(cmd, registerFlags)
+	registerCmd := createRegisterCommand(cmd, registerFlags, &GlobalFlags{})
 
 	if registerCmd == nil {
 		t.Fatal("createRegisterCommand returned nil")
@@ -188,7 +188,7 @@ func TestCreateUnregisterCommand(t *testing.T) {
 	cmd := command{mgr: mgr}
 	unregisterFlags := &UnregisterFlags{}
 
-	unregisterCmd := createUnregisterCommand(cmd, unregisterFlags)
+	unregisterCmd := createUnregisterCommand(cmd, unregisterFlags, &GlobalFlags{})
 
 	if unregisterCmd == nil {
 		t.Fatal("createUnregisterCommand returned nil")
@@ -204,7 +204,7 @@ func TestCreateRegisterFileCommand(t *testing.T) {
 	cmd := command{mgr: mgr}
 	registerFileFlags := &RegisterFileFlags{}
 
-	registerFileCmd := createRegisterFileCommand(cmd, registerFileFlags)
+	registerFileCmd := createRegisterFileCommand(cmd, registerFileFlags, &GlobalFlags{})
 
 	if registerFileCmd == nil {
 		t.Fatal("createRegisterFileCommand returned nil")

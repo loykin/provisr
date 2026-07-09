@@ -30,6 +30,11 @@ func (m *Manager) CreateCronJob(spec CronJobSpec) (*CronJob, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Apply defaults (e.g. ConcurrencyPolicy) before validating: an omitted
+	// concurrency_policy is legitimate input and shouldn't fail validation,
+	// which checks the field against a fixed set of allowed values.
+	spec.GetDefaults()
+
 	// Validate spec
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid cronjob spec: %w", err)

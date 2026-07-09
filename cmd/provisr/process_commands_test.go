@@ -61,7 +61,7 @@ listen = "127.0.0.1:8080"`,
 				}
 			}
 
-			programsDir, err := cmd.getProgramsDirectory()
+			programsDir, err := cmd.getProgramsDirectory("")
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
@@ -115,7 +115,7 @@ func TestCommand_RegisterLocally_Integration(t *testing.T) {
 		AutoStart: true,
 	}
 
-	err := cmd.registerLocally(flags)
+	err := cmd.registerLocally(flags, "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 		return
@@ -137,10 +137,18 @@ func TestCommand_RegisterLocally_Integration(t *testing.T) {
 		return
 	}
 
-	var programData map[string]interface{}
-	if err := json.Unmarshal(data, &programData); err != nil {
+	var fileData map[string]interface{}
+	if err := json.Unmarshal(data, &fileData); err != nil {
 		t.Errorf("failed to parse program file: %v", err)
 		return
+	}
+
+	if fileData["type"] != "process" {
+		t.Errorf(`expected type "process", got %v`, fileData["type"])
+	}
+	programData, ok := fileData["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected spec to be an object, got %v", fileData["spec"])
 	}
 
 	// Validate content
@@ -223,7 +231,7 @@ func TestCommand_RegisterFileLocally_Integration(t *testing.T) {
 		FilePath: testFile,
 	}
 
-	err = cmd.registerFileLocally(flags)
+	err = cmd.registerFileLocally(flags, "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 		return
@@ -245,10 +253,18 @@ func TestCommand_RegisterFileLocally_Integration(t *testing.T) {
 		return
 	}
 
-	var copiedSpec map[string]interface{}
-	if err := json.Unmarshal(copiedData, &copiedSpec); err != nil {
+	var copiedFile map[string]interface{}
+	if err := json.Unmarshal(copiedData, &copiedFile); err != nil {
 		t.Errorf("failed to parse copied file: %v", err)
 		return
+	}
+
+	if copiedFile["type"] != "process" {
+		t.Errorf(`expected type "process", got %v`, copiedFile["type"])
+	}
+	copiedSpec, ok := copiedFile["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected spec to be an object, got %v", copiedFile["spec"])
 	}
 
 	if copiedSpec["name"] != "file-test-app" {

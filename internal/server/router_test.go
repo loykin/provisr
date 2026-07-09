@@ -217,7 +217,7 @@ func TestStartThenStatusByBaseAndName(t *testing.T) {
 func TestNewServerStartClose(t *testing.T) {
 	// ensure NewServer returns a server and can be closed quickly
 	mgr := core.New()
-	srv, err := NewServer(config.ServerConfig{Listen: "127.0.0.1:0", BasePath: "/x"}, mgr)
+	srv, err := NewServer(config.ServerConfig{Listen: "127.0.0.1:0", BasePath: "/x"}, mgr, nil)
 	if err != nil {
 		t.Fatalf("NewServer error: %v", err)
 	}
