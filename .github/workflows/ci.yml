@@ -167,6 +167,42 @@ jobs:
           name: coverage
           path: coverage.out
 
+  test-frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (also type-checks via tsc -b)
+        run: npm run build
+
+      - name: Verify internal/ui/dist is up to date
+        working-directory: .
+        run: |
+          set -e
+          if ! diff -rq frontend/dist internal/ui/dist; then
+            echo "::error::internal/ui/dist is stale (doesn't match a fresh 'npm run build'). Run 'make ui' and commit the result."
+            exit 1
+          fi
+          echo "internal/ui/dist matches a fresh frontend build."
+
   publish-coverage:
     name: Publish Coverage (Shields)
     runs-on: ubuntu-latest

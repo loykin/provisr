@@ -35,7 +35,8 @@ import (
 // historyReader is satisfied by history sinks that support reading events back
 // (currently only the sqlite-backed sink).
 type historyReader interface {
-	List(ctx context.Context, name string, limit int) ([]sqlite.Record, error)
+	List(ctx context.Context, name string, limit, offset int) ([]sqlite.Record, error)
+	Count(ctx context.Context, name string) (int, error)
 }
 
 type Router struct {
@@ -68,10 +69,15 @@ func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.Aut
 	r.programsDir = programsDir
 	r.cronScheduler = cronScheduler
 
-	if historyCfg != nil && historyCfg.Enabled && (historyCfg.InStore == nil || *historyCfg.InStore) {
+	// `Enabled` only gates external export sinks (see main.go's history sink
+	// setup) — the /history reader is about the local in-store sink, so it
+	// mounts whenever in_store is on, regardless of Enabled.
+	if historyCfg != nil && (historyCfg.InStore == nil || *historyCfg.InStore) {
 		dsn := historyCfg.StoreDSN
 		if dsn == "" {
-			dsn = "sqlite:///provisr-history.db"
+			// Two slashes, not three — see the matching comment in
+			// cmd/provisr/main.go's history sink setup for why.
+			dsn = "sqlite://provisr-history.db"
 		}
 		sink, err := sqlite.New(dsn)
 		if err != nil {
@@ -177,6 +183,15 @@ func (r *Router) Handler() http.Handler {
 		group.POST("/cronjobs/:name/resume", authGin, jobWritePerm, r.handleResumeCronJob)
 		group.POST("/cronjobs/:name/trigger", authGin, jobWritePerm, r.handleTriggerCronJob)
 	}
+
+	// Unauthenticated, always-mounted: lets the UI tell whether it should
+	// show a login gate at all. When auth is disabled, every other endpoint
+	// above is already wide open (noopMiddleware), so the UI must skip
+	// login entirely rather than get stuck on a login form that has no
+	// backing /auth/login route to submit to.
+	group.GET("/auth/status", func(c *gin.Context) {
+		writeJSON(c, http.StatusOK, gin.H{"enabled": r.authService != nil})
+	})
 
 	// Add auth endpoints if auth service is available
 	if r.authService != nil {
@@ -665,9 +680,16 @@ func (r *Router) handleDebugProcesses(c *gin.Context) {
 	writeJSON(c, http.StatusOK, debugInfos)
 }
 
+// historyResp wraps a page of history rows with the total row count so
+// callers can compute page counts without a separate request.
+type historyResp struct {
+	Rows  []sqlite.Record `json:"rows"`
+	Total int             `json:"total"`
+}
+
 // handleHistory returns recorded process lifecycle events (start/stop), newest
 // first. Query params: name (optional, filters to one process), limit
-// (optional, default 100, max 500).
+// (optional, default 100, max 500), offset (optional, default 0).
 func (r *Router) handleHistory(c *gin.Context) {
 	name := c.Query("name")
 	limit := 100
@@ -679,14 +701,28 @@ func (r *Router) handleHistory(c *gin.Context) {
 		}
 		limit = n
 	}
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: "offset must be a number"})
+			return
+		}
+		offset = n
+	}
 
-	rows, err := r.historyReader.List(c.Request.Context(), name, limit)
+	rows, err := r.historyReader.List(c.Request.Context(), name, limit, offset)
+	if err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+		return
+	}
+	total, err := r.historyReader.Count(c.Request.Context(), name)
 	if err != nil {
 		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
 		return
 	}
 
-	writeJSON(c, http.StatusOK, rows)
+	writeJSON(c, http.StatusOK, historyResp{Rows: rows, Total: total})
 }
 
 // logsSinceResp is the response body for the live-tail polling endpoint.

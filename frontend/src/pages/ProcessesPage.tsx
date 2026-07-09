@@ -1,16 +1,17 @@
+import { useNavigate } from '@tanstack/react-router'
 import { DataGrid } from '@loykin/gridkit'
-import { PageTopBar } from '@loykin/designkit'
 import { SidePanelProvider, useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/page-header'
 import { useAuth } from '@/features/auth/context'
 import { useProcesses } from '@/features/processes/queries'
 import { columns } from '@/features/processes/columns'
 import { ProcessDetailPanel } from '@/features/processes/ProcessDetailPanel'
-import { ProcessRegisterPanel } from '@/features/processes/ProcessFormPanel'
 
 function ProcessesGrid() {
   const { open } = useSidePanel()
   const { user } = useAuth()
+  const navigate = useNavigate()
   const { data: rows, error } = useProcesses()
 
   // react-query keeps the last successful `data` around even when a later
@@ -23,17 +24,17 @@ function ProcessesGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageTopBar
-        left="Processes"
-        right={
+      <PageHeader
+        title="Processes"
+        actions={
           user?.roles.includes('admin') ? (
-            <Button size="sm" onClick={() => open(<ProcessRegisterPanel />, { size: 480 })}>
+            <Button size="sm" onClick={() => void navigate({ to: '/processes/new' })}>
               Register process
             </Button>
           ) : undefined
         }
       />
-      <div className="flex-1 overflow-hidden p-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4">
         {error && !hasData && (
           <p className="mb-2 text-sm text-destructive">Failed to load process list.</p>
         )}
@@ -48,6 +49,13 @@ function ProcessesGrid() {
           getRowId={(row) => row.name}
           initialSorting={[{ id: 'name', desc: false }]}
           onRowClick={(row) => open(<ProcessDetailPanel name={row.name} />, { size: 480 })}
+          // gridkit's shell has `overflow: hidden`, which per the flexbox spec
+          // makes its automatic min-height resolve to 0 — so as a flex child
+          // it would otherwise get silently squashed (and its excess content
+          // invisibly clipped) by this page's own scroll container. shrink-0
+          // keeps it at natural content height so our own overflow-y-auto
+          // wrapper is what scrolls, not gridkit's internal (hidden) overflow.
+          classNames={{ root: 'shrink-0' }}
         />
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { DataBodyTemplate } from '@loykin/designkit'
 import { useProcessLogs } from './queries'
 import { renderAnsiLine } from '@/lib/ansi'
 import type { ProcessStatus } from './types'
@@ -36,24 +37,14 @@ function LogTail({ name }: { name: string }) {
 export function ProcessDetailBody({ name, status }: { name: string; status: ProcessStatus }) {
   return (
     <>
-      <div className="grid grid-cols-2 gap-4 rounded-(--radius) border border-border bg-card p-4 text-sm">
-        <div>
-          <div className="text-muted-foreground">PID</div>
-          <div>{status.pid}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Restarts</div>
-          <div>{status.restarts}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Started at</div>
-          <div>{status.running ? new Date(status.started_at).toLocaleString() : '-'}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Detected by</div>
-          <div>{status.detected_by || '-'}</div>
-        </div>
-      </div>
+      <DataBodyTemplate.Group layout="stacked">
+        <DataBodyTemplate.Field label="PID">{status.pid}</DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Restarts">{status.restarts}</DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Started at">
+          {status.running ? new Date(status.started_at).toLocaleString() : '-'}
+        </DataBodyTemplate.Field>
+        <DataBodyTemplate.Field label="Detected by">{status.detected_by || '-'}</DataBodyTemplate.Field>
+      </DataBodyTemplate.Group>
 
       <LogTail name={name} />
     </>

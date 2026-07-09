@@ -23,3 +23,7 @@ export interface AuthUser {
   username: string
   roles: string[]
 }
+
+export interface AuthStatus {
+  enabled: boolean
+}

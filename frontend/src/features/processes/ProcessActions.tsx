@@ -1,6 +1,6 @@
 import { Pencil, Play, Square } from 'lucide-react'
 import { useSidePanel } from '@loykin/side-panel'
-import { Button } from '@/components/ui/button'
+import { IconAction } from '@/components/icon-action'
 import { useAuth } from '@/features/auth/context'
 import { ProcessEditPanel } from './ProcessFormPanel'
 import { useStartProcess, useStopProcess } from './queries'
@@ -21,36 +21,22 @@ export function ProcessActions({ status }: { status: ProcessStatus }) {
   const pending = start.isPending || stop.isPending
 
   return (
-    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
       {status.running ? (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => stop.mutate(status.name)}
-        >
+        <IconAction label="Stop process" disabled={pending} onClick={() => stop.mutate(status.name)}>
           <Square className="h-3.5 w-3.5" />
-          Stop
-        </Button>
+        </IconAction>
       ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => start.mutate(status.name)}
-        >
+        <IconAction label="Start process" disabled={pending} onClick={() => start.mutate(status.name)}>
           <Play className="h-3.5 w-3.5" />
-          Start
-        </Button>
+        </IconAction>
       )}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        title="Edit process"
+      <IconAction
+        label="Edit process"
         onClick={() => open(<ProcessEditPanel name={status.name} />, { size: 480 })}
       >
         <Pencil className="h-3.5 w-3.5" />
-      </Button>
+      </IconAction>
     </div>
   )
 }

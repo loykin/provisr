@@ -5,3 +5,8 @@ export interface HistoryRecord {
   status: string
   error?: string
 }
+
+export interface HistoryPage {
+  rows: HistoryRecord[]
+  total: number
+}

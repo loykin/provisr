@@ -31,7 +31,7 @@ func TestSinkSendAndList(t *testing.T) {
 		}
 	}
 
-	all, err := sink.List(ctx, "", 0)
+	all, err := sink.List(ctx, "", 0, 0)
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestSinkSendAndList(t *testing.T) {
 		t.Errorf("expected newest row to be svc-b/running, got %+v", all[0])
 	}
 
-	filtered, err := sink.List(ctx, "svc-a", 0)
+	filtered, err := sink.List(ctx, "svc-a", 0, 0)
 	if err != nil {
 		t.Fatalf("List(svc-a) error: %v", err)
 	}

@@ -4,10 +4,10 @@ type = "process"
 name = "long-sleeper"
 command = "sleep 300"  # 5 minutes
 priority = 10
-retries = 2
+retry_count = 2
 auto_restart = true
 restart_interval = "1s"
-startsecs = "0.5s"
+start_duration = "0.5s"
 instances = 1
 
 [spec.log]

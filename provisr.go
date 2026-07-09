@@ -113,6 +113,17 @@ func NewSinkFromDSN(dsn string) (HistorySink, error) {
 	return factory.NewSinkFromDSN(dsn)
 }
 
+// EnsureInitialAdmin creates an "admin" user with a random password if the
+// configured auth store has no users yet, so enabling authCfg on a fresh
+// store doesn't lock every operator out until someone with separate shell
+// access runs `provisr auth user create`. A no-op (created=false, no error)
+// if authCfg is nil/disabled or any user already exists — safe to call on
+// every startup. The caller must display the returned password once; it is
+// never stored or logged by this function.
+func EnsureInitialAdmin(authCfg *ServerAuthConfig) (password string, created bool, err error) {
+	return iapi.EnsureInitialAdmin(authCfg)
+}
+
 // --- HTTP server / router facades ---
 
 // NewHTTPServer starts an HTTP server exposing the internal API using the

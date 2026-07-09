@@ -574,15 +574,27 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 	mgr.SetInstanceGroups(managerGroups)
 
-	// Setup history sinks from config
-	if cfg.History != nil && cfg.History.Enabled {
+	// Setup history sinks from config. `enabled` is the master switch for
+	// *external* exports (OpenSearch/ClickHouse) only — `in_store` (default
+	// true) independently controls local sqlite/postgres recording, so
+	// `enabled=false, in_store=true` (the shipped example config.toml) means
+	// "keep local history, don't export externally", matching the comments
+	// in config.toml. Previously `enabled=false` disabled in-store recording
+	// too, silently ignoring `in_store` entirely and leaving GET /history
+	// with nothing to show even though the config said otherwise.
+	if cfg.History != nil {
 		var sinks []provisr.HistorySink
 
 		inStore := cfg.History.InStore == nil || *cfg.History.InStore
 		if inStore {
 			dsn := cfg.History.StoreDSN
 			if dsn == "" {
-				dsn = "sqlite:///provisr-history.db"
+				// Two slashes, not three: sqlite.New only trims the
+				// "sqlite://" prefix, so a third slash here would leave a
+				// leading "/" and resolve to the absolute path
+				// "/provisr-history.db" at the filesystem root instead of a
+				// file relative to the working directory.
+				dsn = "sqlite://provisr-history.db"
 			}
 			sink, err := provisr.NewSinkFromDSN(dsn)
 			if err != nil {
@@ -592,25 +604,27 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 			}
 		}
 
-		if cfg.History.OpenSearchURL != "" {
-			sink, err := opensearch.New(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex)
-			if err != nil {
-				fmt.Printf("Warning: failed to setup OpenSearch history sink: %v\n", err)
-			} else {
-				sinks = append(sinks, sink)
+		if cfg.History.Enabled {
+			if cfg.History.OpenSearchURL != "" {
+				sink, err := opensearch.New(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex)
+				if err != nil {
+					fmt.Printf("Warning: failed to setup OpenSearch history sink: %v\n", err)
+				} else {
+					sinks = append(sinks, sink)
+				}
 			}
-		}
 
-		if cfg.History.ClickHouseURL != "" {
-			table := cfg.History.ClickHouseTable
-			if table == "" {
-				table = "process_history"
-			}
-			sink, err := clickhouse.New(cfg.History.ClickHouseURL, table)
-			if err != nil {
-				fmt.Printf("Warning: failed to setup ClickHouse history sink: %v\n", err)
-			} else {
-				sinks = append(sinks, sink)
+			if cfg.History.ClickHouseURL != "" {
+				table := cfg.History.ClickHouseTable
+				if table == "" {
+					table = "process_history"
+				}
+				sink, err := clickhouse.New(cfg.History.ClickHouseURL, table)
+				if err != nil {
+					fmt.Printf("Warning: failed to setup ClickHouse history sink: %v\n", err)
+				} else {
+					sinks = append(sinks, sink)
+				}
 			}
 		}
 
@@ -664,6 +678,23 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	// Check Server config (was HTTP config)
 	if cfg.Server == nil {
 		return fmt.Errorf("server must be configured to run serve command")
+	}
+
+	// If auth is enabled and the store has no users yet, create an initial
+	// admin with a random password and print it once — otherwise enabling
+	// auth on a fresh store locks every operator out until someone with
+	// separate shell access runs `provisr auth user create`. A no-op after
+	// the first successful boot (or if auth is disabled).
+	if password, created, err := provisr.EnsureInitialAdmin(cfg.Server.Auth); err != nil {
+		fmt.Printf("Warning: failed to check/create initial admin user: %v\n", err)
+	} else if created {
+		fmt.Println("========================================================")
+		fmt.Println(" No users found in the auth store — created an initial admin:")
+		fmt.Println("   username: admin")
+		fmt.Printf("   password: %s\n", password)
+		fmt.Println(" This password is shown only once and is not stored anywhere.")
+		fmt.Println(" Log in and consider rotating it or creating a named admin user.")
+		fmt.Println("========================================================")
 	}
 
 	// Apply config: recover from PID files, start missing, and cleanup removed processes

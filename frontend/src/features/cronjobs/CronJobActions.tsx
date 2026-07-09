@@ -1,6 +1,6 @@
 import { Pause, Pencil, Play, Trash2, Zap } from 'lucide-react'
 import { useSidePanel } from '@loykin/side-panel'
-import { Button } from '@/components/ui/button'
+import { IconAction } from '@/components/icon-action'
 import { useAuth } from '@/features/auth/context'
 import { CronJobEditPanel } from './CronJobFormPanel'
 import { useDeleteCronJob, useResumeCronJob, useSuspendCronJob, useTriggerCronJob } from './queries'
@@ -32,46 +32,26 @@ export function CronJobActions({ job }: { job: CronJobInfo }) {
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
       {isSuspended ? (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => resume.mutate(job.name)}
-        >
+        <IconAction label="Resume schedule" disabled={pending} onClick={() => resume.mutate(job.name)}>
           <Play className="h-3.5 w-3.5" />
-          Resume
-        </Button>
+        </IconAction>
       ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => suspend.mutate(job.name)}
-        >
+        <IconAction label="Suspend schedule" disabled={pending} onClick={() => suspend.mutate(job.name)}>
           <Pause className="h-3.5 w-3.5" />
-          Suspend
-        </Button>
+        </IconAction>
       )}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        title="Run now"
-        disabled={pending}
-        onClick={() => trigger.mutate(job.name)}
-      >
+      <IconAction label="Run now" disabled={pending} onClick={() => trigger.mutate(job.name)}>
         <Zap className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        title="Edit cronjob"
+      </IconAction>
+      <IconAction
+        label="Edit cronjob"
         onClick={() => open(<CronJobEditPanel name={job.name} />, { size: 480 })}
       >
         <Pencil className="h-3.5 w-3.5" />
-      </Button>
-      <Button variant="ghost" size="icon-sm" title="Delete cronjob" onClick={handleDelete}>
+      </IconAction>
+      <IconAction label="Delete cronjob" onClick={handleDelete}>
         <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      </IconAction>
     </div>
   )
 }
