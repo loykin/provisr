@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 5173
+    },
+    {
+      "name": "provisr-e2e",
+      "runtimeExecutable": "/private/tmp/claude-503/-Users-loykin-Project-provisr/d80481fa-e945-4c0b-8902-321912620f79/scratchpad/e2e/provisr",
+      "runtimeArgs": ["serve", "/private/tmp/claude-503/-Users-loykin-Project-provisr/d80481fa-e945-4c0b-8902-321912620f79/scratchpad/e2e/config.toml"],
+      "port": 8080
     }
   ]
 }

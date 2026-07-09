@@ -1,6 +1,5 @@
 # provisr
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/loykin/provisr)](https://goreportcard.com/report/github.com/loykin/provisr)
 ![CodeQL](https://github.com/loykin/provisr/actions/workflows/codeql.yml/badge.svg)
 [![Trivy](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/loykin/provisr/gh-pages/shields/trivy.json&cacheSeconds=60)](https://raw.githubusercontent.com/loykin/provisr/gh-pages/shields/trivy.json)
 

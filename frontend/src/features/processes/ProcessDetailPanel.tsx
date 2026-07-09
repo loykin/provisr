@@ -3,6 +3,7 @@ import { PanelTemplate } from '@loykin/designkit'
 import { useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
 import { useProcessStatus } from './queries'
+import { ProcessActions } from './ProcessActions'
 import { ProcessDetailBody } from './ProcessDetailBody'
 import { ProcessStateBadge } from './ProcessStateBadge'
 
@@ -31,7 +32,12 @@ export function ProcessDetailPanel({ name }: { name: string }) {
       eyebrow="Process"
       title={name}
       status={<ProcessStateBadge state={status.state} />}
-      actions={closeBtn}
+      actions={
+        <div className="flex items-center gap-2">
+          <ProcessActions status={status} />
+          {closeBtn}
+        </div>
+      }
     >
       <ProcessDetailBody name={name} status={status} />
     </PanelTemplate>

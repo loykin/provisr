@@ -159,6 +159,32 @@ func (m *Manager) Start(name string) error {
 	return up.Start(*spec)
 }
 
+// GetSpec returns the currently-registered spec for name, e.g. so a caller
+// can prefill an edit form before calling Update.
+func (m *Manager) GetSpec(name string) (process.Spec, error) {
+	m.mu.RLock()
+	up := m.processes[name]
+	m.mu.RUnlock()
+
+	if up == nil {
+		return process.Spec{}, fmt.Errorf("process %s not found", name)
+	}
+
+	up.mu.RLock()
+	proc := up.proc
+	up.mu.RUnlock()
+
+	if proc == nil {
+		return process.Spec{}, fmt.Errorf("process %q has no process instance", name)
+	}
+
+	spec := proc.GetSpec()
+	if spec == nil {
+		return process.Spec{}, fmt.Errorf("process %q has no spec defined", name)
+	}
+	return *spec, nil
+}
+
 // Recover reads spec.PIDFile, marks the process Running if the recorded PID is
 // still alive, or Stopped if it is dead. The process is never restarted.
 // Call this once at startup to re-attach to processes that survived a provisr
@@ -185,6 +211,25 @@ func (m *Manager) Recover(spec process.Spec) error {
 	// No PID file, content invalid, or PID identity mismatch — register as stopped.
 	up.Recover(spec, 0)
 	return nil
+}
+
+// Update replaces the spec of an already-registered process and immediately
+// restarts it under the new spec (stop, then start). The process must already
+// be registered; use Register/RegisterN to create a new one.
+func (m *Manager) Update(spec process.Spec, wait time.Duration) error {
+	m.mu.RLock()
+	up := m.processes[spec.Name]
+	m.mu.RUnlock()
+
+	if up == nil {
+		return fmt.Errorf("process %s not found", spec.Name)
+	}
+
+	if err := up.Stop(wait); err != nil {
+		return fmt.Errorf("update %q: stop failed: %w", spec.Name, err)
+	}
+
+	return up.Start(spec)
 }
 
 // Stop stops a process without unregistering it

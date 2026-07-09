@@ -32,7 +32,9 @@ type Process struct {
 	logs       *logRingBuffer
 }
 
-func New(spec Spec) *Process { return &Process{spec: spec, logs: newLogRingBuffer(defaultLogBufferCapacity)} }
+func New(spec Spec) *Process {
+	return &Process{spec: spec, logs: newLogRingBuffer(defaultLogBufferCapacity)}
+}
 
 // LogsSince returns captured stdout/stderr lines with offset >= since
 // (oldest first, capped at limit if positive), plus the offset to pass as
@@ -104,12 +106,24 @@ func (r *Process) CopyCmd() *exec.Cmd {
 }
 
 // SeedPID seeds the internal PID (e.g., after manager restart) without changing running state.
-// It also updates the Snapshot() PID for observability.
+// It also updates the Snapshot() PID for observability, and best-effort
+// recovers the process's true start time via OS-native APIs (getProcStartUnix)
+// so a process recovered from a PID file across a daemon restart doesn't
+// report StartedAt as the Go zero value — which would make uptime computed
+// as now-minus-StartedAt an enormous, nonsensical duration. getProcStartUnix
+// returns the same real value on every call, so re-seeding on repeated
+// DetectAlive polls is harmless; the time.Now() fallback only applies once
+// (guarded by IsZero) so it doesn't keep resetting uptime to ~0 every poll.
 func (r *Process) SeedPID(pid int) {
 	r.mu.Lock()
 	if pid > 0 {
 		r.pid = pid
 		r.status.PID = pid
+		if startUnix := getProcStartUnix(pid); startUnix > 0 {
+			r.status.StartedAt = time.Unix(startUnix, 0)
+		} else if r.status.StartedAt.IsZero() {
+			r.status.StartedAt = time.Now()
+		}
 	}
 	r.mu.Unlock()
 }

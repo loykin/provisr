@@ -1,12 +1,16 @@
 import { DataGrid } from '@loykin/gridkit'
 import { PageTopBar } from '@loykin/designkit'
 import { SidePanelProvider, useSidePanel } from '@loykin/side-panel'
+import { Button } from '@/components/ui/button'
+import { useAuth } from '@/features/auth/context'
 import { useProcesses } from '@/features/processes/queries'
 import { columns } from '@/features/processes/columns'
 import { ProcessDetailPanel } from '@/features/processes/ProcessDetailPanel'
+import { ProcessRegisterPanel } from '@/features/processes/ProcessFormPanel'
 
 function ProcessesGrid() {
   const { open } = useSidePanel()
+  const { user } = useAuth()
   const { data: rows, error } = useProcesses()
 
   // react-query keeps the last successful `data` around even when a later
@@ -19,7 +23,16 @@ function ProcessesGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageTopBar left="Processes" />
+      <PageTopBar
+        left="Processes"
+        right={
+          user?.roles.includes('admin') ? (
+            <Button size="sm" onClick={() => open(<ProcessRegisterPanel />, { size: 480 })}>
+              Register process
+            </Button>
+          ) : undefined
+        }
+      />
       <div className="flex-1 overflow-hidden p-4">
         {error && !hasData && (
           <p className="mb-2 text-sm text-destructive">Failed to load process list.</p>

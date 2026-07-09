@@ -205,16 +205,14 @@ func (j *Job) runProcess(jobProcess *JobProcess) {
 		fmt.Sprintf("JOB_COMPLETION_INDEX=%d", jobProcess.Index),
 	)
 
-	// Register process with manager
+	// Register process with manager. RegisterN both creates and starts the
+	// process (Manager.Register calls ManagedProcess.Start internally) — a
+	// separate Start call here was redundant and, worse, always failed with
+	// "already running" since the process was already in StateRunning by
+	// the time it ran, marking every job Failed regardless of whether the
+	// command itself actually succeeded.
 	if err := j.manager.RegisterN(*processSpec); err != nil {
 		slog.Error("Failed to register job process", "job", j.spec.Name, "process", jobProcess.Name, "error", err)
-		j.handleProcessFailure(jobProcess, err)
-		return
-	}
-
-	// Start process
-	if err := j.manager.Start(jobProcess.Name); err != nil {
-		slog.Error("Failed to start job process", "job", j.spec.Name, "process", jobProcess.Name, "error", err)
 		j.handleProcessFailure(jobProcess, err)
 		return
 	}

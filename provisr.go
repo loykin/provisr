@@ -50,11 +50,6 @@ const (
 
 	RunModeBlocking = core.RunModeBlocking
 	RunModeAsync    = core.RunModeAsync
-
-	PhasePreStart  = core.PhasePreStart
-	PhasePostStart = core.PhasePostStart
-	PhasePreStop   = core.PhasePreStop
-	PhasePostStop  = core.PhasePostStop
 )
 
 // Manager is the public process manager facade (alias of core.Manager).
@@ -79,6 +74,8 @@ type JobSpec = core.JobSpec
 type JobStatus = core.JobStatus
 type CronScheduler = core.CronScheduler
 type CronJob = core.CronJob
+type CronJobStatus = core.CronJobStatus
+type CronJobHistoryEntry = core.CronJobHistoryEntry
 
 // New constructs a new Manager.
 func New() *Manager { return core.New() }
@@ -118,14 +115,18 @@ func NewSinkFromDSN(dsn string) (HistorySink, error) {
 
 // --- HTTP server / router facades ---
 
-// NewHTTPServer starts an HTTP server exposing the internal API using the given manager.
-func NewHTTPServer(serverConfig ServerConfig, m *Manager) (*http.Server, error) {
-	return iapi.NewServer(serverConfig, m)
+// NewHTTPServer starts an HTTP server exposing the internal API using the
+// given manager. cronScheduler may be nil if cron jobs aren't used; passing
+// one enables the /cronjobs* endpoints.
+func NewHTTPServer(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler) (*http.Server, error) {
+	return iapi.NewServer(serverConfig, m, cronScheduler)
 }
 
-// NewTLSServer starts an HTTPS server with TLS configuration from server config.
-func NewTLSServer(serverConfig ServerConfig, m *Manager) (*http.Server, error) {
-	return iapi.NewTLSServer(serverConfig, m)
+// NewTLSServer starts an HTTPS server with TLS configuration from server
+// config. cronScheduler may be nil if cron jobs aren't used; passing one
+// enables the /cronjobs* endpoints.
+func NewTLSServer(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler) (*http.Server, error) {
+	return iapi.NewTLSServer(serverConfig, m, cronScheduler)
 }
 
 // Router is a thin facade over the internal HTTP router for embedding into

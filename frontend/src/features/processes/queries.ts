@@ -1,7 +1,16 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { getProcess, getProcessLogsSince, listProcesses } from './api'
-import type { LogLine } from './types'
+import {
+  getProcess,
+  getProcessLogsSince,
+  getProcessSpec,
+  listProcesses,
+  registerProcess,
+  startProcess,
+  stopProcess,
+  updateProcess,
+} from './api'
+import type { LogLine, ProcessSpec } from './types'
 
 const STATUS_POLL_MS = 3000
 const LOGS_POLL_MS = 1000
@@ -20,6 +29,64 @@ export function useProcessStatus(name: string) {
     queryKey: ['process', name],
     queryFn: () => getProcess(name),
     refetchInterval: STATUS_POLL_MS,
+  })
+}
+
+// Start/Stop mutate process state on the server; on success we invalidate
+// both the list and the single-process query so the UI reflects the new
+// state on the next poll tick instead of waiting up to STATUS_POLL_MS.
+export function useStartProcess() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => startProcess(name),
+    onSuccess: (_data, name) => {
+      void queryClient.invalidateQueries({ queryKey: ['processes'] })
+      void queryClient.invalidateQueries({ queryKey: ['process', name] })
+    },
+  })
+}
+
+export function useStopProcess() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => stopProcess(name),
+    onSuccess: (_data, name) => {
+      void queryClient.invalidateQueries({ queryKey: ['processes'] })
+      void queryClient.invalidateQueries({ queryKey: ['process', name] })
+    },
+  })
+}
+
+// Fetches the currently-registered spec for an existing process, e.g. to
+// prefill an edit form. Disabled by default — only fetch when a form is
+// actually open (enabled: true), since most views never need this.
+export function useProcessSpec(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['processSpec', name],
+    queryFn: () => getProcessSpec(name),
+    enabled,
+  })
+}
+
+export function useRegisterProcess() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (spec: ProcessSpec) => registerProcess(spec),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['processes'] })
+    },
+  })
+}
+
+export function useUpdateProcess() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (spec: ProcessSpec) => updateProcess(spec),
+    onSuccess: (_data, spec) => {
+      void queryClient.invalidateQueries({ queryKey: ['processes'] })
+      void queryClient.invalidateQueries({ queryKey: ['process', spec.name] })
+      void queryClient.invalidateQueries({ queryKey: ['processSpec', spec.name] })
+    },
   })
 }
 

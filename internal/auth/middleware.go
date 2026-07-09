@@ -22,6 +22,13 @@ type Middleware struct {
 	enabled     bool
 }
 
+// NewMiddleware creates a Middleware bound to the given AuthService. When
+// enabled is false, GinAuth/HTTPAuth/GinRequirePermission/HTTPRequirePermission
+// all become no-ops (c.Next()/next.ServeHTTP without checking anything).
+func NewMiddleware(authService *AuthService, enabled bool) *Middleware {
+	return &Middleware{authService: authService, enabled: enabled}
+}
+
 // GinAuth returns a Gin middleware function for authentication
 func (m *Middleware) GinAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -10,6 +10,7 @@
 package core
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -121,6 +122,12 @@ func (m *Manager) Recover(s Spec) error           { return m.inner.Recover(s) }
 func (m *Manager) ApplyConfig(specs []Spec) error { return m.inner.ApplyConfig(specs) }
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	return m.inner.Stop(name, wait)
+}
+func (m *Manager) Update(s Spec, wait time.Duration) error {
+	return m.inner.Update(s, wait)
+}
+func (m *Manager) GetSpec(name string) (Spec, error) {
+	return m.inner.GetSpec(name)
 }
 func (m *Manager) StopMatch(pattern string, wait time.Duration) error {
 	return m.inner.StopMatch(pattern, wait)
@@ -246,6 +253,8 @@ func (jm *JobManager) Shutdown() error             { return jm.inner.Shutdown() 
 // --- CronScheduler facade ---
 
 type CronJob = cronjob.CronJobSpec
+type CronJobStatus = cronjob.CronJobStatus
+type CronJobHistoryEntry = cronjob.JobHistoryEntry
 
 type CronScheduler struct{ inner *cronjob.Manager }
 
@@ -257,3 +266,82 @@ func NewCronScheduler(m *Manager) *CronScheduler {
 func (s *CronScheduler) Add(j CronJob) error { _, err := s.inner.CreateCronJob(j); return err }
 func (s *CronScheduler) Start() error        { return nil } // CronJobs start automatically when created
 func (s *CronScheduler) Stop() error         { return s.inner.Shutdown() }
+
+// Get returns the spec for a single cronjob, e.g. to prefill an edit form.
+func (s *CronScheduler) Get(name string) (CronJob, bool) {
+	cj, ok := s.inner.GetCronJob(name)
+	if !ok {
+		return CronJob{}, false
+	}
+	return cj.GetSpec(), true
+}
+
+// List returns every registered cronjob's spec, keyed by name.
+func (s *CronScheduler) List() map[string]CronJob {
+	out := make(map[string]CronJob)
+	for name, cj := range s.inner.ListCronJobs() {
+		out[name] = cj.GetSpec()
+	}
+	return out
+}
+
+// Status returns the current status (active runs, last schedule/success time)
+// for a single cronjob.
+func (s *CronScheduler) Status(name string) (CronJobStatus, bool) {
+	cj, ok := s.inner.GetCronJob(name)
+	if !ok {
+		return CronJobStatus{}, false
+	}
+	return cj.GetStatus(), true
+}
+
+// NextSchedule returns the next time a cronjob is due to run, or the zero
+// time if it isn't currently scheduled (e.g. suspended).
+func (s *CronScheduler) NextSchedule(name string) (time.Time, bool) {
+	cj, ok := s.inner.GetCronJob(name)
+	if !ok {
+		return time.Time{}, false
+	}
+	return cj.GetNextSchedule(), true
+}
+
+// History returns the run history (most recent completions, capped by the
+// spec's history limits) for a single cronjob.
+func (s *CronScheduler) History(name string) ([]CronJobHistoryEntry, bool) {
+	cj, ok := s.inner.GetCronJob(name)
+	if !ok {
+		return nil, false
+	}
+	entries := cj.GetHistory()
+	out := make([]CronJobHistoryEntry, len(entries))
+	for i, e := range entries {
+		out[i] = *e
+	}
+	return out, true
+}
+
+// Update replaces a cronjob's spec, stopping the old schedule and starting
+// the new one (equivalent to Delete+Add under the same name).
+func (s *CronScheduler) Update(name string, j CronJob) error {
+	return s.inner.UpdateCronJob(name, j)
+}
+
+// Suspend pauses a cronjob's schedule without removing it.
+func (s *CronScheduler) Suspend(name string) error { return s.inner.SuspendCronJob(name) }
+
+// Resume re-schedules a previously-suspended cronjob.
+func (s *CronScheduler) Resume(name string) error { return s.inner.ResumeCronJob(name) }
+
+// Delete stops and removes a cronjob.
+func (s *CronScheduler) Delete(name string) error { return s.inner.DeleteCronJob(name) }
+
+// Trigger runs a cronjob's job template immediately, out of band from its
+// schedule (subject to the same concurrency policy as a normal firing).
+func (s *CronScheduler) Trigger(name string) error {
+	cj, ok := s.inner.GetCronJob(name)
+	if !ok {
+		return fmt.Errorf("cronjob %q not found", name)
+	}
+	cj.TriggerNow()
+	return nil
+}
