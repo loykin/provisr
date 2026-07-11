@@ -680,32 +680,17 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		return fmt.Errorf("server must be configured to run serve command")
 	}
 
-	// If auth is enabled and the store has no users yet, create an initial
-	// admin with a random password and print it once — otherwise enabling
-	// auth on a fresh store locks every operator out until someone with
-	// separate shell access runs `provisr auth user create`. A no-op after
-	// the first successful boot (or if auth is disabled).
-	if password, created, err := provisr.EnsureInitialAdmin(cfg.Server.Auth); err != nil {
-		fmt.Printf("Warning: failed to check/create initial admin user: %v\n", err)
-	} else if created {
-		fmt.Println("========================================================")
-		fmt.Println(" No users found in the auth store — created an initial admin:")
-		fmt.Println("   username: admin")
-		fmt.Printf("   password: %s\n", password)
-		fmt.Println(" This password is shown only once and is not stored anywhere.")
-		fmt.Println(" Log in and consider rotating it or creating a named admin user.")
-		fmt.Println("========================================================")
-	}
-
 	// Apply config: recover from PID files, start missing, and cleanup removed processes
 	if err := mgr.ApplyConfig(cfg.Specs); err != nil {
 		fmt.Printf("Warning: failed to apply config: %v\n", err)
 	}
 
+	jobManager := provisr.NewJobManager(mgr)
+
 	// Always create the cron scheduler (even with zero initial jobs) so the
 	// HTTP /cronjobs* endpoints can register jobs on a running daemon, not
 	// just at startup from config.
-	cronScheduler := provisr.NewCronScheduler(mgr)
+	cronScheduler := provisr.NewCronSchedulerWithJobManager(mgr, jobManager)
 	for _, j := range cfg.CronJobs {
 		jb := provisr.CronJob(j) // Direct assignment since they're the same type
 		if err := cronScheduler.Add(jb); err != nil {
@@ -752,19 +737,16 @@ func createAuthCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authentication management commands",
-		Long: `Manage users and client credentials for authentication.
+		Long: `Manage users for authentication.
 
 Examples:
   provisr auth user create --username=admin --password=secret --roles=admin
-  provisr auth user list
-  provisr auth client create --name="API Client" --scopes=operator
-  provisr auth client list`,
+  provisr auth user list`,
 	}
 
 	// Add subcommands
 	cmd.AddCommand(
 		createAuthUserCommand(provisrCommand, globalFlags),
-		createAuthClientCommand(provisrCommand, globalFlags),
 		createAuthTestCommand(provisrCommand, globalFlags),
 	)
 
@@ -785,24 +767,6 @@ func createAuthUserCommand(provisrCommand command, globalFlags *GlobalFlags) *co
 		createAuthUserListCommand(provisrCommand, globalFlags),
 		createAuthUserDeleteCommand(provisrCommand, globalFlags),
 		createAuthUserPasswordCommand(provisrCommand, globalFlags),
-	)
-
-	return cmd
-}
-
-// createAuthClientCommand creates the auth client subcommand
-func createAuthClientCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "client",
-		Short: "Client credential management commands",
-		Long:  "Manage client credentials for API authentication",
-	}
-
-	// Add client subcommands
-	cmd.AddCommand(
-		createAuthClientCreateCommand(provisrCommand, globalFlags),
-		createAuthClientListCommand(provisrCommand, globalFlags),
-		createAuthClientDeleteCommand(provisrCommand, globalFlags),
 	)
 
 	return cmd
@@ -897,67 +861,6 @@ Examples:
 	return cmd
 }
 
-// createAuthClientCreateCommand creates the auth client create subcommand
-func createAuthClientCreateCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
-	flags := &AuthClientCreateFlags{}
-
-	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create a new client credential",
-		Long: `Create a new client credential for API authentication.
-
-Examples:
-  provisr auth client create --name="API Client" --scopes=operator
-  provisr auth client create --name="Admin Client" --scopes=admin,operator`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return provisrCommand.AuthClientCreate(*flags, globalFlags.ConfigPath)
-		},
-	}
-
-	cmd.Flags().StringVar(&flags.Name, "name", "", "client name (required)")
-	cmd.Flags().StringSliceVar(&flags.Scopes, "scopes", []string{"operator"}, "client scopes (comma-separated)")
-
-	_ = cmd.MarkFlagRequired("name")
-
-	return cmd
-}
-
-// createAuthClientListCommand creates the auth client list subcommand
-func createAuthClientListCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all client credentials",
-		Long:  "List all client credentials in the system",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return provisrCommand.AuthClientList(globalFlags.ConfigPath)
-		},
-	}
-
-	return cmd
-}
-
-// createAuthClientDeleteCommand creates the auth client delete subcommand
-func createAuthClientDeleteCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
-	flags := &AuthClientDeleteFlags{}
-
-	cmd := &cobra.Command{
-		Use:   "delete",
-		Short: "Delete a client credential",
-		Long: `Delete a client credential from the system.
-
-Examples:
-  provisr auth client delete --client-id=client-123`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return provisrCommand.AuthClientDelete(*flags, globalFlags.ConfigPath)
-		},
-	}
-
-	cmd.Flags().StringVar(&flags.ClientID, "client-id", "", "client ID to delete (required)")
-	_ = cmd.MarkFlagRequired("client-id")
-
-	return cmd
-}
-
 // createAuthTestCommand creates the auth test subcommand
 func createAuthTestCommand(provisrCommand command, globalFlags *GlobalFlags) *cobra.Command {
 	flags := &AuthTestFlags{}
@@ -968,18 +871,15 @@ func createAuthTestCommand(provisrCommand command, globalFlags *GlobalFlags) *co
 		Long: `Test authentication with different methods and credentials.
 
 Examples:
-  provisr auth test --method=basic --username=admin --password=secret
-  provisr auth test --method=client_secret --client-id=client_123 --client-secret=secret123`,
+  provisr auth test --method=basic --username=admin --password=secret`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.AuthTest(*flags, globalFlags.ConfigPath)
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.Method, "method", "basic", "authentication method (basic, client_secret, jwt)")
+	cmd.Flags().StringVar(&flags.Method, "method", "basic", "authentication method (basic, jwt)")
 	cmd.Flags().StringVar(&flags.Username, "username", "", "username (for basic auth)")
 	cmd.Flags().StringVar(&flags.Password, "password", "", "password (for basic auth)")
-	cmd.Flags().StringVar(&flags.ClientID, "client-id", "", "client ID (for client_secret auth)")
-	cmd.Flags().StringVar(&flags.ClientSecret, "client-secret", "", "client secret (for client_secret auth)")
 	cmd.Flags().StringVar(&flags.Token, "token", "", "JWT token (for jwt auth)")
 
 	return cmd
@@ -996,18 +896,15 @@ func createLoginCommand(provisrCommand command) *cobra.Command {
 
 Examples:
   provisr login --username=admin --password=secret
-  provisr login --method=client_secret --client-id=client_123 --client-secret=secret123
   provisr login --server-url=http://remote:8080/api --username=admin --password=secret`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return provisrCommand.Login(*flags)
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.Method, "method", "basic", "authentication method (basic, client_secret)")
+	cmd.Flags().StringVar(&flags.Method, "method", "basic", "authentication method (basic)")
 	cmd.Flags().StringVar(&flags.Username, "username", "", "username (for basic auth)")
 	cmd.Flags().StringVar(&flags.Password, "password", "", "password (for basic auth)")
-	cmd.Flags().StringVar(&flags.ClientID, "client-id", "", "client ID (for client_secret auth)")
-	cmd.Flags().StringVar(&flags.ClientSecret, "client-secret", "", "client secret (for client_secret auth)")
 	cmd.Flags().StringVar(&flags.ServerURL, "server-url", "", "server URL (default: http://localhost:8080/api)")
 
 	return cmd

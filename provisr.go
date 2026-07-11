@@ -86,8 +86,9 @@ func NewGroup(m *Manager) *Group { return core.NewGroup(m) }
 // NewJobManager constructs a JobManager bound to the given Manager.
 func NewJobManager(m *Manager) *JobManager { return core.NewJobManager(m) }
 
-// NewCronScheduler constructs a CronScheduler bound to the given Manager.
-func NewCronScheduler(m *Manager) *CronScheduler { return core.NewCronScheduler(m) }
+func NewCronSchedulerWithJobManager(m *Manager, jm *JobManager) *CronScheduler {
+	return core.NewCronSchedulerWithJobManager(m, jm)
+}
 
 // NewProcessMetricsCollector constructs a new process metrics collector.
 func NewProcessMetricsCollector(cfg ProcessMetricsConfig) *ProcessMetricsCollector {
@@ -111,17 +112,6 @@ func LoadConfig(path string) (*cfg.Config, error) { return cfg.LoadConfig(path) 
 // For ClickHouse, import github.com/loykin/provisr/history/clickhouse instead.
 func NewSinkFromDSN(dsn string) (HistorySink, error) {
 	return factory.NewSinkFromDSN(dsn)
-}
-
-// EnsureInitialAdmin creates an "admin" user with a random password if the
-// configured auth store has no users yet, so enabling authCfg on a fresh
-// store doesn't lock every operator out until someone with separate shell
-// access runs `provisr auth user create`. A no-op (created=false, no error)
-// if authCfg is nil/disabled or any user already exists — safe to call on
-// every startup. The caller must display the returned password once; it is
-// never stored or logged by this function.
-func EnsureInitialAdmin(authCfg *ServerAuthConfig) (password string, created bool, err error) {
-	return iapi.EnsureInitialAdmin(authCfg)
 }
 
 // --- HTTP server / router facades ---

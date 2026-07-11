@@ -115,14 +115,41 @@ func (m *Manager) ListJobs() map[string]*Job {
 
 // UpdateJob updates a job (stops the old one and starts a new one)
 func (m *Manager) UpdateJob(name string, spec Spec) error {
+	if spec.Name != name {
+		return fmt.Errorf("job name cannot be changed from %q to %q", name, spec.Name)
+	}
+	if err := spec.Validate(); err != nil {
+		return fmt.Errorf("invalid job spec: %w", err)
+	}
+
+	m.mu.RLock()
+	old, exists := m.jobs[name]
+	if !exists {
+		m.mu.RUnlock()
+		return fmt.Errorf("job %q not found", name)
+	}
+	oldSpec := old.GetSpec()
+	for _, depName := range spec.DependsOn {
+		if _, ok := m.jobs[depName]; !ok {
+			m.mu.RUnlock()
+			return fmt.Errorf("job %q: dependency %q not found", spec.Name, depName)
+		}
+	}
+	m.mu.RUnlock()
+
 	// Delete existing job
 	if err := m.DeleteJob(name); err != nil {
 		return fmt.Errorf("failed to delete existing job: %w", err)
 	}
 
 	// Create new job with updated spec
-	_, err := m.CreateJob(spec)
-	return err
+	if _, err := m.CreateJob(spec); err != nil {
+		if _, restoreErr := m.CreateJob(oldSpec); restoreErr != nil {
+			return fmt.Errorf("failed to create updated job: %v; failed to restore original job: %w", err, restoreErr)
+		}
+		return fmt.Errorf("failed to create updated job; original job restored: %w", err)
+	}
+	return nil
 }
 
 // DeleteJob deletes a job

@@ -85,11 +85,6 @@ const (
 
 	RunModeBlocking = process.RunModeBlocking
 	RunModeAsync    = process.RunModeAsync
-
-	PhasePreStart  = process.PhasePreStart
-	PhasePostStart = process.PhasePostStart
-	PhasePreStop   = process.PhasePreStop
-	PhasePostStop  = process.PhasePostStop
 )
 
 // --- History types ---
@@ -243,7 +238,22 @@ func (jm *JobManager) GetJob(name string) (JobStatus, bool) {
 	}
 	return j.GetStatus(), true
 }
+func (jm *JobManager) GetJobSpec(name string) (JobSpec, bool) {
+	j, exists := jm.inner.GetJob(name)
+	if !exists {
+		return JobSpec{}, false
+	}
+	return j.GetSpec(), true
+}
 func (jm *JobManager) ListJobs() map[string]JobStatus { return jm.inner.GetJobStatus() }
+func (jm *JobManager) ListJobSpecs() map[string]JobSpec {
+	jobs := jm.inner.ListJobs()
+	specs := make(map[string]JobSpec, len(jobs))
+	for name, j := range jobs {
+		specs[name] = j.GetSpec()
+	}
+	return specs
+}
 func (jm *JobManager) UpdateJob(name string, spec JobSpec) error {
 	return jm.inner.UpdateJob(name, spec)
 }
@@ -261,6 +271,14 @@ type CronScheduler struct{ inner *cronjob.Manager }
 // NewCronScheduler constructs a CronScheduler bound to the given Manager.
 func NewCronScheduler(m *Manager) *CronScheduler {
 	return &CronScheduler{inner: cronjob.NewManager(m.inner)}
+}
+
+func NewCronSchedulerWithJobManager(m *Manager, jm *JobManager) *CronScheduler {
+	return &CronScheduler{inner: cronjob.NewManagerWithJobManager(m.inner, jm.inner)}
+}
+
+func (s *CronScheduler) JobManager() *JobManager {
+	return &JobManager{inner: s.inner.JobManager()}
 }
 
 func (s *CronScheduler) Add(j CronJob) error { _, err := s.inner.CreateCronJob(j); return err }

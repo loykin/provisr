@@ -8,12 +8,11 @@ import (
 type AuthMethod string
 
 const (
-	AuthMethodBasic        AuthMethod = "basic"         // username/password
-	AuthMethodClientSecret AuthMethod = "client_secret" // client_id/client_secret
-	AuthMethodJWT          AuthMethod = "jwt"           // JWT token
+	AuthMethodBasic AuthMethod = "basic" // username/password
+	AuthMethodJWT   AuthMethod = "jwt"   // JWT token
 )
 
-// User and ClientCredential types are now imported from the store package
+// User type is imported from the store package
 
 // AuthResult represents the result of authentication
 type AuthResult struct {
@@ -34,12 +33,10 @@ type Token struct {
 
 // LoginRequest represents a login request
 type LoginRequest struct {
-	Method       AuthMethod `json:"method"`
-	Username     string     `json:"username,omitempty"`
-	Password     string     `json:"password,omitempty"`
-	ClientID     string     `json:"client_id,omitempty"`
-	ClientSecret string     `json:"client_secret,omitempty"`
-	Token        string     `json:"token,omitempty"`
+	Method   AuthMethod `json:"method"`
+	Username string     `json:"username,omitempty"`
+	Password string     `json:"password,omitempty"`
+	Token    string     `json:"token,omitempty"`
 }
 
 // Permission represents a permission in the system

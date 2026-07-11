@@ -3,9 +3,10 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -18,6 +19,7 @@ type AuthService struct {
 	jwtSecret  []byte
 	tokenTTL   time.Duration
 	bcryptCost int
+	userMu     sync.Mutex
 }
 
 // AuthConfig represents configuration for the auth service
@@ -92,8 +94,6 @@ func (s *AuthService) Authenticate(ctx context.Context, req LoginRequest) (*Auth
 	switch req.Method {
 	case AuthMethodBasic:
 		return s.authenticateBasic(ctx, req.Username, req.Password)
-	case AuthMethodClientSecret:
-		return s.authenticateClientSecret(ctx, req.ClientID, req.ClientSecret)
 	case AuthMethodJWT:
 		return s.authenticateJWT(ctx, req.Token)
 	default:
@@ -134,44 +134,6 @@ func (s *AuthService) authenticateBasic(ctx context.Context, username, password 
 		Username: user.Username,
 		Roles:    user.Roles,
 		Metadata: user.Metadata,
-		Token:    token,
-	}, nil
-}
-
-// authenticateClientSecret performs client_id/client_secret authentication
-func (s *AuthService) authenticateClientSecret(ctx context.Context, clientID, clientSecret string) (*AuthResult, error) {
-	if clientID == "" || clientSecret == "" {
-		return &AuthResult{Success: false}, ErrInvalidCredentials
-	}
-
-	client, err := s.store.GetClientByClientID(ctx, clientID)
-	if err != nil {
-		if err == ErrClientNotFound {
-			return &AuthResult{Success: false}, ErrInvalidCredentials
-		}
-		return &AuthResult{Success: false}, fmt.Errorf("failed to get client: %w", err)
-	}
-
-	if !client.Active {
-		return &AuthResult{Success: false}, ErrInvalidCredentials
-	}
-
-	if subtle.ConstantTimeCompare([]byte(client.ClientSecret), []byte(clientSecret)) != 1 {
-		return &AuthResult{Success: false}, ErrInvalidCredentials
-	}
-
-	// For client credentials, we create a token with client info
-	token, err := s.generateClientJWT(client)
-	if err != nil {
-		return &AuthResult{Success: false}, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	return &AuthResult{
-		Success:  true,
-		UserID:   client.ID,
-		Username: client.ClientID,
-		Roles:    client.Scopes, // Use scopes as roles for clients
-		Metadata: client.Metadata,
 		Token:    token,
 	}, nil
 }
@@ -243,37 +205,6 @@ func (s *AuthService) generateJWT(user *User) (*Token, error) {
 	}, nil
 }
 
-// generateClientJWT generates a JWT token for a client credential
-func (s *AuthService) generateClientJWT(client *ClientCredential) (*Token, error) {
-	expiresAt := time.Now().Add(s.tokenTTL)
-
-	claims := &Claims{
-		UserID:   client.ID,
-		Username: client.ClientID,
-		Roles:    client.Scopes,
-		Metadata: client.Metadata,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-			Issuer:    "provisr",
-			Subject:   client.ID,
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(s.jwtSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign token: %w", err)
-	}
-
-	return &Token{
-		Type:      "Bearer",
-		Value:     tokenString,
-		ExpiresAt: expiresAt,
-	}, nil
-}
-
 // CreateUser creates a new user with hashed password
 func (s *AuthService) CreateUser(ctx context.Context, username, password, email string, roles []string, metadata map[string]string) (*User, error) {
 	if username == "" || password == "" {
@@ -306,32 +237,52 @@ func (s *AuthService) CreateUser(ctx context.Context, username, password, email 
 	return user, nil
 }
 
-// CreateClient creates a new client credential
-func (s *AuthService) CreateClient(ctx context.Context, name string, scopes []string, metadata map[string]string) (*ClientCredential, error) {
-	if name == "" {
-		return nil, fmt.Errorf("client name is required")
+// HasAnyUsers reports whether the store has at least one user, used to
+// decide whether the frontend should show a first-run "create the admin
+// account" form instead of a login form.
+func (s *AuthService) HasAnyUsers(ctx context.Context) (bool, error) {
+	users, _, err := s.store.ListUsers(ctx, 0, 1)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for existing users: %w", err)
+	}
+	return len(users) > 0, nil
+}
+
+// BootstrapFirstAdmin creates the first admin user directly from an
+// unauthenticated request, and returns the same *AuthResult shape as
+// Authenticate (including a token) so the caller ends up logged in
+// immediately. Refuses with ErrAlreadyBootstrapped once any user exists —
+// this is the only auth mutation allowed with no token, so it must stay
+// unusable after the very first admin is created.
+func (s *AuthService) BootstrapFirstAdmin(ctx context.Context, username, password string) (*AuthResult, error) {
+	if username == "" || password == "" {
+		return nil, fmt.Errorf("username and password are required")
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+	now := time.Now().UTC()
+	user := &User{ID: generateID(), Username: username, PasswordHash: string(passwordHash), Roles: []string{"admin"}, CreatedAt: now, UpdatedAt: now, Active: true}
+	if err := s.store.CreateFirstUser(ctx, user); err != nil {
+		if errors.Is(err, ErrUserAlreadyExists) {
+			return nil, ErrAlreadyBootstrapped
+		}
+		return nil, fmt.Errorf("failed to create initial admin: %w", err)
 	}
 
-	clientID := generateClientID()
-	clientSecret := generateClientSecret()
-
-	client := &ClientCredential{
-		ID:           generateID(),
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Name:         name,
-		Scopes:       scopes,
-		Metadata:     metadata,
-		CreatedAt:    time.Now().UTC(),
-		UpdatedAt:    time.Now().UTC(),
-		Active:       true,
+	token, err := s.generateJWT(user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	if err := s.store.CreateClient(ctx, client); err != nil {
-		return nil, fmt.Errorf("failed to create client: %w", err)
-	}
-
-	return client, nil
+	return &AuthResult{
+		Success:  true,
+		UserID:   user.ID,
+		Username: user.Username,
+		Roles:    user.Roles,
+		Token:    token,
+	}, nil
 }
 
 // UpdateUserPassword updates a user's password
@@ -406,37 +357,72 @@ func (s *AuthService) GetUser(ctx context.Context, id string) (*User, error) {
 
 // UpdateUser updates a user
 func (s *AuthService) UpdateUser(ctx context.Context, user *User) error {
+	s.userMu.Lock()
+	defer s.userMu.Unlock()
+	current, err := s.store.GetUser(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	if isActiveAdmin(current) && !isActiveAdmin(user) {
+		last, err := s.isLastActiveAdmin(ctx, current.ID)
+		if err != nil {
+			return err
+		}
+		if last {
+			return ErrLastActiveAdmin
+		}
+	}
 	return s.store.UpdateUser(ctx, user)
 }
 
 // DeleteUser deletes a user
 func (s *AuthService) DeleteUser(ctx context.Context, id string) error {
+	s.userMu.Lock()
+	defer s.userMu.Unlock()
+	current, err := s.store.GetUser(ctx, id)
+	if err != nil {
+		return err
+	}
+	if isActiveAdmin(current) {
+		last, err := s.isLastActiveAdmin(ctx, id)
+		if err != nil {
+			return err
+		}
+		if last {
+			return ErrLastActiveAdmin
+		}
+	}
 	return s.store.DeleteUser(ctx, id)
+}
+
+func isActiveAdmin(user *User) bool {
+	if user == nil || !user.Active {
+		return false
+	}
+	for _, role := range user.Roles {
+		if role == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *AuthService) isLastActiveAdmin(ctx context.Context, exceptID string) (bool, error) {
+	users, _, err := s.store.ListUsers(ctx, 0, int(^uint(0)>>1))
+	if err != nil {
+		return false, fmt.Errorf("failed to list users: %w", err)
+	}
+	for _, candidate := range users {
+		if candidate.ID != exceptID && isActiveAdmin(candidate) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // ListUsers lists users with pagination
 func (s *AuthService) ListUsers(ctx context.Context, offset, limit int) ([]*User, int, error) {
 	return s.store.ListUsers(ctx, offset, limit)
-}
-
-// GetClient gets a client by ID
-func (s *AuthService) GetClient(ctx context.Context, id string) (*ClientCredential, error) {
-	return s.store.GetClient(ctx, id)
-}
-
-// UpdateClient updates a client
-func (s *AuthService) UpdateClient(ctx context.Context, client *ClientCredential) error {
-	return s.store.UpdateClient(ctx, client)
-}
-
-// DeleteClient deletes a client
-func (s *AuthService) DeleteClient(ctx context.Context, id string) error {
-	return s.store.DeleteClient(ctx, id)
-}
-
-// ListClients lists clients with pagination
-func (s *AuthService) ListClients(ctx context.Context, offset, limit int) ([]*ClientCredential, int, error) {
-	return s.store.ListClients(ctx, offset, limit)
 }
 
 // Store returns the underlying store (for CLI operations)
@@ -453,18 +439,6 @@ func (s *AuthService) Close() error {
 
 func generateID() string {
 	bytes := make([]byte, 16)
-	_, _ = rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
-
-func generateClientID() string {
-	bytes := make([]byte, 16)
-	_, _ = rand.Read(bytes)
-	return "client_" + hex.EncodeToString(bytes)[:16]
-}
-
-func generateClientSecret() string {
-	bytes := make([]byte, 32)
 	_, _ = rand.Read(bytes)
 	return hex.EncodeToString(bytes)
 }

@@ -12,9 +12,15 @@
    the same way a modal sheet would, without changing its non-modal,
    resizable behavior. */
 .sp-panel {
+  border-radius: 0;
+  background: var(--card);
   box-shadow:
     0 10px 15px -3px rgb(0 0 0 / 0.1),
     0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+.sp-panel-content {
+  background: var(--card);
 }
 
 @custom-variant dark (&:is(.dark *));

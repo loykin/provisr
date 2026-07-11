@@ -69,8 +69,6 @@ func getErrorMessage(err error) string {
 	switch err {
 	case auth.ErrUserNotFound:
 		return "User not found"
-	case auth.ErrClientNotFound:
-		return "Client not found"
 	default:
 		return err.Error()
 	}
@@ -88,23 +86,26 @@ func NewAuthAPI(authService *auth.AuthService) *AuthAPI {
 	}
 }
 
-// RegisterAuthEndpoints registers authentication endpoints to the router
-func (api *AuthAPI) RegisterAuthEndpoints(r *gin.RouterGroup) {
+// RegisterAuthEndpoints registers authentication endpoints to the router.
+// /login and /bootstrap are intentionally left off authGin/*Perm — they're
+// how a caller gets a token (or creates the very first admin) in the first
+// place. Every /users* route requires authGin plus the matching read/write
+// permission so only an admin token can manage accounts.
+func (api *AuthAPI) RegisterAuthEndpoints(
+	r *gin.RouterGroup,
+	authGin, userReadPerm, userWritePerm gin.HandlerFunc,
+) {
 	group := r.Group("/auth")
 	{
 		group.POST("/login", api.login)
-		group.POST("/users", api.createUser)
-		group.GET("/users", api.listUsers)
-		group.GET("/users/:id", api.getUser)
-		group.PUT("/users/:id", api.updateUser)
-		group.DELETE("/users/:id", api.deleteUser)
-		group.PUT("/users/:id/password", api.updateUserPassword)
+		group.POST("/bootstrap", api.bootstrap)
 
-		group.POST("/clients", api.createClient)
-		group.GET("/clients", api.listClients)
-		group.GET("/clients/:id", api.getClient)
-		group.PUT("/clients/:id", api.updateClient)
-		group.DELETE("/clients/:id", api.deleteClient)
+		group.POST("/users", authGin, userWritePerm, api.createUser)
+		group.GET("/users", authGin, userReadPerm, api.listUsers)
+		group.GET("/users/:id", authGin, userReadPerm, api.getUser)
+		group.PUT("/users/:id", authGin, userWritePerm, api.updateUser)
+		group.DELETE("/users/:id", authGin, userWritePerm, api.deleteUser)
+		group.PUT("/users/:id/password", authGin, userWritePerm, api.updateUserPassword)
 	}
 }
 
@@ -124,6 +125,33 @@ func (api *AuthAPI) login(c *gin.Context) {
 
 	if !result.Success {
 		respondError(c, http.StatusUnauthorized, "authentication_failed", "Invalid credentials")
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// bootstrap creates the first admin user when the store has none yet, and
+// logs them in immediately. Deliberately unauthenticated — see
+// RegisterAuthEndpoints — and self-guarding: AuthService.BootstrapFirstAdmin
+// refuses once any user exists, so this can't be used to add a second admin.
+func (api *AuthAPI) bootstrap(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handleBindingError(c, err)
+		return
+	}
+
+	result, err := api.authService.BootstrapFirstAdmin(c.Request.Context(), req.Username, req.Password)
+	if err != nil {
+		if errors.Is(err, auth.ErrAlreadyBootstrapped) {
+			respondError(c, http.StatusConflict, "already_bootstrapped", "An admin user already exists")
+		} else {
+			respondError(c, http.StatusInternalServerError, "bootstrap_failed", err.Error())
+		}
 		return
 	}
 
@@ -241,7 +269,11 @@ func (api *AuthAPI) updateUser(c *gin.Context) {
 	}
 
 	if err := api.authService.UpdateUser(c.Request.Context(), user); err != nil {
-		respondError(c, http.StatusInternalServerError, "update_failed", err.Error())
+		if errors.Is(err, auth.ErrLastActiveAdmin) {
+			respondError(c, http.StatusConflict, "last_active_admin", err.Error())
+		} else {
+			respondError(c, http.StatusInternalServerError, "update_failed", err.Error())
+		}
 		return
 	}
 
@@ -255,6 +287,10 @@ func (api *AuthAPI) deleteUser(c *gin.Context) {
 	id := c.Param("id")
 
 	if err := api.authService.DeleteUser(c.Request.Context(), id); err != nil {
+		if errors.Is(err, auth.ErrLastActiveAdmin) {
+			respondError(c, http.StatusConflict, "last_active_admin", err.Error())
+			return
+		}
 		handleAuthServiceError(c, err, auth.ErrUserNotFound, "user_not_found", "delete_failed")
 		return
 	}
@@ -284,138 +320,5 @@ func (api *AuthAPI) updateUserPassword(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Password updated successfully",
-	})
-}
-
-// createClient creates a new client credential
-func (api *AuthAPI) createClient(c *gin.Context) {
-	var req struct {
-		Name     string            `json:"name" binding:"required"`
-		Scopes   []string          `json:"scopes"`
-		Metadata map[string]string `json:"metadata"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		handleBindingError(c, err)
-		return
-	}
-
-	client, err := api.authService.CreateClient(
-		c.Request.Context(),
-		req.Name,
-		req.Scopes,
-		req.Metadata,
-	)
-	if err != nil {
-		if errors.Is(err, auth.ErrClientAlreadyExists) {
-			respondError(c, http.StatusConflict, "client_exists", "Client already exists")
-		} else {
-			respondError(c, http.StatusInternalServerError, "creation_failed", err.Error())
-		}
-		return
-	}
-
-	c.JSON(http.StatusCreated, client)
-}
-
-// listClients lists all clients with pagination
-func (api *AuthAPI) listClients(c *gin.Context) {
-	pagination, err := parsePaginationParams(c)
-	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_pagination", err.Error())
-		return
-	}
-
-	clients, total, err := api.authService.ListClients(c.Request.Context(), pagination.Offset, pagination.Limit)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "list_failed", err.Error())
-		return
-	}
-
-	// Don't return client secrets in list
-	for _, client := range clients {
-		client.ClientSecret = ""
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"clients": clients,
-		"total":   total,
-		"offset":  pagination.Offset,
-		"limit":   pagination.Limit,
-	})
-}
-
-// getClient gets a specific client
-func (api *AuthAPI) getClient(c *gin.Context) {
-	id := c.Param("id")
-
-	client, err := api.authService.GetClient(c.Request.Context(), id)
-	if err != nil {
-		handleAuthServiceError(c, err, auth.ErrClientNotFound, "client_not_found", "get_failed")
-		return
-	}
-
-	// Don't return client secret
-	client.ClientSecret = ""
-	c.JSON(http.StatusOK, client)
-}
-
-// updateClient updates a client
-func (api *AuthAPI) updateClient(c *gin.Context) {
-	id := c.Param("id")
-
-	var req struct {
-		Name     string            `json:"name"`
-		Scopes   []string          `json:"scopes"`
-		Metadata map[string]string `json:"metadata"`
-		Active   *bool             `json:"active"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		handleBindingError(c, err)
-		return
-	}
-
-	client, err := api.authService.GetClient(c.Request.Context(), id)
-	if err != nil {
-		handleAuthServiceError(c, err, auth.ErrClientNotFound, "client_not_found", "get_failed")
-		return
-	}
-
-	// Update fields
-	if req.Name != "" {
-		client.Name = req.Name
-	}
-	if req.Scopes != nil {
-		client.Scopes = req.Scopes
-	}
-	if req.Metadata != nil {
-		client.Metadata = req.Metadata
-	}
-	if req.Active != nil {
-		client.Active = *req.Active
-	}
-
-	if err := api.authService.UpdateClient(c.Request.Context(), client); err != nil {
-		respondError(c, http.StatusInternalServerError, "update_failed", err.Error())
-		return
-	}
-
-	// Don't return client secret
-	client.ClientSecret = ""
-	c.JSON(http.StatusOK, client)
-}
-
-// deleteClient deletes a client
-func (api *AuthAPI) deleteClient(c *gin.Context) {
-	id := c.Param("id")
-
-	if err := api.authService.DeleteClient(c.Request.Context(), id); err != nil {
-		handleAuthServiceError(c, err, auth.ErrClientNotFound, "client_not_found", "delete_failed")
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Client deleted successfully",
 	})
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { DataBodyTemplate } from '@loykin/designkit'
-import { useProcessLogs } from './queries'
+import { LifecycleHookList, LifecycleHookSummary } from '@/components/lifecycle-hooks'
+import { DetailList, DetailRow, DetailSection, MonoValue } from '@/components/panel-detail'
+import { useProcessLogs, useProcessSpec } from './queries'
 import { renderAnsiLine } from '@/lib/ansi'
 import type { ProcessStatus } from './types'
 
@@ -14,8 +15,7 @@ function LogTail({ name }: { name: string }) {
   }, [lines])
 
   return (
-    <div className="mt-4">
-      <div className="mb-1 text-sm font-medium text-muted-foreground">Live output</div>
+    <DetailSection title="Live output">
       <div
         ref={scrollRef}
         className="h-64 overflow-y-auto rounded-(--radius) border border-border bg-black p-3 font-mono text-xs text-neutral-200"
@@ -30,21 +30,52 @@ function LogTail({ name }: { name: string }) {
           </div>
         ))}
       </div>
-    </div>
+    </DetailSection>
   )
 }
 
 export function ProcessDetailBody({ name, status }: { name: string; status: ProcessStatus }) {
+  const { data: spec } = useProcessSpec(name, true)
+
   return (
     <>
-      <DataBodyTemplate.Group layout="stacked">
-        <DataBodyTemplate.Field label="PID">{status.pid}</DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Restarts">{status.restarts}</DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Started at">
-          {status.running ? new Date(status.started_at).toLocaleString() : '-'}
-        </DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Detected by">{status.detected_by || '-'}</DataBodyTemplate.Field>
-      </DataBodyTemplate.Group>
+      <DetailSection title="Details">
+        <DetailList>
+          <DetailRow label="PID">{status.pid}</DetailRow>
+          <DetailRow label="Restarts">{status.restarts}</DetailRow>
+          <DetailRow label="Started at">
+            {status.running ? new Date(status.started_at).toLocaleString() : '-'}
+          </DetailRow>
+          <DetailRow label="Detected by">{status.detected_by || '-'}</DetailRow>
+          {spec && (
+            <>
+              <DetailRow label="Command">
+                <MonoValue>{spec.command || (spec.args ?? []).join(' ') || '-'}</MonoValue>
+              </DetailRow>
+              <DetailRow label="Working directory">
+                <MonoValue>{spec.work_dir || '-'}</MonoValue>
+              </DetailRow>
+              <DetailRow label="Instances">{spec.instances ?? 1}</DetailRow>
+              <DetailRow label="Auto-restart">
+                {spec.auto_restart ? 'Enabled' : 'Disabled'}
+              </DetailRow>
+              <DetailRow label="Priority">{spec.priority ?? 0}</DetailRow>
+              <DetailRow label="PID file">
+                <MonoValue>{spec.pid_file || '-'}</MonoValue>
+              </DetailRow>
+              <DetailRow label="Hooks">
+                <LifecycleHookSummary lifecycle={spec.lifecycle} />
+              </DetailRow>
+            </>
+          )}
+        </DetailList>
+      </DetailSection>
+
+      {spec && (
+        <DetailSection title="Lifecycle hooks">
+          <LifecycleHookList lifecycle={spec.lifecycle} />
+        </DetailSection>
+      )}
 
       <LogTail name={name} />
     </>

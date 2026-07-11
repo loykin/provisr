@@ -57,17 +57,8 @@ type AuthUserCreateFlags struct {
 	Roles    []string
 }
 
-type AuthClientCreateFlags struct {
-	Name   string
-	Scopes []string
-}
-
 type AuthUserDeleteFlags struct {
 	Username string
-}
-
-type AuthClientDeleteFlags struct {
-	ClientID string
 }
 
 type AuthUserPasswordFlags struct {
@@ -76,22 +67,18 @@ type AuthUserPasswordFlags struct {
 }
 
 type AuthTestFlags struct {
-	Method       string
-	Username     string
-	Password     string
-	ClientID     string
-	ClientSecret string
-	Token        string
+	Method   string
+	Username string
+	Password string
+	Token    string
 }
 
 // Login command flags
 type LoginFlags struct {
-	Username     string
-	Password     string
-	ClientID     string
-	ClientSecret string
-	Method       string
-	ServerURL    string
+	Username  string
+	Password  string
+	Method    string
+	ServerURL string
 }
 
 // Template command flags

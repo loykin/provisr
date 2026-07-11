@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { LifecycleHookEditor, hasLifecycleHooks, validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
+import type { LifecycleHooks } from '@/components/lifecycle-hooks'
 import { ApiError } from '@/lib/api'
 import { useProcessSpec, useUpdateProcess } from './queries'
 import type { ProcessSpec } from './types'
@@ -17,32 +19,39 @@ export interface ProcessFormState {
   env: string
   autoRestart: boolean
   instances: string
+  lifecycle: LifecycleHooks
 }
 
 export function specToForm(spec: ProcessSpec): ProcessFormState {
   return {
     name: spec.name,
-    command: spec.command,
+    command: spec.command ?? (spec.args ?? []).join(' '),
     workDir: spec.work_dir ?? '',
     env: (spec.env ?? []).join('\n'),
     autoRestart: spec.auto_restart ?? false,
     instances: spec.instances && spec.instances > 1 ? String(spec.instances) : '',
+    lifecycle: spec.lifecycle ?? {},
   }
 }
 
-export function formToSpec(form: ProcessFormState): ProcessSpec {
+export function formToSpec(form: ProcessFormState, base?: ProcessSpec): ProcessSpec {
   const env = form.env
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
   const instances = Number(form.instances)
+  const baseArgsCommand = base?.args && base.args.length > 0 ? base.args.join(' ') : undefined
+  const keepArgs = Boolean(baseArgsCommand && !base?.command && form.command === baseArgsCommand)
   return {
+    ...base,
     name: form.name.trim(),
-    command: form.command,
+    command: keepArgs ? undefined : form.command,
+    args: keepArgs ? base?.args : undefined,
     work_dir: form.workDir.trim() || undefined,
     env: env.length > 0 ? env : undefined,
     auto_restart: form.autoRestart,
     instances: instances > 1 ? instances : undefined,
+    lifecycle: hasLifecycleHooks(form.lifecycle) ? form.lifecycle : undefined,
   }
 }
 
@@ -113,6 +122,15 @@ export function ProcessFormFields({
           Restart automatically on exit
         </label>
       </DataBodyTemplate.Row>
+      <DataBodyTemplate.Row
+        label="Lifecycle hooks"
+        description="Commands run before/after the process starts or stops"
+      >
+        <LifecycleHookEditor
+          value={form.lifecycle}
+          onChange={(lifecycle) => setForm((f) => ({ ...f, lifecycle }))}
+        />
+      </DataBodyTemplate.Row>
     </DataBodyTemplate.Group>
   )
 }
@@ -124,9 +142,9 @@ export function ProcessFormFields({
 // Register lives on its own page (ProcessRegisterPage) rather than a side
 // panel — creating a new process is a primary navigation action, not a
 // quick contextual edit.
-function ProcessEditForm({ initial }: { initial: ProcessFormState }) {
+function ProcessEditForm({ spec }: { spec: ProcessSpec }) {
   const { close } = useSidePanel()
-  const [form, setForm] = useState(initial)
+  const [form, setForm] = useState(() => specToForm(spec))
   const [error, setError] = useState<string | null>(null)
   const update = useUpdateProcess()
 
@@ -137,8 +155,13 @@ function ProcessEditForm({ initial }: { initial: ProcessFormState }) {
       setError('Name and command are required.')
       return
     }
+    const lifecycleError = validateLifecycleHooks(form.lifecycle)
+    if (lifecycleError) {
+      setError(lifecycleError)
+      return
+    }
     try {
-      await update.mutateAsync(formToSpec(form))
+      await update.mutateAsync(formToSpec(form, spec))
       await close()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save process.')
@@ -184,7 +207,7 @@ export function ProcessEditPanel({ name }: { name: string }) {
 
   return (
     <PanelTemplate eyebrow="Process" title={`Edit ${name}`} actions={closeBtn}>
-      <ProcessEditForm initial={specToForm(spec)} />
+      <ProcessEditForm spec={spec} />
     </PanelTemplate>
   )
 }

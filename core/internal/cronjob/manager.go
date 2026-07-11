@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/loykin/provisr/core/internal/job"
 	"github.com/loykin/provisr/core/internal/manager"
 	"github.com/loykin/provisr/core/internal/metrics"
 )
@@ -15,14 +16,27 @@ type Manager struct {
 	mu             sync.RWMutex
 	cronJobs       map[string]*CronJob
 	processManager *manager.Manager
+	jobManager     *job.Manager
 }
 
 // NewManager creates a new cronjob manager
 func NewManager(processManager *manager.Manager) *Manager {
+	return NewManagerWithJobManager(processManager, job.NewManager(processManager))
+}
+
+// NewManagerWithJobManager creates a cronjob manager backed by a shared job
+// manager, so scheduled jobs and ad-hoc jobs are visible through the same
+// workload inventory.
+func NewManagerWithJobManager(processManager *manager.Manager, jobManager *job.Manager) *Manager {
 	return &Manager{
 		cronJobs:       make(map[string]*CronJob),
 		processManager: processManager,
+		jobManager:     jobManager,
 	}
+}
+
+func (m *Manager) JobManager() *job.Manager {
+	return m.jobManager
 }
 
 // CreateCronJob creates and starts a new cronjob
@@ -46,7 +60,7 @@ func (m *Manager) CreateCronJob(spec CronJobSpec) (*CronJob, error) {
 	}
 
 	// Create cronjob
-	cronJob := NewCronJob(spec, m.processManager)
+	cronJob := NewCronJob(spec, m.jobManager)
 	m.cronJobs[spec.Name] = cronJob
 
 	// Start cronjob
@@ -97,7 +111,7 @@ func (m *Manager) UpdateCronJob(name string, spec CronJobSpec) error {
 
 	// Create new cronjob with updated spec
 	m.mu.Lock()
-	newCronJob := NewCronJob(spec, m.processManager)
+	newCronJob := NewCronJob(spec, m.jobManager)
 	m.cronJobs[name] = newCronJob
 	m.mu.Unlock()
 

@@ -79,6 +79,38 @@ func TestStatusUnknown(t *testing.T) {
 	}
 }
 
+func TestJobsAPI(t *testing.T) {
+	h := setupRouter(t, "")
+	spec := core.JobSpec{Name: "job-api", Command: "go version"}
+
+	rec := doReq(t, h, http.MethodPost, "/jobs", spec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create job expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doReq(t, h, http.MethodGet, "/jobs", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list jobs expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var jobs []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &jobs); err != nil {
+		t.Fatalf("failed to parse jobs json: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0]["name"] != "job-api" {
+		t.Fatalf("unexpected jobs response: %+v", jobs)
+	}
+
+	rec = doReq(t, h, http.MethodGet, "/jobs/job-api", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get job expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doReq(t, h, http.MethodDelete, "/jobs/job-api", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete job expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWildcardStatusAndStop(t *testing.T) {
 	h := setupRouter(t, "")
 	// start 2 instances via API

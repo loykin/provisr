@@ -26,4 +26,5 @@ export interface AuthUser {
 
 export interface AuthStatus {
   enabled: boolean
+  needs_setup: boolean
 }

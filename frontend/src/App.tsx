@@ -9,7 +9,7 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router'
-import { CalendarClock, History, Server } from 'lucide-react'
+import { Boxes, History, Users } from 'lucide-react'
 import { AuthProvider, useAuth } from '@/features/auth/context'
 import { Button } from '@/components/ui/button'
 import {
@@ -35,18 +35,23 @@ const ProcessRegisterPage = lazy(() => import('@/pages/ProcessRegisterPage'))
 const ProcessDetailPage = lazy(() => import('@/pages/ProcessDetailPage'))
 const HistoryPage = lazy(() => import('@/pages/HistoryPage'))
 const JobsPage = lazy(() => import('@/pages/JobsPage'))
+const JobRegisterPage = lazy(() => import('@/pages/JobRegisterPage'))
+const CronJobsPage = lazy(() => import('@/pages/CronJobsPage'))
 const CronJobRegisterPage = lazy(() => import('@/pages/CronJobRegisterPage'))
+const UsersPage = lazy(() => import('@/pages/UsersPage'))
+const UserRegisterPage = lazy(() => import('@/pages/UserRegisterPage'))
 
 const navItems = [
-  { id: 'processes', label: 'Processes', icon: Server, to: '/processes' },
-  { id: 'jobs', label: 'Jobs', icon: CalendarClock, to: '/jobs' },
+  { id: 'workloads', label: 'Workloads', icon: Boxes, to: '/processes', match: ['/processes', '/jobs', '/cronjobs'] },
   { id: 'history', label: 'History', icon: History, to: '/history' },
+  { id: 'users', label: 'Users', icon: Users, to: '/users', adminOnly: true },
 ]
 
 function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const navigate = useNavigate()
   const { user, authEnabled, logout } = useAuth()
+  const isAdmin = user?.roles.includes('admin') ?? false
 
   return (
     <>
@@ -55,17 +60,23 @@ function AppSidebar() {
           <SidebarGroupLabel>provisr</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.id}>
-                  <SidebarMenuButton
-                    isActive={pathname === item.to || pathname.startsWith(item.to + '/')}
-                    onClick={() => void navigate({ to: item.to })}
-                  >
-                    <item.icon />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navItems
+                .filter((item) => !item.adminOnly || (authEnabled && isAdmin))
+                .map((item) => (
+                  <SidebarMenuItem key={item.id}>
+                    <SidebarMenuButton
+                      isActive={
+                        pathname === item.to ||
+                        pathname.startsWith(item.to + '/') ||
+                        item.match?.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'))
+                      }
+                      onClick={() => void navigate({ to: item.to })}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -184,7 +195,31 @@ const jobsRoute = createRoute({
 const jobsRegisterRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'jobs/new',
+  component: JobRegisterPage,
+})
+
+const cronJobsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'cronjobs',
+  component: CronJobsPage,
+})
+
+const cronJobsRegisterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'cronjobs/new',
   component: CronJobRegisterPage,
+})
+
+const usersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'users',
+  component: UsersPage,
+})
+
+const userRegisterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'users/new',
+  component: UserRegisterPage,
 })
 
 const routeTree = rootRoute.addChildren([
@@ -196,6 +231,10 @@ const routeTree = rootRoute.addChildren([
   historyRoute,
   jobsRoute,
   jobsRegisterRoute,
+  cronJobsRoute,
+  cronJobsRegisterRoute,
+  usersRoute,
+  userRegisterRoute,
 ])
 
 export const router = createRouter({ routeTree, basepath: '/ui' })

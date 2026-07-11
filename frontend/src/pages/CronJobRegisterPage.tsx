@@ -8,6 +8,7 @@ import {
   formToSpec,
   type CronJobFormState,
 } from '@/features/cronjobs/CronJobFormPanel'
+import { validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
 import { useCreateCronJob } from '@/features/cronjobs/queries'
 
 const initialForm: CronJobFormState = {
@@ -17,6 +18,8 @@ const initialForm: CronJobFormState = {
   workDir: '',
   env: '',
   concurrencyPolicy: 'Allow',
+  lifecycle: {},
+  jobTemplateLifecycle: {},
 }
 
 export default function CronJobRegisterPage() {
@@ -32,9 +35,14 @@ export default function CronJobRegisterPage() {
       setError('Name, schedule, and command are required.')
       return
     }
+    const lifecycleError = validateLifecycleHooks(form.lifecycle) ?? validateLifecycleHooks(form.jobTemplateLifecycle)
+    if (lifecycleError) {
+      setError(lifecycleError)
+      return
+    }
     try {
       await create.mutateAsync(formToSpec(form))
-      await navigate({ to: '/jobs' })
+      await navigate({ to: '/cronjobs' })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create cronjob.')
     }
@@ -43,11 +51,11 @@ export default function CronJobRegisterPage() {
   return (
     <form className="flex h-full flex-col" onSubmit={(e) => void handleSubmit(e)}>
       <DataBodyTemplate
-        title="Create cron job"
+        title="Create CronJob"
         contentClassName="flex-1"
         actions={
           <>
-            <Button type="button" variant="ghost" onClick={() => void navigate({ to: '/jobs' })}>
+            <Button type="button" variant="ghost" onClick={() => void navigate({ to: '/cronjobs' })}>
               Cancel
             </Button>
             <Button type="submit" disabled={create.isPending}>

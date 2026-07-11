@@ -2,7 +2,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { DataGrid } from '@loykin/gridkit'
 import { SidePanelProvider, useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
-import { PageHeader } from '@/components/page-header'
+import { WorkloadHeader } from '@/components/workload-tabs'
 import { useAuth } from '@/features/auth/context'
 import { useProcesses } from '@/features/processes/queries'
 import { columns } from '@/features/processes/columns'
@@ -24,7 +24,8 @@ function ProcessesGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader
+      <WorkloadHeader
+        active="processes"
         title="Processes"
         actions={
           user?.roles.includes('admin') ? (

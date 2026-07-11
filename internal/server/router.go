@@ -46,6 +46,7 @@ type Router struct {
 	historyReader historyReader
 	programsDir   string
 	cronScheduler *core.CronScheduler
+	jobManager    *core.JobManager
 }
 
 // APIEndpoints provides individual access to API handlers for custom registration
@@ -58,7 +59,7 @@ type APIEndpoints struct {
 // Example basePath: "/abc" results in /abc/start, /abc/stop, /abc/status.
 func NewRouter(mgr *core.Manager, basePath string) *Router {
 	bp := sanitizeBase(basePath)
-	return &Router{mgr: mgr, basePath: bp}
+	return &Router{mgr: mgr, basePath: bp, jobManager: core.NewJobManager(mgr)}
 }
 
 // newRouterFromConfig constructs a Router and wires up an AuthService
@@ -68,6 +69,9 @@ func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.Aut
 	r := NewRouter(mgr, basePath)
 	r.programsDir = programsDir
 	r.cronScheduler = cronScheduler
+	if cronScheduler != nil {
+		r.jobManager = cronScheduler.JobManager()
+	}
 
 	// `Enabled` only gates external export sinks (see main.go's history sink
 	// setup) — the /history reader is about the local in-store sink, so it
@@ -163,16 +167,24 @@ func (r *Router) Handler() http.Handler {
 		group.GET("/history", authGin, readPerm, r.handleHistory)
 	}
 
-	// Add cronjob endpoints if a scheduler is available. Gated on the "job"
-	// resource (same permission set as process read/write, see auth.HasPermission).
+	jobReadPerm := gin.HandlerFunc(noopMiddleware)
+	jobWritePerm := gin.HandlerFunc(noopMiddleware)
+	if r.authService != nil {
+		mw := auth.NewMiddleware(r.authService, true)
+		jobReadPerm = mw.GinRequirePermission("job", "read")
+		jobWritePerm = mw.GinRequirePermission("job", "write")
+	}
+
+	if r.jobManager != nil {
+		group.GET("/jobs", authGin, jobReadPerm, r.handleListJobs)
+		group.POST("/jobs", authGin, jobWritePerm, r.handleCreateJob)
+		group.GET("/jobs/:name", authGin, jobReadPerm, r.handleGetJob)
+		group.POST("/jobs/:name", authGin, jobWritePerm, r.handleUpdateJob)
+		group.DELETE("/jobs/:name", authGin, jobWritePerm, r.handleDeleteJob)
+	}
+
+	// Add cronjob endpoints if a scheduler is available.
 	if r.cronScheduler != nil {
-		jobReadPerm := gin.HandlerFunc(noopMiddleware)
-		jobWritePerm := gin.HandlerFunc(noopMiddleware)
-		if r.authService != nil {
-			mw := auth.NewMiddleware(r.authService, true)
-			jobReadPerm = mw.GinRequirePermission("job", "read")
-			jobWritePerm = mw.GinRequirePermission("job", "write")
-		}
 		group.GET("/cronjobs", authGin, jobReadPerm, r.handleListCronJobs)
 		group.POST("/cronjobs", authGin, jobWritePerm, r.handleCreateCronJob)
 		group.GET("/cronjobs/:name", authGin, jobReadPerm, r.handleGetCronJob)
@@ -190,13 +202,24 @@ func (r *Router) Handler() http.Handler {
 	// login entirely rather than get stuck on a login form that has no
 	// backing /auth/login route to submit to.
 	group.GET("/auth/status", func(c *gin.Context) {
-		writeJSON(c, http.StatusOK, gin.H{"enabled": r.authService != nil})
+		needsSetup := false
+		if r.authService != nil {
+			hasUsers, err := r.authService.HasAnyUsers(c.Request.Context())
+			needsSetup = err == nil && !hasUsers
+		}
+		writeJSON(c, http.StatusOK, gin.H{"enabled": r.authService != nil, "needs_setup": needsSetup})
 	})
 
-	// Add auth endpoints if auth service is available
+	// Add auth endpoints if auth service is available. /login, /status, and
+	// /bootstrap stay unauthenticated by design (RegisterAuthEndpoints keeps
+	// them off these middlewares); /users* requires an admin token —
+	// previously these were mounted on the bare group with no middleware at
+	// all, so anyone could create their own admin user without a token.
 	if r.authService != nil {
+		mw := auth.NewMiddleware(r.authService, true)
 		authAPI := NewAuthAPI(r.authService)
-		authAPI.RegisterAuthEndpoints(group)
+		authAPI.RegisterAuthEndpoints(group, authGin,
+			mw.GinRequirePermission("user", "read"), mw.GinRequirePermission("user", "write"))
 	}
 
 	// Serve the embedded web UI (built via `make ui`) at /ui, single binary.
@@ -781,6 +804,98 @@ func (r *Router) handleGetSpec(c *gin.Context) {
 	}
 
 	writeJSON(c, http.StatusOK, spec)
+}
+
+type jobResp struct {
+	core.JobSpec
+	Status core.JobStatus `json:"status"`
+}
+
+func (r *Router) jobResponse(name string) (jobResp, bool) {
+	spec, ok := r.jobManager.GetJobSpec(name)
+	if !ok {
+		return jobResp{}, false
+	}
+	status, _ := r.jobManager.GetJob(name)
+	return jobResp{JobSpec: spec, Status: status}, true
+}
+
+func (r *Router) handleListJobs(c *gin.Context) {
+	specs := r.jobManager.ListJobSpecs()
+	names := make([]string, 0, len(specs))
+	for name := range specs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	resp := make([]jobResp, 0, len(names))
+	for _, name := range names {
+		if job, ok := r.jobResponse(name); ok {
+			resp = append(resp, job)
+		}
+	}
+	writeJSON(c, http.StatusOK, resp)
+}
+
+func (r *Router) handleGetJob(c *gin.Context) {
+	name := c.Param("name")
+	job, ok := r.jobResponse(name)
+	if !ok {
+		writeJSON(c, http.StatusNotFound, errorResp{Error: fmt.Sprintf("job %q not found", name)})
+		return
+	}
+	writeJSON(c, http.StatusOK, job)
+}
+
+func bindAndValidateJob(c *gin.Context) (spec core.JobSpec, ok bool) {
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid JSON: " + err.Error()})
+		return spec, false
+	}
+	if spec.Name == "" {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "spec.name required"})
+		return spec, false
+	}
+	if !isSafeName(spec.Name) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid spec.name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
+		return spec, false
+	}
+	return spec, true
+}
+
+func (r *Router) handleCreateJob(c *gin.Context) {
+	spec, ok := bindAndValidateJob(c)
+	if !ok {
+		return
+	}
+	if err := r.jobManager.CreateJob(spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleUpdateJob(c *gin.Context) {
+	name := c.Param("name")
+	spec, ok := bindAndValidateJob(c)
+	if !ok {
+		return
+	}
+	spec.Name = name
+	if err := r.jobManager.UpdateJob(name, spec); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
+}
+
+func (r *Router) handleDeleteJob(c *gin.Context) {
+	name := c.Param("name")
+	if err := r.jobManager.DeleteJob(name); err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusOK, okResp{OK: true})
 }
 
 // cronJobResp is the wire shape for a single cronjob: the spec fields

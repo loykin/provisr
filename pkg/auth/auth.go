@@ -7,29 +7,25 @@ import (
 )
 
 type (
-	AuthService      = auth.AuthService
-	AuthConfig       = auth.AuthConfig
-	StoreConfig      = auth.StoreConfig
-	AuthMethod       = auth.AuthMethod
-	AuthResult       = auth.AuthResult
-	Token            = auth.Token
-	LoginRequest     = auth.LoginRequest
-	User             = store.User
-	ClientCredential = store.ClientCredential
+	AuthService  = auth.AuthService
+	AuthConfig   = auth.AuthConfig
+	StoreConfig  = auth.StoreConfig
+	AuthMethod   = auth.AuthMethod
+	AuthResult   = auth.AuthResult
+	Token        = auth.Token
+	LoginRequest = auth.LoginRequest
+	User         = store.User
 )
 
 const (
-	AuthMethodBasic        = auth.AuthMethodBasic
-	AuthMethodClientSecret = auth.AuthMethodClientSecret
-	AuthMethodJWT          = auth.AuthMethodJWT
+	AuthMethodBasic = auth.AuthMethodBasic
+	AuthMethodJWT   = auth.AuthMethodJWT
 )
 
 var (
-	ErrInvalidCredentials  = auth.ErrInvalidCredentials
-	ErrUserNotFound        = auth.ErrUserNotFound
-	ErrUserAlreadyExists   = auth.ErrUserAlreadyExists
-	ErrClientNotFound      = auth.ErrClientNotFound
-	ErrClientAlreadyExists = auth.ErrClientAlreadyExists
+	ErrInvalidCredentials = auth.ErrInvalidCredentials
+	ErrUserNotFound       = auth.ErrUserNotFound
+	ErrUserAlreadyExists  = auth.ErrUserAlreadyExists
 )
 
 // NewAuthService creates a new AuthService from the given config.

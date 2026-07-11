@@ -12,7 +12,6 @@ func TestAuthMethod_Constants(t *testing.T) {
 		expected string
 	}{
 		{"basic auth", AuthMethodBasic, "basic"},
-		{"client secret", AuthMethodClientSecret, "client_secret"},
 		{"jwt auth", AuthMethodJWT, "jwt"},
 	}
 
@@ -98,14 +97,6 @@ func TestLoginRequest_Creation(t *testing.T) {
 			},
 		},
 		{
-			name: "client_secret_request",
-			request: LoginRequest{
-				Method:       AuthMethodClientSecret,
-				ClientID:     "client123",
-				ClientSecret: "secret456",
-			},
-		},
-		{
 			name: "jwt_request",
 			request: LoginRequest{
 				Method: AuthMethodJWT,
@@ -127,13 +118,6 @@ func TestLoginRequest_Creation(t *testing.T) {
 				}
 				if tc.request.Password == "" {
 					t.Error("Expected password for basic auth")
-				}
-			case AuthMethodClientSecret:
-				if tc.request.ClientID == "" {
-					t.Error("Expected client ID for client secret auth")
-				}
-				if tc.request.ClientSecret == "" {
-					t.Error("Expected client secret for client secret auth")
 				}
 			case AuthMethodJWT:
 				if tc.request.Token == "" {

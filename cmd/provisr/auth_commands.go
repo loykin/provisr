@@ -180,64 +180,6 @@ func (c *command) AuthUserPassword(f AuthUserPasswordFlags, configPath string) e
 	return cliHelper.ResetUserPassword(ctx, f.Username, f.NewPassword)
 }
 
-// AuthClientCreate creates a new client credential
-func (c *command) AuthClientCreate(f AuthClientCreateFlags, configPath string) error {
-	ctx := context.Background()
-
-	authStore, err := c.createAuthStore(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to create auth store: %w", err)
-	}
-	defer func() { _ = authStore.Close() }()
-
-	authService, err := auth.NewAuthServiceWithStore(authStore)
-	if err != nil {
-		return fmt.Errorf("failed to create auth service: %w", err)
-	}
-	cliHelper := auth.NewCLIHelper(authService)
-
-	_, err = cliHelper.CreateAPIClient(ctx, f.Name, f.Scopes)
-	return err
-}
-
-// AuthClientList lists all client credentials
-func (c *command) AuthClientList(configPath string) error {
-	ctx := context.Background()
-
-	authStore, err := c.createAuthStore(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to create auth store: %w", err)
-	}
-	defer func() { _ = authStore.Close() }()
-
-	authService, err := auth.NewAuthServiceWithStore(authStore)
-	if err != nil {
-		return fmt.Errorf("failed to create auth service: %w", err)
-	}
-	cliHelper := auth.NewCLIHelper(authService)
-
-	return cliHelper.ListClients(ctx)
-}
-
-// AuthClientDelete deletes a client credential
-func (c *command) AuthClientDelete(f AuthClientDeleteFlags, configPath string) error {
-	ctx := context.Background()
-
-	authStore, err := c.createAuthStore(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to create auth store: %w", err)
-	}
-	defer func() { _ = authStore.Close() }()
-
-	authService, err := auth.NewAuthServiceWithStore(authStore)
-	if err != nil {
-		return fmt.Errorf("failed to create auth service: %w", err)
-	}
-	cliHelper := auth.NewCLIHelper(authService)
-
-	return cliHelper.DeleteClient(ctx, f.ClientID)
-}
-
 // AuthTest tests authentication with given credentials
 func (c *command) AuthTest(f AuthTestFlags, configPath string) error {
 	ctx := context.Background()
@@ -259,20 +201,16 @@ func (c *command) AuthTest(f AuthTestFlags, configPath string) error {
 	switch f.Method {
 	case "basic":
 		method = auth.AuthMethodBasic
-	case "client_secret":
-		method = auth.AuthMethodClientSecret
 	case "jwt":
 		method = auth.AuthMethodJWT
 	default:
-		return fmt.Errorf("unsupported auth method: %s (supported: basic, client_secret, jwt)", f.Method)
+		return fmt.Errorf("unsupported auth method: %s (supported: basic, jwt)", f.Method)
 	}
 
 	credentials := map[string]string{
-		"username":      f.Username,
-		"password":      f.Password,
-		"client_id":     f.ClientID,
-		"client_secret": f.ClientSecret,
-		"token":         f.Token,
+		"username": f.Username,
+		"password": f.Password,
+		"token":    f.Token,
 	}
 
 	return cliHelper.TestAuthentication(ctx, method, credentials)
@@ -287,12 +225,8 @@ func (c *command) Login(f LoginFlags) error {
 		if f.Username == "" || f.Password == "" {
 			return fmt.Errorf("username and password are required for basic auth")
 		}
-	case "client_secret":
-		if f.ClientID == "" || f.ClientSecret == "" {
-			return fmt.Errorf("client_id and client_secret are required for client_secret auth")
-		}
 	default:
-		return fmt.Errorf("unsupported auth method: %s (supported: basic, client_secret)", f.Method)
+		return fmt.Errorf("unsupported auth method: %s (supported: basic)", f.Method)
 	}
 
 	// Default server URL if not specified
@@ -312,13 +246,9 @@ func (c *command) Login(f LoginFlags) error {
 		"method": f.Method,
 	}
 
-	switch f.Method {
-	case "basic":
+	if f.Method == "basic" {
 		loginRequest["username"] = f.Username
 		loginRequest["password"] = f.Password
-	case "client_secret":
-		loginRequest["client_id"] = f.ClientID
-		loginRequest["client_secret"] = f.ClientSecret
 	}
 
 	// Make login request

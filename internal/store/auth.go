@@ -48,11 +48,68 @@ type ClientCredential struct {
 // UserStore defines the interface for user storage operations
 type UserStore interface {
 	CreateUser(ctx context.Context, user *User) error
+	CreateFirstUser(ctx context.Context, user *User) error
 	GetUser(ctx context.Context, id string) (*User, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	UpdateUser(ctx context.Context, user *User) error
 	DeleteUser(ctx context.Context, id string) error
 	ListUsers(ctx context.Context, offset, limit int) ([]*User, int, error)
+}
+
+// CreateFirstUser inserts user only when the users table is still empty. The
+// condition and insert live in one SQL statement, so concurrent bootstrap
+// requests cannot both create an administrator.
+func (s *authStore) CreateFirstUser(ctx context.Context, user *User) error {
+	rolesJSON, _ := json.Marshal(user.Roles)
+	metadataJSON, _ := json.Marshal(user.Metadata)
+
+	return s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		tx, err := db.BeginTxx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin first-user transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		// Every bootstrap competes for the same primary key. This is stronger
+		// than a plain NOT EXISTS(users) predicate on PostgreSQL, where two
+		// READ COMMITTED snapshots could otherwise both observe an empty table.
+		guardQuery := tx.Rebind(`INSERT INTO auth_bootstrap_guard (id)
+			SELECT ? WHERE NOT EXISTS (SELECT 1 FROM users)`)
+		result, err := tx.ExecContext(ctx, guardQuery, 1)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrUserAlreadyExists
+			}
+			return fmt.Errorf("claim bootstrap guard: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("get bootstrap guard affected rows: %w", err)
+		}
+		if affected == 0 {
+			return ErrUserAlreadyExists
+		}
+
+		query := tx.Rebind(`INSERT INTO users (id, username, password_hash, email, roles, metadata, created_at, updated_at, active)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		_, err = tx.ExecContext(ctx, query,
+			user.ID, user.Username, user.PasswordHash, user.Email,
+			string(rolesJSON), string(metadataJSON),
+			user.CreatedAt, user.UpdatedAt, user.Active)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrUserAlreadyExists
+			}
+			return fmt.Errorf("failed to create first user: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			if isUniqueViolation(err) {
+				return ErrUserAlreadyExists
+			}
+			return fmt.Errorf("commit first-user transaction: %w", err)
+		}
+		return nil
+	})
 }
 
 // ClientStore defines the interface for client credential storage operations

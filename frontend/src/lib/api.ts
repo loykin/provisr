@@ -12,6 +12,21 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+// AuthProvider subscribes to this so a 401 on any in-flight request (not
+// just the token's own expiry check on mount) immediately drops the app
+// back to the login screen instead of leaving queries to fail silently
+// until the next full page reload.
+const authExpiredListeners = new Set<() => void>()
+
+export function onAuthExpired(listener: () => void): () => void {
+  authExpiredListeners.add(listener)
+  return () => authExpiredListeners.delete(listener)
+}
+
+function notifyAuthExpired(): void {
+  authExpiredListeners.forEach((listener) => listener())
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -22,7 +37,10 @@ export class ApiError extends Error {
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    if (res.status === 401) clearToken()
+    if (res.status === 401) {
+      clearToken()
+      notifyAuthExpired()
+    }
     const body = await res.text().catch(() => '')
     let message = body || `${res.status} ${res.statusText}`
     try {

@@ -188,17 +188,5 @@ func (m *Middleware) authenticate(r *http.Request) (*AuthResult, error) {
 		return m.authService.Authenticate(r.Context(), req)
 	}
 
-	// Try client credentials from form/query params
-	clientID := r.FormValue("client_id")
-	clientSecret := r.FormValue("client_secret")
-	if clientID != "" && clientSecret != "" {
-		req := LoginRequest{
-			Method:       AuthMethodClientSecret,
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-		}
-		return m.authService.Authenticate(r.Context(), req)
-	}
-
 	return &AuthResult{Success: false}, ErrInvalidCredentials
 }

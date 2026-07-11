@@ -5,6 +5,8 @@ import { useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { LifecycleHookEditor, hasLifecycleHooks, validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
+import type { LifecycleHooks } from '@/components/lifecycle-hooks'
 import { ApiError } from '@/lib/api'
 import { useCronJob, useUpdateCronJob } from './queries'
 import type { CronJobSpec } from './types'
@@ -16,33 +18,49 @@ export interface CronJobFormState {
   workDir: string
   env: string
   concurrencyPolicy: 'Allow' | 'Forbid' | 'Replace'
+  lifecycle: LifecycleHooks
+  jobTemplateLifecycle: LifecycleHooks
 }
 
 export function specToForm(spec: CronJobSpec): CronJobFormState {
   return {
     name: spec.name,
     schedule: spec.schedule,
-    command: spec.job_template.command,
+    command: spec.job_template.command ?? (spec.job_template.args ?? []).join(' '),
     workDir: spec.job_template.work_dir ?? '',
     env: (spec.job_template.env ?? []).join('\n'),
     concurrencyPolicy: (spec.concurrency_policy || 'Allow') as CronJobFormState['concurrencyPolicy'],
+    lifecycle: spec.lifecycle ?? {},
+    jobTemplateLifecycle: spec.job_template.lifecycle ?? {},
   }
 }
 
-export function formToSpec(form: CronJobFormState): CronJobSpec {
+export function formToSpec(form: CronJobFormState, base?: CronJobSpec): CronJobSpec {
   const env = form.env
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
+  const baseArgsCommand =
+    base?.job_template.args && base.job_template.args.length > 0
+      ? base.job_template.args.join(' ')
+      : undefined
+  const keepArgs = Boolean(
+    baseArgsCommand && !base?.job_template.command && form.command === baseArgsCommand,
+  )
   return {
+    ...base,
     name: form.name.trim(),
     schedule: form.schedule.trim(),
     job_template: {
-      command: form.command,
+      ...base?.job_template,
+      command: keepArgs ? undefined : form.command,
+      args: keepArgs ? base?.job_template.args : undefined,
       work_dir: form.workDir.trim() || undefined,
       env: env.length > 0 ? env : undefined,
+      lifecycle: hasLifecycleHooks(form.jobTemplateLifecycle) ? form.jobTemplateLifecycle : undefined,
     },
     concurrency_policy: form.concurrencyPolicy,
+    lifecycle: hasLifecycleHooks(form.lifecycle) ? form.lifecycle : undefined,
   }
 }
 
@@ -115,6 +133,24 @@ export function CronJobFormFields({
           <option value="Replace">Replace — cancel previous, start new</option>
         </select>
       </DataBodyTemplate.Row>
+      <DataBodyTemplate.Row
+        label="Cronjob lifecycle hooks"
+        description="Commands run around the cronjob schedule itself (not each run)"
+      >
+        <LifecycleHookEditor
+          value={form.lifecycle}
+          onChange={(lifecycle) => setForm((f) => ({ ...f, lifecycle }))}
+        />
+      </DataBodyTemplate.Row>
+      <DataBodyTemplate.Row
+        label="Job template lifecycle hooks"
+        description="Commands run before/after each triggered run starts or stops"
+      >
+        <LifecycleHookEditor
+          value={form.jobTemplateLifecycle}
+          onChange={(jobTemplateLifecycle) => setForm((f) => ({ ...f, jobTemplateLifecycle }))}
+        />
+      </DataBodyTemplate.Row>
     </DataBodyTemplate.Group>
   )
 }
@@ -124,9 +160,9 @@ export function CronJobFormFields({
 // edits also apply immediately rather than queuing for a later restart.
 // Create lives on its own page (CronJobRegisterPage) rather than a side
 // panel — same rationale as ProcessRegisterPage.
-function CronJobEditForm({ initial }: { initial: CronJobFormState }) {
+function CronJobEditForm({ spec }: { spec: CronJobSpec }) {
   const { close } = useSidePanel()
-  const [form, setForm] = useState(initial)
+  const [form, setForm] = useState(() => specToForm(spec))
   const [error, setError] = useState<string | null>(null)
   const update = useUpdateCronJob()
 
@@ -137,8 +173,13 @@ function CronJobEditForm({ initial }: { initial: CronJobFormState }) {
       setError('Name, schedule, and command are required.')
       return
     }
+    const lifecycleError = validateLifecycleHooks(form.lifecycle) ?? validateLifecycleHooks(form.jobTemplateLifecycle)
+    if (lifecycleError) {
+      setError(lifecycleError)
+      return
+    }
     try {
-      await update.mutateAsync(formToSpec(form))
+      await update.mutateAsync(formToSpec(form, spec))
       await close()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save cronjob.')
@@ -184,7 +225,7 @@ export function CronJobEditPanel({ name }: { name: string }) {
 
   return (
     <PanelTemplate eyebrow="Cron job" title={`Edit ${name}`} actions={closeBtn}>
-      <CronJobEditForm initial={specToForm(spec)} />
+      <CronJobEditForm spec={spec} />
     </PanelTemplate>
   )
 }

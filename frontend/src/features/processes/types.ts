@@ -1,3 +1,5 @@
+import type { LifecycleHooks } from '@/components/lifecycle-hooks'
+
 export interface ProcessStatus {
   name: string
   running: boolean
@@ -20,14 +22,22 @@ export interface LogsSinceResponse {
   next: number
 }
 
-// Subset of core.Spec that the register/edit form exposes. The backend
-// accepts (and edit-fetches) the full Spec shape, but v1 only surfaces the
-// fields an operator would plausibly want to set by hand.
 export interface ProcessSpec {
   name: string
-  command: string
+  command?: string
+  args?: string[]
   work_dir?: string
   env?: string[]
+  pid_file?: string
+  priority?: number
+  retry_count?: number
+  retry_interval?: string | number
+  start_duration?: string | number
   auto_restart?: boolean
+  restart_interval?: string | number
   instances?: number
+  detached?: boolean
+  detectors?: Array<Record<string, unknown>>
+  log?: Record<string, unknown>
+  lifecycle?: LifecycleHooks
 }

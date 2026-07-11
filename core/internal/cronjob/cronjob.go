@@ -8,17 +8,16 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/core/internal/job"
-	"github.com/loykin/provisr/core/internal/manager"
 	"github.com/loykin/provisr/core/internal/metrics"
 	"github.com/robfig/cron/v3"
 )
 
 // CronJob represents a scheduled recurring job
 type CronJob struct {
-	mu      sync.RWMutex
-	spec    CronJobSpec
-	status  CronJobStatus
-	manager *manager.Manager
+	mu     sync.RWMutex
+	spec   CronJobSpec
+	status CronJobStatus
+	jobs   *job.Manager
 
 	// Scheduling state
 	ctx         context.Context
@@ -42,7 +41,7 @@ type JobHistoryEntry struct {
 }
 
 // NewCronJob creates a new cronjob instance
-func NewCronJob(spec CronJobSpec, mgr *manager.Manager) *CronJob {
+func NewCronJob(spec CronJobSpec, jobs *job.Manager) *CronJob {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Apply defaults
@@ -63,7 +62,7 @@ func NewCronJob(spec CronJobSpec, mgr *manager.Manager) *CronJob {
 
 	return &CronJob{
 		spec:       spec,
-		manager:    mgr,
+		jobs:       jobs,
 		ctx:        ctx,
 		cancel:     cancel,
 		scheduler:  scheduler,
@@ -180,10 +179,8 @@ func (c *CronJob) executeJob() {
 	jobSpec := c.spec.JobTemplate
 	jobSpec.Name = jobName
 
-	j := job.NewJob(jobSpec, c.manager)
-
-	// Start the job
-	if err := j.Start(); err != nil {
+	j, err := c.jobs.CreateJob(jobSpec)
+	if err != nil {
 		slog.Error("Failed to start job", "cronjob", c.spec.Name, "job", jobName, "error", err)
 		c.addToHistory(&JobHistoryEntry{
 			Name:      jobName,

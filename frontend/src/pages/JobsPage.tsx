@@ -2,35 +2,36 @@ import { useNavigate } from '@tanstack/react-router'
 import { DataGrid } from '@loykin/gridkit'
 import { SidePanelProvider, useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
-import { PageHeader } from '@/components/page-header'
+import { WorkloadHeader } from '@/components/workload-tabs'
 import { useAuth } from '@/features/auth/context'
-import { columns } from '@/features/cronjobs/columns'
-import { CronJobDetailPanel } from '@/features/cronjobs/CronJobDetailPanel'
-import { useCronJobs } from '@/features/cronjobs/queries'
+import { columns } from '@/features/jobs/columns'
+import { JobDetailPanel } from '@/features/jobs/JobDetailPanel'
+import { useJobs } from '@/features/jobs/queries'
 
 function JobsGrid() {
   const { open } = useSidePanel()
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { data: rows, error } = useCronJobs()
+  const { data: rows, error } = useJobs()
 
   const hasData = (rows?.length ?? 0) > 0
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader
+      <WorkloadHeader
+        active="jobs"
         title="Jobs"
         actions={
           user?.roles.includes('admin') ? (
             <Button size="sm" onClick={() => void navigate({ to: '/jobs/new' })}>
-              Create cron job
+              Create Job
             </Button>
           ) : undefined
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4">
         {error && !hasData && (
-          <p className="mb-2 text-sm text-destructive">Failed to load cron jobs.</p>
+          <p className="mb-2 text-sm text-destructive">Failed to load Jobs.</p>
         )}
         {error && hasData && (
           <p className="mb-2 text-sm text-muted-foreground">
@@ -42,13 +43,7 @@ function JobsGrid() {
           columns={columns}
           getRowId={(row) => row.name}
           initialSorting={[{ id: 'name', desc: false }]}
-          onRowClick={(row) => open(<CronJobDetailPanel name={row.name} />, { size: 480 })}
-          // gridkit's shell has `overflow: hidden`, which per the flexbox spec
-          // makes its automatic min-height resolve to 0 — so as a flex child
-          // it would otherwise get silently squashed (and its excess content
-          // invisibly clipped) by this page's own scroll container. shrink-0
-          // keeps it at natural content height so our own overflow-y-auto
-          // wrapper is what scrolls, not gridkit's internal (hidden) overflow.
+          onRowClick={(row) => open(<JobDetailPanel name={row.name} />, { size: 480 })}
           classNames={{ root: 'shrink-0' }}
         />
       </div>

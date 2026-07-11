@@ -4,6 +4,7 @@ import { DataBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/api'
 import { ProcessFormFields, formToSpec, type ProcessFormState } from '@/features/processes/ProcessFormPanel'
+import { validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
 import { useRegisterProcess } from '@/features/processes/queries'
 
 const initialForm: ProcessFormState = {
@@ -13,6 +14,7 @@ const initialForm: ProcessFormState = {
   env: '',
   autoRestart: false,
   instances: '',
+  lifecycle: {},
 }
 
 export default function ProcessRegisterPage() {
@@ -26,6 +28,11 @@ export default function ProcessRegisterPage() {
     setError(null)
     if (!form.name.trim() || !form.command.trim()) {
       setError('Name and command are required.')
+      return
+    }
+    const lifecycleError = validateLifecycleHooks(form.lifecycle)
+    if (lifecycleError) {
+      setError(lifecycleError)
       return
     }
     try {

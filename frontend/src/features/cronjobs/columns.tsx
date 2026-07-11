@@ -1,5 +1,6 @@
 import type { DataGridColumnDef } from '@loykin/gridkit'
-import { Badge } from '@/components/ui/badge'
+import { lifecycleHookCount } from '@/components/lifecycle-hooks'
+import { StatusBadge } from '@/components/status-badge'
 import { TruncateCell } from '@/components/truncate-cell'
 import { CronJobActions } from './CronJobActions'
 import type { CronJobInfo } from './types'
@@ -19,14 +20,7 @@ export const columns: DataGridColumnDef<CronJobInfo>[] = [
   {
     id: 'status',
     header: 'Status',
-    cell: ({ row }) =>
-      row.original.suspend ? (
-        <Badge variant="secondary">suspended</Badge>
-      ) : (
-        <Badge className="border-green-600/30 bg-green-600/15 text-green-700 dark:text-green-400" variant="outline">
-          active
-        </Badge>
-      ),
+    cell: ({ row }) => <StatusBadge status={row.original.suspend ? 'suspended' : 'active'} />,
     // Badge has rounded corners that the grid's default cell clipping cuts
     // into — cellOverflow: 'visible' is gridkit's documented fix for
     // Badge/Avatar/Chip cells. Width is set via top-level `size` (TanStack's
@@ -37,8 +31,15 @@ export const columns: DataGridColumnDef<CronJobInfo>[] = [
   },
   {
     id: 'active',
-    header: 'Running',
+    header: 'Active runs',
     cell: ({ row }) => row.original.status.active?.length ?? 0,
+    size: 110,
+  },
+  {
+    id: 'hooks',
+    header: 'Hooks',
+    cell: ({ row }) =>
+      lifecycleHookCount(row.original.lifecycle) + lifecycleHookCount(row.original.job_template.lifecycle),
     size: 90,
   },
   {

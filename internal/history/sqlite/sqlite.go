@@ -103,10 +103,27 @@ func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
 	})
 }
 
+func containsPattern(value string) string {
+	var b strings.Builder
+	b.Grow(len(value) + 2)
+	b.WriteByte('%')
+	for _, r := range value {
+		switch r {
+		case '%', '_', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('%')
+	return b.String()
+}
+
 // List returns history rows newest-first, paginated by limit/offset. If name
-// is empty, rows for all processes are returned. limit is capped at 500
-// (defaults to 100); offset must be >= 0.
+// is empty, rows for all processes are returned. Otherwise name is treated as
+// a case-insensitive contains filter. limit is capped at 500 (defaults to
+// 100); offset must be >= 0.
 func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]Record, error) {
+	name = strings.TrimSpace(name)
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -120,20 +137,26 @@ func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]Reco
 				`SELECT timestamp, pid, name, status, error FROM process_history ORDER BY timestamp DESC LIMIT ? OFFSET ?`, limit, offset)
 		}
 		return db.SelectContext(ctx, &rows,
-			`SELECT timestamp, pid, name, status, error FROM process_history WHERE name = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`, name, limit, offset)
+			`SELECT timestamp, pid, name, status, error
+			 FROM process_history
+			 WHERE name LIKE ? ESCAPE '\'
+			 ORDER BY timestamp DESC
+			 LIMIT ? OFFSET ?`, containsPattern(name), limit, offset)
 	})
 	return rows, err
 }
 
 // Count returns the total number of history rows, optionally filtered by
-// name, so callers can compute page counts for List.
+// name contains search, so callers can compute page counts for List.
 func (s *Sink) Count(ctx context.Context, name string) (int, error) {
+	name = strings.TrimSpace(name)
 	var total int
 	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
 		if name == "" {
 			return db.GetContext(ctx, &total, `SELECT COUNT(*) FROM process_history`)
 		}
-		return db.GetContext(ctx, &total, `SELECT COUNT(*) FROM process_history WHERE name = ?`, name)
+		return db.GetContext(ctx, &total,
+			`SELECT COUNT(*) FROM process_history WHERE name LIKE ? ESCAPE '\'`, containsPattern(name))
 	})
 	return total, err
 }

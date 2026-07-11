@@ -127,15 +127,6 @@ func TestLoginFlags_Validation(t *testing.T) {
 			expectError: false, // Will fail due to no server, but validates input
 		},
 		{
-			name: "valid_client_secret_auth",
-			flags: LoginFlags{
-				Method:       "client_secret",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-			},
-			expectError: false, // Will fail due to no server, but validates input
-		},
-		{
 			name: "basic_auth_missing_username",
 			flags: LoginFlags{
 				Method:   "basic",
@@ -152,24 +143,6 @@ func TestLoginFlags_Validation(t *testing.T) {
 			},
 			expectError:   true,
 			expectedError: "username and password are required",
-		},
-		{
-			name: "client_secret_missing_id",
-			flags: LoginFlags{
-				Method:       "client_secret",
-				ClientSecret: "secret123",
-			},
-			expectError:   true,
-			expectedError: "client_id and client_secret are required",
-		},
-		{
-			name: "client_secret_missing_secret",
-			flags: LoginFlags{
-				Method:   "client_secret",
-				ClientID: "client123",
-			},
-			expectError:   true,
-			expectedError: "client_id and client_secret are required",
 		},
 		{
 			name: "unsupported_auth_method",

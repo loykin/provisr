@@ -2,8 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"time"
 )
@@ -18,81 +16,6 @@ func NewCLIHelper(authService *AuthService) *CLIHelper {
 	return &CLIHelper{
 		authService: authService,
 	}
-}
-
-// CreateInitialAdmin creates an initial admin user if no users exist
-func (cli *CLIHelper) CreateInitialAdmin(ctx context.Context, username, password string) error {
-	// Check if any users exist
-	users, _, err := cli.authService.store.ListUsers(ctx, 0, 1)
-	if err != nil {
-		return fmt.Errorf("failed to check existing users: %w", err)
-	}
-
-	if len(users) > 0 {
-		return fmt.Errorf("users already exist, cannot create initial admin")
-	}
-
-	// Create admin user
-	_, err = cli.authService.CreateUser(ctx, username, password, "", []string{"admin"}, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create admin user: %w", err)
-	}
-
-	fmt.Printf("Initial admin user '%s' created successfully\n", username)
-	return nil
-}
-
-// EnsureInitialAdmin creates an admin user with a random password if the
-// store has no users at all yet, so enabling [server.auth] on a fresh store
-// doesn't lock every operator out until someone with separate shell access
-// runs `provisr auth user create`. Returns created=false (and no error) if
-// users already exist — this is a no-op after the first successful boot.
-// The generated password is never stored or logged anywhere except the
-// single return value; the caller is responsible for displaying it once.
-func (cli *CLIHelper) EnsureInitialAdmin(ctx context.Context, username string) (password string, created bool, err error) {
-	users, _, err := cli.authService.store.ListUsers(ctx, 0, 1)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to check existing users: %w", err)
-	}
-	if len(users) > 0 {
-		return "", false, nil
-	}
-
-	passwordBytes := make([]byte, 18)
-	if _, err := rand.Read(passwordBytes); err != nil {
-		return "", false, fmt.Errorf("failed to generate initial admin password: %w", err)
-	}
-	password = base64.RawURLEncoding.EncodeToString(passwordBytes)
-
-	if _, err := cli.authService.CreateUser(ctx, username, password, "", []string{"admin"}, nil); err != nil {
-		return "", false, fmt.Errorf("failed to create initial admin user: %w", err)
-	}
-
-	return password, true, nil
-}
-
-// CreateAPIClient creates a client credential for API access
-func (cli *CLIHelper) CreateAPIClient(ctx context.Context, name string, scopes []string) (*ClientCredential, error) {
-	if name == "" {
-		name = "API Client"
-	}
-
-	if len(scopes) == 0 {
-		scopes = []string{"operator"} // Default scope
-	}
-
-	client, err := cli.authService.CreateClient(ctx, name, scopes, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create client: %w", err)
-	}
-
-	fmt.Printf("Client created successfully:\n")
-	fmt.Printf("  Client ID: %s\n", client.ClientID)
-	fmt.Printf("  Client Secret: %s\n", client.ClientSecret)
-	fmt.Printf("  Scopes: %v\n", client.Scopes)
-	fmt.Printf("\nKeep the client secret secure. It cannot be retrieved again.\n")
-
-	return client, nil
 }
 
 // ListUsers lists all users
@@ -129,35 +52,6 @@ func (cli *CLIHelper) ListUsers(ctx context.Context) error {
 	return nil
 }
 
-// ListClients lists all client credentials
-func (cli *CLIHelper) ListClients(ctx context.Context) error {
-	clients, total, err := cli.authService.store.ListClients(ctx, 0, 100)
-	if err != nil {
-		return fmt.Errorf("failed to list clients: %w", err)
-	}
-
-	fmt.Printf("Client Credentials (%d total):\n", total)
-	fmt.Printf("%-20s %-25s %-30s %-10s %s\n", "ID", "Client ID", "Name", "Active", "Scopes")
-	fmt.Printf("%s\n", "─────────────────────────────────────────────────────────────────────────────────")
-
-	for _, client := range clients {
-		active := "Yes"
-		if !client.Active {
-			active = "No"
-		}
-
-		scopes := fmt.Sprintf("%v", client.Scopes)
-		if len(client.Scopes) == 0 {
-			scopes = "-"
-		}
-
-		fmt.Printf("%-20s %-25s %-30s %-10s %s\n",
-			client.ID, client.ClientID, client.Name, active, scopes)
-	}
-
-	return nil
-}
-
 // DeleteUser deletes a user by username or ID
 func (cli *CLIHelper) DeleteUser(ctx context.Context, identifier string) error {
 	// Try to get user by username first
@@ -175,26 +69,6 @@ func (cli *CLIHelper) DeleteUser(ctx context.Context, identifier string) error {
 	}
 
 	fmt.Printf("User '%s' deleted successfully\n", user.Username)
-	return nil
-}
-
-// DeleteClient deletes a client by client_id or ID
-func (cli *CLIHelper) DeleteClient(ctx context.Context, identifier string) error {
-	// Try to get client by client_id first
-	client, err := cli.authService.store.GetClientByClientID(ctx, identifier)
-	if err != nil {
-		// Try by ID
-		client, err = cli.authService.store.GetClient(ctx, identifier)
-		if err != nil {
-			return fmt.Errorf("client not found: %s", identifier)
-		}
-	}
-
-	if err := cli.authService.store.DeleteClient(ctx, client.ID); err != nil {
-		return fmt.Errorf("failed to delete client: %w", err)
-	}
-
-	fmt.Printf("Client '%s' deleted successfully\n", client.Name)
 	return nil
 }
 
@@ -227,9 +101,6 @@ func (cli *CLIHelper) TestAuthentication(ctx context.Context, method AuthMethod,
 	case AuthMethodBasic:
 		req.Username = credentials["username"]
 		req.Password = credentials["password"]
-	case AuthMethodClientSecret:
-		req.ClientID = credentials["client_id"]
-		req.ClientSecret = credentials["client_secret"]
 	case AuthMethodJWT:
 		req.Token = credentials["token"]
 	default:

@@ -124,7 +124,7 @@ max_history = 100
 # `provisr auth user create` etc, not auto-provisioned from this file.
 [server.auth]
 # Enable authentication for the API server
-enabled = false
+enabled = true
 # Secret key for signing JWT tokens. Leave unset to generate a random secret
 # on each startup (fine for a single long-running server; tokens won't
 # survive a restart). Set explicitly if you need tokens to remain valid

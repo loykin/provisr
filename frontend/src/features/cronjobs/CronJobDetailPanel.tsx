@@ -1,12 +1,23 @@
 import { X } from 'lucide-react'
-import { DataBodyTemplate, PanelTemplate } from '@loykin/designkit'
+import { PanelTemplate } from '@loykin/designkit'
 import { useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
+import { LifecycleHookList, LifecycleHookSummary } from '@/components/lifecycle-hooks'
+import { DetailList, DetailRow, DetailSection, MonoValue } from '@/components/panel-detail'
+import { StatusBadge } from '@/components/status-badge'
 import { CronJobActions } from './CronJobActions'
 import { useCronJob, useCronJobHistory } from './queries'
 
 function formatTime(value?: string): string {
   return value ? new Date(value).toLocaleString() : '-'
+}
+
+function formatNumber(value?: number): string {
+  return typeof value === 'number' ? String(value) : '-'
+}
+
+function formatList(values?: string[]): string {
+  return values && values.length > 0 ? values.join(', ') : '-'
 }
 
 export function CronJobDetailPanel({ name }: { name: string }) {
@@ -34,6 +45,7 @@ export function CronJobDetailPanel({ name }: { name: string }) {
     <PanelTemplate
       eyebrow="Cron job"
       title={name}
+      status={<StatusBadge status={job.suspend ? 'suspended' : 'active'} />}
       actions={
         <div className="flex items-center gap-2">
           <CronJobActions job={job} />
@@ -41,31 +53,58 @@ export function CronJobDetailPanel({ name }: { name: string }) {
         </div>
       }
     >
-      <DataBodyTemplate.Group layout="stacked">
-        <DataBodyTemplate.Field label="Schedule">
-          <span className="font-mono">{job.schedule}</span>
-        </DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Status">{job.suspend ? 'Suspended' : 'Active'}</DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Concurrency policy">
-          {job.concurrency_policy || 'Allow'}
-        </DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Currently running">
-          {job.status.active?.length ?? 0}
-        </DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Last scheduled">
-          {formatTime(job.status.last_schedule_time)}
-        </DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Last successful">
-          {formatTime(job.status.last_successful_time)}
-        </DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Next run">{formatTime(job.next_schedule)}</DataBodyTemplate.Field>
-        <DataBodyTemplate.Field label="Command">
-          <span className="font-mono">{job.job_template.command}</span>
-        </DataBodyTemplate.Field>
-      </DataBodyTemplate.Group>
+      <DetailSection title="Details">
+        <DetailList>
+          <DetailRow label="Schedule">
+            <MonoValue>{job.schedule}</MonoValue>
+          </DetailRow>
+          <DetailRow label="Concurrency policy">{job.concurrency_policy || 'Allow'}</DetailRow>
+          <DetailRow label="Time zone">{job.time_zone || '-'}</DetailRow>
+          <DetailRow label="Starting deadline">{formatNumber(job.starting_deadline_seconds)}</DetailRow>
+          <DetailRow label="History limits">
+            success {formatNumber(job.successful_jobs_history_limit)} / failed{' '}
+            {formatNumber(job.failed_jobs_history_limit)}
+          </DetailRow>
+          <DetailRow label="Currently running">{job.status.active?.length ?? 0}</DetailRow>
+          <DetailRow label="Last scheduled">{formatTime(job.status.last_schedule_time)}</DetailRow>
+          <DetailRow label="Last successful">{formatTime(job.status.last_successful_time)}</DetailRow>
+          <DetailRow label="Next run">{formatTime(job.next_schedule)}</DetailRow>
+          <DetailRow label="Command">
+            <MonoValue>{job.job_template.command || formatList(job.job_template.args)}</MonoValue>
+          </DetailRow>
+          <DetailRow label="Working directory">
+            <MonoValue>{job.job_template.work_dir || '-'}</MonoValue>
+          </DetailRow>
+          <DetailRow label="Parallelism">{formatNumber(job.job_template.parallelism)}</DetailRow>
+          <DetailRow label="Completions">{formatNumber(job.job_template.completions)}</DetailRow>
+          <DetailRow label="Completion mode">{job.job_template.completion_mode || 'NonIndexed'}</DetailRow>
+          <DetailRow label="Restart policy">{job.job_template.restart_policy || 'Never'}</DetailRow>
+          <DetailRow label="Backoff limit">{formatNumber(job.job_template.backoff_limit)}</DetailRow>
+          <DetailRow label="Active deadline">
+            {formatNumber(job.job_template.active_deadline_seconds)}
+          </DetailRow>
+          <DetailRow label="TTL after finished">
+            {formatNumber(job.job_template.ttl_seconds_after_finished)}
+          </DetailRow>
+          <DetailRow label="Depends on">{formatList(job.job_template.depends_on)}</DetailRow>
+          <DetailRow label="CronJob hooks">
+            <LifecycleHookSummary lifecycle={job.lifecycle} />
+          </DetailRow>
+          <DetailRow label="Job template hooks">
+            <LifecycleHookSummary lifecycle={job.job_template.lifecycle} />
+          </DetailRow>
+        </DetailList>
+      </DetailSection>
 
-      <div className="mt-4">
-        <div className="mb-1 text-sm font-medium text-muted-foreground">Recent runs</div>
+      <DetailSection title="CronJob lifecycle hooks">
+        <LifecycleHookList lifecycle={job.lifecycle} />
+      </DetailSection>
+
+      <DetailSection title="Job template lifecycle hooks">
+        <LifecycleHookList lifecycle={job.job_template.lifecycle} />
+      </DetailSection>
+
+      <DetailSection title="Job runs">
         <div className="rounded-(--radius) border border-border">
           {!history || history.length === 0 ? (
             <p className="p-3 text-sm text-muted-foreground">No runs yet.</p>
@@ -90,7 +129,7 @@ export function CronJobDetailPanel({ name }: { name: string }) {
             </table>
           )}
         </div>
-      </div>
+      </DetailSection>
     </PanelTemplate>
   )
 }
