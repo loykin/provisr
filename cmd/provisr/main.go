@@ -573,6 +573,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		}
 	}
 	mgr.SetInstanceGroups(managerGroups)
+	var historyReader provisr.HistoryReader
 
 	// Setup history sinks from config. `enabled` is the master switch for
 	// *external* exports (OpenSearch/ClickHouse) only — `in_store` (default
@@ -601,6 +602,9 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 				fmt.Printf("Warning: failed to setup history store: %v\n", err)
 			} else {
 				sinks = append(sinks, sink)
+				if reader, ok := sink.(provisr.HistoryReader); ok {
+					historyReader = reader
+				}
 			}
 		}
 
@@ -707,12 +711,12 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled {
 		protocol = "HTTPS"
-		server, err = provisr.NewTLSServer(*cfg.Server, mgr, cronScheduler)
+		server, err = provisr.NewTLSServerWithHistoryReader(*cfg.Server, mgr, cronScheduler, historyReader)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTPS server: %w", err)
 		}
 	} else {
-		server, err = provisr.NewHTTPServer(*cfg.Server, mgr, cronScheduler)
+		server, err = provisr.NewHTTPServerWithHistoryReader(*cfg.Server, mgr, cronScheduler, historyReader)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP server: %w", err)
 		}

@@ -92,6 +92,8 @@ const (
 // HistorySink is the interface implemented by history backends.
 // External backends should import github.com/loykin/provisr/core/history.
 type HistorySink = history.Sink
+type HistoryReader = history.Reader
+type HistoryEntry = history.Entry
 
 // --- Manager facade ---
 

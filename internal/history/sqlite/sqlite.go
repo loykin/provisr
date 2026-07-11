@@ -29,14 +29,9 @@ type Sink struct {
 	adapter *sqlxadapter.Adapter
 }
 
-// Record is a single stored history row.
-type Record struct {
-	Timestamp time.Time `db:"timestamp" json:"timestamp"`
-	PID       int       `db:"pid" json:"pid"`
-	Name      string    `db:"name" json:"name"`
-	Status    string    `db:"status" json:"status"`
-	Error     *string   `db:"error" json:"error,omitempty"`
-}
+// Record is kept as an alias for source compatibility. New code should use
+// core/history.Entry through the Reader port.
+type Record = corehistory.Entry
 
 // New creates a new SQLite-backed history sink.
 // DSN format:
@@ -165,3 +160,5 @@ func (s *Sink) Close() error {
 	s.adapter.Close()
 	return nil
 }
+
+var _ corehistory.Reader = (*Sink)(nil)

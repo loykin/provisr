@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,9 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/loykin/provisr/core"
+	corehistory "github.com/loykin/provisr/core/history"
 	"github.com/loykin/provisr/internal/auth"
 	"github.com/loykin/provisr/internal/config"
-	"github.com/loykin/provisr/internal/history/sqlite"
 	tlsutil "github.com/loykin/provisr/internal/tls"
 	"github.com/loykin/provisr/internal/ui"
 )
@@ -32,18 +31,11 @@ import (
 // If name provided, returns single status.
 // basePath may be empty or start with '/'; no trailing slash.
 
-// historyReader is satisfied by history sinks that support reading events back
-// (currently only the sqlite-backed sink).
-type historyReader interface {
-	List(ctx context.Context, name string, limit, offset int) ([]sqlite.Record, error)
-	Count(ctx context.Context, name string) (int, error)
-}
-
 type Router struct {
 	mgr           *core.Manager
 	basePath      string
 	authService   *auth.AuthService
-	historyReader historyReader
+	historyReader corehistory.Reader
 	programsDir   string
 	cronScheduler *core.CronScheduler
 	jobManager    *core.JobManager
@@ -62,33 +54,21 @@ func NewRouter(mgr *core.Manager, basePath string) *Router {
 	return &Router{mgr: mgr, basePath: bp, jobManager: core.NewJobManager(mgr)}
 }
 
+// SetHistoryReader attaches a backend-neutral history reader to the Router.
+// Adapter construction and lifetime belong to the composition root.
+func (r *Router) SetHistoryReader(reader corehistory.Reader) { r.historyReader = reader }
+
 // newRouterFromConfig constructs a Router and wires up an AuthService
 // (if authCfg is present and enabled) and a history reader (if historyCfg
 // enables in-store history) so their endpoints are mounted by Handler().
-func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.AuthConfig, historyCfg *config.HistoryConfig, programsDir string, cronScheduler *core.CronScheduler) (*Router, error) {
+func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.AuthConfig, programsDir string, cronScheduler *core.CronScheduler, historyReader corehistory.Reader) (*Router, error) {
 	r := NewRouter(mgr, basePath)
 	r.programsDir = programsDir
 	r.cronScheduler = cronScheduler
 	if cronScheduler != nil {
 		r.jobManager = cronScheduler.JobManager()
 	}
-
-	// `Enabled` only gates external export sinks (see main.go's history sink
-	// setup) — the /history reader is about the local in-store sink, so it
-	// mounts whenever in_store is on, regardless of Enabled.
-	if historyCfg != nil && (historyCfg.InStore == nil || *historyCfg.InStore) {
-		dsn := historyCfg.StoreDSN
-		if dsn == "" {
-			// Two slashes, not three — see the matching comment in
-			// cmd/provisr/main.go's history sink setup for why.
-			dsn = "sqlite://provisr-history.db"
-		}
-		sink, err := sqlite.New(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open history store: %w", err)
-		}
-		r.historyReader = sink
-	}
+	r.historyReader = historyReader
 
 	if authCfg == nil || !authCfg.Enabled {
 		return r, nil
@@ -234,7 +214,13 @@ func (r *Router) Handler() http.Handler {
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
 func NewServer(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler) (*http.Server, error) {
-	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History, serverConfig.ProgramsDirectory, cronScheduler)
+	return NewServerWithHistoryReader(serverConfig, mgr, cronScheduler, nil)
+}
+
+// NewServerWithHistoryReader starts an HTTP server with a history reader
+// supplied by the composition root.
+func NewServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader) (*http.Server, error) {
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.ProgramsDirectory, cronScheduler, historyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +259,13 @@ func NewServer(serverConfig config.ServerConfig, mgr *core.Manager, cronSchedule
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
 func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler) (*http.Server, error) {
-	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.History, serverConfig.ProgramsDirectory, cronScheduler)
+	return NewTLSServerWithHistoryReader(serverConfig, mgr, cronScheduler, nil)
+}
+
+// NewTLSServerWithHistoryReader is the TLS equivalent of
+// NewServerWithHistoryReader.
+func NewTLSServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader) (*http.Server, error) {
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.ProgramsDirectory, cronScheduler, historyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -706,8 +698,8 @@ func (r *Router) handleDebugProcesses(c *gin.Context) {
 // historyResp wraps a page of history rows with the total row count so
 // callers can compute page counts without a separate request.
 type historyResp struct {
-	Rows  []sqlite.Record `json:"rows"`
-	Total int             `json:"total"`
+	Rows  []corehistory.Entry `json:"rows"`
+	Total int                 `json:"total"`
 }
 
 // handleHistory returns recorded process lifecycle events (start/stop), newest

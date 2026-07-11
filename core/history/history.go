@@ -37,3 +37,22 @@ type Event struct {
 type Sink interface {
 	Send(ctx context.Context, e Event) error
 }
+
+// Entry is the backend-neutral representation returned by history readers.
+// Storage adapters may keep additional internal fields, but transports must
+// depend on this contract rather than a concrete database record type.
+type Entry struct {
+	Timestamp time.Time `json:"timestamp"`
+	PID       int       `json:"pid"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+	Error     *string   `json:"error,omitempty"`
+}
+
+// Reader provides paginated access to stored process lifecycle history.
+// Implementations may be backed by SQLite, PostgreSQL, OpenSearch, or any
+// other adapter with equivalent query semantics.
+type Reader interface {
+	List(ctx context.Context, name string, limit, offset int) ([]Entry, error)
+	Count(ctx context.Context, name string) (int, error)
+}

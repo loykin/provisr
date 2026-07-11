@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,8 +12,42 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/loykin/provisr/core"
+	corehistory "github.com/loykin/provisr/core/history"
 	"github.com/loykin/provisr/internal/config"
 )
+
+type fakeHistoryReader struct {
+	rows  []corehistory.Entry
+	total int
+}
+
+func (f fakeHistoryReader) List(context.Context, string, int, int) ([]corehistory.Entry, error) {
+	return f.rows, nil
+}
+
+func (f fakeHistoryReader) Count(context.Context, string) (int, error) { return f.total, nil }
+
+func TestHistoryReaderIsInjected(t *testing.T) {
+	r := NewRouter(core.New(), "")
+	r.SetHistoryReader(fakeHistoryReader{
+		rows:  []corehistory.Entry{{Name: "worker", PID: 42, Status: "running"}},
+		total: 1,
+	})
+	rec := doReq(t, r.Handler(), http.MethodGet, "/history", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("history expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Rows  []corehistory.Entry `json:"rows"`
+		Total int                 `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Total != 1 || len(response.Rows) != 1 || response.Rows[0].Name != "worker" {
+		t.Fatalf("unexpected history response: %+v", response)
+	}
+}
 
 func setupRouter(t *testing.T, base string) http.Handler {
 	t.Helper()

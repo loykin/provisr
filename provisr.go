@@ -7,6 +7,7 @@
 package provisr
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -60,6 +61,8 @@ type ManagerInstanceGroup = core.ManagerInstanceGroup
 // The built-in factory supports opensearch://, postgres://, postgresql://, and sqlite://.
 // For ClickHouse, import github.com/loykin/provisr/history/clickhouse separately.
 type HistorySink = core.HistorySink
+type HistoryReader = core.HistoryReader
+type HistoryEntry = core.HistoryEntry
 
 // Process metrics types
 type ProcessMetrics = core.ProcessMetrics
@@ -120,14 +123,51 @@ func NewSinkFromDSN(dsn string) (HistorySink, error) {
 // given manager. cronScheduler may be nil if cron jobs aren't used; passing
 // one enables the /cronjobs* endpoints.
 func NewHTTPServer(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler) (*http.Server, error) {
-	return iapi.NewServer(serverConfig, m, cronScheduler)
+	reader, err := historyReaderFromConfig(serverConfig.History)
+	if err != nil {
+		return nil, err
+	}
+	return iapi.NewServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
+}
+
+// NewHTTPServerWithHistoryReader starts the HTTP server with a reader created
+// by the application's composition root.
+func NewHTTPServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader) (*http.Server, error) {
+	return iapi.NewServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
 }
 
 // NewTLSServer starts an HTTPS server with TLS configuration from server
 // config. cronScheduler may be nil if cron jobs aren't used; passing one
 // enables the /cronjobs* endpoints.
 func NewTLSServer(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler) (*http.Server, error) {
-	return iapi.NewTLSServer(serverConfig, m, cronScheduler)
+	reader, err := historyReaderFromConfig(serverConfig.History)
+	if err != nil {
+		return nil, err
+	}
+	return iapi.NewTLSServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
+}
+
+func NewTLSServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader) (*http.Server, error) {
+	return iapi.NewTLSServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
+}
+
+func historyReaderFromConfig(historyConfig *cfg.HistoryConfig) (HistoryReader, error) {
+	if historyConfig == nil || (historyConfig.InStore != nil && !*historyConfig.InStore) {
+		return nil, nil
+	}
+	dsn := historyConfig.StoreDSN
+	if dsn == "" {
+		dsn = "sqlite://provisr-history.db"
+	}
+	sink, err := NewSinkFromDSN(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("create history reader: %w", err)
+	}
+	reader, ok := sink.(HistoryReader)
+	if !ok {
+		return nil, fmt.Errorf("history store %q does not support reading", dsn)
+	}
+	return reader, nil
 }
 
 // Router is a thin facade over the internal HTTP router for embedding into
