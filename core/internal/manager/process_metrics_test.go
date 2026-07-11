@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/loykin/provisr/core/internal/metrics"
 	"github.com/loykin/provisr/core/internal/process"
+	"github.com/loykin/provisr/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

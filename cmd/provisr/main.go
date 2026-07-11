@@ -640,6 +640,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {
+		mgr.SetObservers(provisr.MetricsObserver())
 		// Configure process metrics if enabled
 		if cfg.Metrics.ProcessMetrics != nil && cfg.Metrics.ProcessMetrics.Enabled {
 			processMetricsConfig := provisr.ProcessMetricsConfig{

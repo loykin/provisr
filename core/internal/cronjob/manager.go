@@ -7,31 +7,23 @@ import (
 	"sync"
 
 	"github.com/loykin/provisr/core/internal/job"
-	"github.com/loykin/provisr/core/internal/manager"
-	"github.com/loykin/provisr/core/internal/metrics"
+	"github.com/loykin/provisr/core/observability"
 )
 
 // Manager manages cronjobs
 type Manager struct {
-	mu             sync.RWMutex
-	cronJobs       map[string]*CronJob
-	processManager *manager.Manager
-	jobManager     *job.Manager
-}
-
-// NewManager creates a new cronjob manager
-func NewManager(processManager *manager.Manager) *Manager {
-	return NewManagerWithJobManager(processManager, job.NewManager(processManager))
+	mu         sync.RWMutex
+	cronJobs   map[string]*CronJob
+	jobManager *job.Manager
 }
 
 // NewManagerWithJobManager creates a cronjob manager backed by a shared job
 // manager, so scheduled jobs and ad-hoc jobs are visible through the same
 // workload inventory.
-func NewManagerWithJobManager(processManager *manager.Manager, jobManager *job.Manager) *Manager {
+func NewManagerWithJobManager(_ job.ProcessRunner, jobManager *job.Manager) *Manager {
 	return &Manager{
-		cronJobs:       make(map[string]*CronJob),
-		processManager: processManager,
-		jobManager:     jobManager,
+		cronJobs:   make(map[string]*CronJob),
+		jobManager: jobManager,
 	}
 }
 
@@ -70,7 +62,7 @@ func (m *Manager) CreateCronJob(spec CronJobSpec) (*CronJob, error) {
 	}
 
 	// Update metrics
-	metrics.IncCronJobActive(spec.Name)
+	m.jobManager.Observe(observability.Event{Kind: observability.CronJobActivated, Name: spec.Name})
 
 	slog.Info("CronJob created and started", "name", spec.Name, "schedule", spec.Schedule)
 	return cronJob, nil
@@ -167,7 +159,7 @@ func (m *Manager) DeleteCronJob(name string) error {
 	delete(m.cronJobs, name)
 
 	// Update metrics
-	metrics.DecCronJobActive(name)
+	m.jobManager.Observe(observability.Event{Kind: observability.CronJobDeactivated, Name: name})
 
 	slog.Info("CronJob deleted", "name", name)
 	return nil

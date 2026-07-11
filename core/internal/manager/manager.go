@@ -10,8 +10,9 @@ import (
 
 	"github.com/loykin/provisr/core/history"
 	"github.com/loykin/provisr/core/internal/env"
-	"github.com/loykin/provisr/core/internal/metrics"
 	"github.com/loykin/provisr/core/internal/process"
+	"github.com/loykin/provisr/core/observability"
+	"github.com/loykin/provisr/core/stats"
 )
 
 // Manager provides a cleaner interface with reduced complexity
@@ -32,9 +33,10 @@ type Manager struct {
 	// Shared resources
 	envManager       *env.Env
 	histSinks        []history.Sink
-	metricsCollector *metrics.ProcessMetricsCollector
+	metricsCollector stats.Collector
 	metricsCtx       context.Context
 	metricsCancel    context.CancelFunc
+	emitter          *observability.Emitter
 }
 
 // NewManager creates a new manager
@@ -46,8 +48,15 @@ func NewManager() *Manager {
 		envManager:    env.New(),
 		metricsCtx:    ctx,
 		metricsCancel: cancel,
+		emitter:       observability.NewEmitter(),
 	}
 }
+
+func (m *Manager) SetObservers(observers ...observability.Observer) {
+	m.emitter.SetObservers(observers...)
+}
+
+func (m *Manager) Observe(event observability.Event) { m.emitter.Emit(event) }
 
 // NewManagerWithStore has been removed. Use NewManager() and provide specs via Start/StartN as needed.
 
@@ -77,7 +86,7 @@ func (m *Manager) SetHistorySinks(sinks ...history.Sink) {
 }
 
 // SetProcessMetricsCollector configures the process metrics collector
-func (m *Manager) SetProcessMetricsCollector(collector *metrics.ProcessMetricsCollector) error {
+func (m *Manager) SetProcessMetricsCollector(collector stats.Collector) error {
 	m.mu.Lock()
 	m.metricsCollector = collector
 	m.mu.Unlock()
@@ -448,6 +457,7 @@ func (m *Manager) ensureProcess(name string) *ManagedProcess {
 		up = NewManagedProcess(
 			spec,
 			m.mergeEnv,
+			m.emitter,
 		)
 		// Inject shared history sinks so that events work immediately
 		if len(m.histSinks) > 0 {
@@ -690,20 +700,20 @@ func (m *Manager) InstanceGroupStop(groupName string, wait time.Duration) error 
 }
 
 // GetProcessMetrics returns the latest metrics for a specific process
-func (m *Manager) GetProcessMetrics(name string) (metrics.ProcessMetrics, bool) {
+func (m *Manager) GetProcessMetrics(name string) (stats.ProcessMetrics, bool) {
 	m.mu.RLock()
 	collector := m.metricsCollector
 	m.mu.RUnlock()
 
 	if collector == nil {
-		return metrics.ProcessMetrics{}, false
+		return stats.ProcessMetrics{}, false
 	}
 
 	return collector.GetMetrics(name)
 }
 
 // GetProcessMetricsHistory returns the historical metrics for a specific process
-func (m *Manager) GetProcessMetricsHistory(name string) ([]metrics.ProcessMetrics, bool) {
+func (m *Manager) GetProcessMetricsHistory(name string) ([]stats.ProcessMetrics, bool) {
 	m.mu.RLock()
 	collector := m.metricsCollector
 	m.mu.RUnlock()
@@ -716,13 +726,13 @@ func (m *Manager) GetProcessMetricsHistory(name string) ([]metrics.ProcessMetric
 }
 
 // GetAllProcessMetrics returns the latest metrics for all processes
-func (m *Manager) GetAllProcessMetrics() map[string]metrics.ProcessMetrics {
+func (m *Manager) GetAllProcessMetrics() map[string]stats.ProcessMetrics {
 	m.mu.RLock()
 	collector := m.metricsCollector
 	m.mu.RUnlock()
 
 	if collector == nil {
-		return make(map[string]metrics.ProcessMetrics)
+		return make(map[string]stats.ProcessMetrics)
 	}
 
 	return collector.GetAllMetrics()

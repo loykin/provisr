@@ -19,6 +19,7 @@ import (
 	"github.com/loykin/provisr/internal/config"
 	tlsutil "github.com/loykin/provisr/internal/tls"
 	"github.com/loykin/provisr/internal/ui"
+	apiwire "github.com/loykin/provisr/pkg/api"
 )
 
 // Router provides embeddable HTTP handlers for managing processes.
@@ -255,13 +256,6 @@ func NewServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Mana
 	return server, nil
 }
 
-// NewTLSServer starts a standalone HTTPS server using TLS configuration.
-// The returned function can be called to shutdown the server immediately
-// by closing the listener via http.Server's Close.
-func NewTLSServer(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler) (*http.Server, error) {
-	return NewTLSServerWithHistoryReader(serverConfig, mgr, cronScheduler, nil)
-}
-
 // NewTLSServerWithHistoryReader is the TLS equivalent of
 // NewServerWithHistoryReader.
 func NewTLSServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader) (*http.Server, error) {
@@ -410,13 +404,9 @@ func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) {
 
 // --- Handlers ---
 
-type errorResp struct {
-	Error string `json:"error"`
-}
+type errorResp = apiwire.ErrorResponse
 
-type okResp struct {
-	OK bool `json:"ok"`
-}
+type okResp = apiwire.OKResponse
 
 // processSelector holds the parsed query parameters for process selection
 type processSelector struct {
@@ -697,10 +687,7 @@ func (r *Router) handleDebugProcesses(c *gin.Context) {
 
 // historyResp wraps a page of history rows with the total row count so
 // callers can compute page counts without a separate request.
-type historyResp struct {
-	Rows  []corehistory.Entry `json:"rows"`
-	Total int                 `json:"total"`
-}
+type historyResp = apiwire.HistoryResponse
 
 // handleHistory returns recorded process lifecycle events (start/stop), newest
 // first. Query params: name (optional, filters to one process), limit

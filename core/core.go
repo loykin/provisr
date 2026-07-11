@@ -11,7 +11,6 @@ package core
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/loykin/provisr/core/history"
@@ -20,10 +19,10 @@ import (
 	"github.com/loykin/provisr/core/internal/job"
 	"github.com/loykin/provisr/core/internal/logger"
 	"github.com/loykin/provisr/core/internal/manager"
-	"github.com/loykin/provisr/core/internal/metrics"
 	"github.com/loykin/provisr/core/internal/process"
 	pg "github.com/loykin/provisr/core/internal/process_group"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/loykin/provisr/core/observability"
+	"github.com/loykin/provisr/core/stats"
 )
 
 // --- Process types ---
@@ -103,11 +102,15 @@ type ManagerInstanceGroup = manager.InstanceGroup
 // Manager is a thin facade over the internal manager. It provides a stable
 // public API for embedding.
 type Manager struct{ inner *manager.Manager }
+type Observer = observability.Observer
+type ObserverFunc = observability.ObserverFunc
+type ObservationEvent = observability.Event
 
 // New constructs a new Manager.
 func New() *Manager { return &Manager{inner: manager.NewManager()} }
 
 func (m *Manager) SetHistorySinks(sinks ...HistorySink) { m.inner.SetHistorySinks(sinks...) }
+func (m *Manager) SetObservers(observers ...Observer)   { m.inner.SetObservers(observers...) }
 func (m *Manager) SetGlobalEnv(kvs []string)            { m.inner.SetGlobalEnv(kvs) }
 func (m *Manager) SetInstanceGroups(groups []ManagerInstanceGroup) {
 	m.inner.SetInstanceGroups(groups)
@@ -162,9 +165,8 @@ func (m *Manager) Shutdown() error { return m.inner.Shutdown() }
 
 // --- Process metrics ---
 
-type ProcessMetrics = metrics.ProcessMetrics
-type ProcessMetricsCollector = metrics.ProcessMetricsCollector
-type ProcessMetricsConfig = metrics.ProcessMetricsConfig
+type ProcessMetrics = stats.ProcessMetrics
+type ProcessMetricsCollector = stats.Collector
 
 func (m *Manager) GetProcessMetrics(name string) (ProcessMetrics, bool) {
 	return m.inner.GetProcessMetrics(name)
@@ -178,29 +180,9 @@ func (m *Manager) GetAllProcessMetrics() map[string]ProcessMetrics {
 func (m *Manager) IsProcessMetricsEnabled() bool {
 	return m.inner.IsProcessMetricsEnabled()
 }
-func (m *Manager) SetProcessMetricsCollector(collector *ProcessMetricsCollector) error {
+func (m *Manager) SetProcessMetricsCollector(collector ProcessMetricsCollector) error {
 	return m.inner.SetProcessMetricsCollector(collector)
 }
-
-// NewProcessMetricsCollector constructs a new collector for process resource metrics.
-func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsCollector {
-	return metrics.NewProcessMetricsCollector(config)
-}
-
-// RegisterMetrics registers the provisr Prometheus metrics with the given registerer.
-func RegisterMetrics(r prometheus.Registerer) error { return metrics.Register(r) }
-
-// RegisterMetricsDefault registers metrics with the default Prometheus registry.
-func RegisterMetricsDefault() error { return metrics.Register(prometheus.DefaultRegisterer) }
-
-// RegisterMetricsWithProcessMetricsDefault registers metrics including the
-// process metrics collector against the default Prometheus registry.
-func RegisterMetricsWithProcessMetricsDefault(cfg ProcessMetricsConfig) error {
-	return metrics.RegisterWithProcessMetrics(prometheus.DefaultRegisterer, cfg)
-}
-
-// MetricsHandler returns an http.Handler for /metrics using the default registry.
-func MetricsHandler() http.Handler { return metrics.Handler() }
 
 // --- Group facade ---
 
@@ -269,11 +251,6 @@ type CronJobStatus = cronjob.CronJobStatus
 type CronJobHistoryEntry = cronjob.JobHistoryEntry
 
 type CronScheduler struct{ inner *cronjob.Manager }
-
-// NewCronScheduler constructs a CronScheduler bound to the given Manager.
-func NewCronScheduler(m *Manager) *CronScheduler {
-	return &CronScheduler{inner: cronjob.NewManager(m.inner)}
-}
 
 func NewCronSchedulerWithJobManager(m *Manager, jm *JobManager) *CronScheduler {
 	return &CronScheduler{inner: cronjob.NewManagerWithJobManager(m.inner, jm.inner)}

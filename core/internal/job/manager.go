@@ -7,19 +7,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/loykin/provisr/core/internal/manager"
-	"github.com/loykin/provisr/core/internal/metrics"
+	"github.com/loykin/provisr/core/observability"
 )
 
 // Manager manages jobs
 type Manager struct {
 	mu             sync.RWMutex
 	jobs           map[string]*Job
-	processManager *manager.Manager
+	processManager ProcessRunner
 }
 
 // NewManager creates a new job manager
-func NewManager(processManager *manager.Manager) *Manager {
+func NewManager(processManager ProcessRunner) *Manager {
 	return &Manager{
 		jobs:           make(map[string]*Job),
 		processManager: processManager,
@@ -65,8 +64,7 @@ func (m *Manager) CreateJob(spec Spec) (*Job, error) {
 		slog.Info("Job created and started", "name", spec.Name)
 	}
 
-	metrics.IncJobTotal(spec.Name, string(JobPhaseRunning))
-	metrics.IncJobActive(spec.Name)
+	m.processManager.Observe(observability.Event{Kind: observability.JobStarted, Name: spec.Name, Phase: string(JobPhaseRunning)})
 
 	return j, nil
 }
@@ -174,11 +172,13 @@ func (m *Manager) DeleteJob(name string) error {
 	delete(m.jobs, name)
 
 	// Update metrics
-	metrics.DecJobActive(name)
+	m.processManager.Observe(observability.Event{Kind: observability.JobDeleted, Name: name})
 
 	slog.Info("Job deleted", "name", name)
 	return nil
 }
+
+func (m *Manager) Observe(event observability.Event) { m.processManager.Observe(event) }
 
 // CleanupCompletedJobs removes completed jobs based on their TTL
 func (m *Manager) CleanupCompletedJobs() {

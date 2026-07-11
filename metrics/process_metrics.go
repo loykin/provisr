@@ -11,23 +11,13 @@ import (
 	"sync"
 	"time"
 
+	corestats "github.com/loykin/provisr/core/stats"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v4/process"
 )
 
 // ProcessMetrics holds CPU and memory metrics for a single process
-type ProcessMetrics struct {
-	PID        int32     `json:"pid"`
-	Name       string    `json:"name"`
-	CPUPercent float64   `json:"cpu_percent"`
-	MemoryMB   float64   `json:"memory_mb"`
-	MemoryRSS  uint64    `json:"memory_rss"`
-	MemoryVMS  uint64    `json:"memory_vms"`
-	MemorySwap uint64    `json:"memory_swap,omitempty"`
-	Timestamp  time.Time `json:"timestamp"`
-	NumThreads int32     `json:"num_threads"`
-	NumFDs     int32     `json:"num_fds,omitempty"` // Unix only
-}
+type ProcessMetrics = corestats.ProcessMetrics
 
 // InstanceMetrics represents metrics for a single process instance
 type InstanceMetrics struct {

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/loykin/provisr/core/internal/manager"
 )
 
 // Job represents a running job instance
@@ -16,7 +14,7 @@ type Job struct {
 	mu      sync.RWMutex
 	spec    Spec
 	status  JobStatus
-	manager *manager.Manager
+	manager ProcessRunner
 
 	// Job execution state
 	ctx       context.Context
@@ -52,7 +50,7 @@ const (
 )
 
 // NewJob creates a new job instance
-func NewJob(spec Spec, mgr *manager.Manager) *Job {
+func NewJob(spec Spec, mgr ProcessRunner) *Job {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Apply defaults

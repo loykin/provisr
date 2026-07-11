@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/core/history"
-	"github.com/loykin/provisr/core/internal/metrics"
 	"github.com/loykin/provisr/core/internal/process"
+	"github.com/loykin/provisr/core/observability"
 )
 
 // ManagedProcess combines Manager-Handler-Supervisor responsibilities into a single,
@@ -34,6 +34,7 @@ type ManagedProcess struct {
 	lastRestartAt time.Time
 	history       []history.Sink
 	envMerger     func(process.Spec) []string
+	emitter       *observability.Emitter
 }
 
 // Recover seeds the process with a PID and spec loaded from a PID file and sets state accordingly.
@@ -102,13 +103,19 @@ const (
 func NewManagedProcess(
 	spec process.Spec,
 	envMerger func(process.Spec) []string,
+	emitters ...*observability.Emitter,
 ) *ManagedProcess {
+	emitter := observability.NewEmitter()
+	if len(emitters) > 0 && emitters[0] != nil {
+		emitter = emitters[0]
+	}
 	up := &ManagedProcess{
 		state:     StateStopped,
 		proc:      process.New(spec),
 		cmdChan:   make(chan command, 16), // Buffered to prevent blocking
 		doneChan:  make(chan struct{}),
 		envMerger: envMerger,
+		emitter:   emitter,
 	}
 
 	go up.runStateMachine()
@@ -366,7 +373,7 @@ func (up *ManagedProcess) doStart(newSpec process.Spec) error {
 	}
 
 	// Record metrics and persist
-	metrics.IncStart(newSpec.Name)
+	up.emitter.Emit(observability.Event{Kind: observability.ProcessStarted, Name: newSpec.Name})
 	up.persistStart()
 
 	return nil
@@ -466,7 +473,7 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 	}
 
 	// Record metrics
-	metrics.IncStop(up.proc.GetName())
+	up.emitter.Emit(observability.Event{Kind: observability.ProcessStopped, Name: up.proc.GetName()})
 
 	return nil
 }
@@ -527,11 +534,7 @@ func (up *ManagedProcess) setState(newState processState) {
 	up.mu.Unlock()
 
 	// Record state transition metrics (outside lock to avoid holding lock too long)
-	metrics.RecordStateTransition(name, oldStateStr, newStateStr)
-
-	// Update current state metrics - set old state to 0, new state to 1
-	metrics.SetCurrentState(name, oldStateStr, false)
-	metrics.SetCurrentState(name, newStateStr, true)
+	up.emitter.Emit(observability.Event{Kind: observability.ProcessStateChanged, Name: name, From: oldStateStr, To: newStateStr})
 }
 
 // checkProcessHealth monitors process health and transitions state.

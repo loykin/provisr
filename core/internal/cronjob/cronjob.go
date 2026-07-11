@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/core/internal/job"
-	"github.com/loykin/provisr/core/internal/metrics"
+	"github.com/loykin/provisr/core/observability"
 	"github.com/robfig/cron/v3"
 )
 
@@ -108,7 +108,7 @@ func (c *CronJob) startLocked() error {
 	// Update next schedule metric
 	nextSchedule := c.nextScheduleLocked()
 	if !nextSchedule.IsZero() {
-		metrics.SetCronJobNextSchedule(c.spec.Name, float64(nextSchedule.Unix()))
+		c.jobs.Observe(observability.Event{Kind: observability.CronJobNextScheduled, Name: c.spec.Name, UnixTime: float64(nextSchedule.Unix())})
 	}
 
 	slog.Info("CronJob scheduled", "name", c.spec.Name, "schedule", c.spec.Schedule)
@@ -145,7 +145,7 @@ func (c *CronJob) executeJob() {
 	c.status.LastScheduleTime = &now
 
 	// Update metrics
-	metrics.SetCronJobLastSchedule(c.spec.Name, float64(now.Unix()))
+	c.jobs.Observe(observability.Event{Kind: observability.CronJobScheduled, Name: c.spec.Name, UnixTime: float64(now.Unix())})
 
 	// Check if we should skip due to concurrency policy
 	if len(c.activeJobs) > 0 {
@@ -190,12 +190,12 @@ func (c *CronJob) executeJob() {
 		})
 
 		// Update metrics for failed start
-		metrics.IncCronJobTotal(c.spec.Name, string(job.JobPhaseFailed))
+		c.jobs.Observe(observability.Event{Kind: observability.CronJobCompleted, Name: c.spec.Name, Phase: string(job.JobPhaseFailed)})
 		return
 	}
 
 	// Update metrics for job start
-	metrics.IncCronJobTotal(c.spec.Name, string(job.JobPhaseRunning))
+	c.jobs.Observe(observability.Event{Kind: observability.CronJobScheduled, Name: c.spec.Name, Phase: string(job.JobPhaseRunning)})
 
 	// Track the active job
 	c.activeJobs[jobName] = j
@@ -209,7 +209,7 @@ func (c *CronJob) executeJob() {
 	// Update next schedule metric after job starts
 	nextSchedule := c.nextScheduleLocked()
 	if !nextSchedule.IsZero() {
-		metrics.SetCronJobNextSchedule(c.spec.Name, float64(nextSchedule.Unix()))
+		c.jobs.Observe(observability.Event{Kind: observability.CronJobNextScheduled, Name: c.spec.Name, UnixTime: float64(nextSchedule.Unix())})
 	}
 
 	slog.Info("Job started", "cronjob", c.spec.Name, "job", jobName)
@@ -258,8 +258,7 @@ func (c *CronJob) monitorJob(jobName string, j *job.Job) {
 
 	// Update metrics for job completion
 	duration := completionTime.Sub(*status.StartTime).Seconds()
-	metrics.IncCronJobTotal(c.spec.Name, string(phase))
-	metrics.ObserveCronJobDuration(c.spec.Name, string(phase), duration)
+	c.jobs.Observe(observability.Event{Kind: observability.CronJobCompleted, Name: c.spec.Name, Phase: string(phase), Duration: duration})
 
 	c.addToHistory(&JobHistoryEntry{
 		Name:           jobName,

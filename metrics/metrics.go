@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
+	"github.com/loykin/provisr/core/observability"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -101,6 +102,42 @@ func Register(r prometheus.Registerer) error {
 	}
 	regOK.Store(true)
 	return nil
+}
+
+func Observer() observability.Observer { return observability.ObserverFunc(observeCoreEvent) }
+
+func observeCoreEvent(event observability.Event) {
+	switch event.Kind {
+	case observability.ProcessStarted:
+		IncStart(event.Name)
+	case observability.ProcessStopped:
+		IncStop(event.Name)
+	case observability.ProcessStateChanged:
+		RecordStateTransition(event.Name, event.From, event.To)
+		SetCurrentState(event.Name, event.From, false)
+		SetCurrentState(event.Name, event.To, true)
+	case observability.JobStarted:
+		IncJobTotal(event.Name, event.Phase)
+		IncJobActive(event.Name)
+	case observability.JobDeleted:
+		DecJobActive(event.Name)
+	case observability.CronJobActivated:
+		IncCronJobActive(event.Name)
+	case observability.CronJobDeactivated:
+		DecCronJobActive(event.Name)
+	case observability.CronJobScheduled:
+		if event.UnixTime != 0 {
+			SetCronJobLastSchedule(event.Name, event.UnixTime)
+		}
+		if event.Phase != "" {
+			IncCronJobTotal(event.Name, event.Phase)
+		}
+	case observability.CronJobNextScheduled:
+		SetCronJobNextSchedule(event.Name, event.UnixTime)
+	case observability.CronJobCompleted:
+		IncCronJobTotal(event.Name, event.Phase)
+		ObserveCronJobDuration(event.Name, event.Phase, event.Duration)
+	}
 }
 
 // RegisterWithProcessMetrics registers all metrics including process monitoring metrics

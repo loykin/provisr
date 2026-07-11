@@ -7,7 +7,6 @@
 package provisr
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/history/factory"
 	iapi "github.com/loykin/provisr/internal/server"
+	metricsadapter "github.com/loykin/provisr/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -66,8 +66,8 @@ type HistoryEntry = core.HistoryEntry
 
 // Process metrics types
 type ProcessMetrics = core.ProcessMetrics
-type ProcessMetricsCollector = core.ProcessMetricsCollector
-type ProcessMetricsConfig = core.ProcessMetricsConfig
+type ProcessMetricsCollector = metricsadapter.ProcessMetricsCollector
+type ProcessMetricsConfig = metricsadapter.ProcessMetricsConfig
 
 // Group / Job / Cron facades (re-exports)
 type Group = core.Group
@@ -95,7 +95,7 @@ func NewCronSchedulerWithJobManager(m *Manager, jm *JobManager) *CronScheduler {
 
 // NewProcessMetricsCollector constructs a new process metrics collector.
 func NewProcessMetricsCollector(cfg ProcessMetricsConfig) *ProcessMetricsCollector {
-	return core.NewProcessMetricsCollector(cfg)
+	return metricsadapter.NewProcessMetricsCollector(cfg)
 }
 
 // --- Config types (specific to the orchestrator) ---
@@ -119,55 +119,14 @@ func NewSinkFromDSN(dsn string) (HistorySink, error) {
 
 // --- HTTP server / router facades ---
 
-// NewHTTPServer starts an HTTP server exposing the internal API using the
-// given manager. cronScheduler may be nil if cron jobs aren't used; passing
-// one enables the /cronjobs* endpoints.
-func NewHTTPServer(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler) (*http.Server, error) {
-	reader, err := historyReaderFromConfig(serverConfig.History)
-	if err != nil {
-		return nil, err
-	}
-	return iapi.NewServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
-}
-
 // NewHTTPServerWithHistoryReader starts the HTTP server with a reader created
 // by the application's composition root.
 func NewHTTPServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader) (*http.Server, error) {
 	return iapi.NewServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
 }
 
-// NewTLSServer starts an HTTPS server with TLS configuration from server
-// config. cronScheduler may be nil if cron jobs aren't used; passing one
-// enables the /cronjobs* endpoints.
-func NewTLSServer(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler) (*http.Server, error) {
-	reader, err := historyReaderFromConfig(serverConfig.History)
-	if err != nil {
-		return nil, err
-	}
-	return iapi.NewTLSServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
-}
-
 func NewTLSServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader) (*http.Server, error) {
 	return iapi.NewTLSServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
-}
-
-func historyReaderFromConfig(historyConfig *cfg.HistoryConfig) (HistoryReader, error) {
-	if historyConfig == nil || (historyConfig.InStore != nil && !*historyConfig.InStore) {
-		return nil, nil
-	}
-	dsn := historyConfig.StoreDSN
-	if dsn == "" {
-		dsn = "sqlite://provisr-history.db"
-	}
-	sink, err := NewSinkFromDSN(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("create history reader: %w", err)
-	}
-	reader, ok := sink.(HistoryReader)
-	if !ok {
-		return nil, fmt.Errorf("history store %q does not support reading", dsn)
-	}
-	return reader, nil
 }
 
 // Router is a thin facade over the internal HTTP router for embedding into
@@ -215,17 +174,18 @@ func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) { e.inner.RegisterAll
 
 // --- Metrics helpers (public facade) ---
 
-func RegisterMetrics(r prometheus.Registerer) error { return core.RegisterMetrics(r) }
-func RegisterMetricsDefault() error                 { return core.RegisterMetricsDefault() }
+func RegisterMetrics(r prometheus.Registerer) error { return metricsadapter.Register(r) }
+func RegisterMetricsDefault() error                 { return metricsadapter.Register(prometheus.DefaultRegisterer) }
+func MetricsObserver() core.Observer                { return metricsadapter.Observer() }
 
 func RegisterMetricsWithProcessMetricsDefault(cfg ProcessMetricsConfig) error {
-	return core.RegisterMetricsWithProcessMetricsDefault(cfg)
+	return metricsadapter.RegisterWithProcessMetrics(prometheus.DefaultRegisterer, cfg)
 }
 
 // ServeMetrics starts an HTTP server on addr exposing /metrics using the default registry.
 // It returns any immediate listen error; otherwise it runs the server in the caller goroutine.
 func ServeMetrics(addr string) error {
-	http.Handle("/metrics", core.MetricsHandler())
+	http.Handle("/metrics", metricsadapter.Handler())
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           nil,

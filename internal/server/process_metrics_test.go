@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/loykin/provisr/core"
+	metricsadapter "github.com/loykin/provisr/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,12 +20,12 @@ func TestProcessMetricsEndpoints(t *testing.T) {
 
 	// Create manager and set up metrics collector
 	mgr := core.New()
-	config := core.ProcessMetricsConfig{
+	config := metricsadapter.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := core.NewProcessMetricsCollector(config)
+	collector := metricsadapter.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
@@ -268,12 +269,12 @@ func TestAPIEndpointsProcessMetrics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	mgr := core.New()
-	config := core.ProcessMetricsConfig{
+	config := metricsadapter.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := core.NewProcessMetricsCollector(config)
+	collector := metricsadapter.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
@@ -311,12 +312,12 @@ func TestProcessMetricsGroupEdgeCases(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	mgr := core.New()
-	config := core.ProcessMetricsConfig{
+	config := metricsadapter.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := core.NewProcessMetricsCollector(config)
+	collector := metricsadapter.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 
@@ -401,12 +402,12 @@ func TestProcessMetricsConcurrentRequests(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	mgr := core.New()
-	config := core.ProcessMetricsConfig{
+	config := metricsadapter.ProcessMetricsConfig{
 		Enabled:    true,
 		Interval:   time.Second,
 		MaxHistory: 10,
 	}
-	collector := core.NewProcessMetricsCollector(config)
+	collector := metricsadapter.NewProcessMetricsCollector(config)
 	err := mgr.SetProcessMetricsCollector(collector)
 	require.NoError(t, err)
 

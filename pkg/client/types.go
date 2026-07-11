@@ -1,6 +1,10 @@
 package client
 
-import "time"
+import (
+	"time"
+
+	apiwire "github.com/loykin/provisr/pkg/api"
+)
 
 // RegisterRequest represents a request to register a new process
 type RegisterRequest struct {
@@ -58,6 +62,5 @@ type ProcessStatus struct {
 }
 
 // ErrorResponse represents an API error response
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
+type ErrorResponse = apiwire.ErrorResponse
+type HistoryResponse = apiwire.HistoryResponse
