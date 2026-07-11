@@ -10,6 +10,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/loykin/dbstore"
+	prometheusadapter "github.com/loykin/dbstore/adapters/prometheus"
+	sqlxadapter "github.com/loykin/dbstore/adapters/sqlx"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 
@@ -23,8 +25,8 @@ const source = "process_history"
 
 // Sink writes history events to SQLite via dbstore, and can read them back.
 type Sink struct {
-	dbstore.BaseRepo[*sqlx.DB]
-	pool *dbstore.Pool[*sqlx.DB]
+	sqlxadapter.Source
+	adapter *sqlxadapter.Adapter
 }
 
 // Record is a single stored history row.
@@ -34,25 +36,6 @@ type Record struct {
 	Name      string    `db:"name" json:"name"`
 	Status    string    `db:"status" json:"status"`
 	Error     *string   `db:"error" json:"error,omitempty"`
-}
-
-type driverAdapter struct {
-	db *sqlx.DB
-}
-
-func (d *driverAdapter) Open(cfg dbstore.DriverConfig) (*sqlx.DB, error) {
-	db, err := sqlx.Connect("sqlite", cfg.DSN)
-	if err != nil {
-		return nil, err
-	}
-	d.db = db
-	return db, nil
-}
-
-func (d *driverAdapter) ApplyPoolConfig(db *sqlx.DB, cfg dbstore.PoolConfig) {
-	dbstore.DefaultApplyPoolConfig(db, cfg)
-	// sqlite only supports a single writer at a time.
-	db.SetMaxOpenConns(1)
 }
 
 // New creates a new SQLite-backed history sink.
@@ -71,38 +54,40 @@ func New(dsn string) (*Sink, error) {
 		dsn = strings.TrimPrefix(dsn, "sqlite://")
 	}
 
-	adapter := &driverAdapter{}
-	registry := dbstore.NewDriverRegistry[*sqlx.DB]()
-	registry.Register("sqlite", adapter)
-	pool := dbstore.NewPool(registry)
-	if err := pool.Register(source, dbstore.DriverConfig{
+	adapter := sqlxadapter.New()
+	adapter.RegisterDriver(sqlxadapter.DriverSQLite, sqlxadapter.SQLiteDriver())
+	adapter.SetObserver(prometheusadapter.New("provisr_history_sqlite", nil))
+	if err := adapter.Open(source, dbstore.SourceConfig{
 		Driver: "sqlite",
 		DSN:    dsn + "?_journal=WAL&_timeout=5000&_fk=1",
 		PoolConfig: dbstore.PoolConfig{
-			MaxOpenConns: 1,
-			MaxIdleConns: 1,
-			MaxIdleTime:  5 * time.Minute,
+			MaxOpenConns:   1,
+			MaxIdleConns:   1,
+			MaxIdleTime:    5 * time.Minute,
+			MaxConcurrency: 1,
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("register sqlite pool: %w", err)
 	}
 
-	if err := migrate(adapter.db); err != nil {
-		pool.RemoveAll()
+	src := sqlxadapter.NewSource(source, adapter.Executor())
+	if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
+		return migrate(ctx, db)
+	}); err != nil {
+		adapter.Close()
 		return nil, err
 	}
 
-	executor := dbstore.NewExecutor(pool)
-	return &Sink{BaseRepo: dbstore.NewBaseRepo(source, executor), pool: pool}, nil
+	return &Sink{Source: src, adapter: adapter}, nil
 }
 
-func migrate(db *sqlx.DB) error {
+func migrate(ctx context.Context, db *sqlx.DB) error {
 	goose.SetBaseFS(migrationsFS)
 	goose.SetLogger(goose.NopLogger())
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("goose set dialect: %w", err)
 	}
-	if err := goose.RunContext(context.Background(), "up", db.DB, "migrations"); err != nil {
+	if err := goose.RunContext(ctx, "up", db.DB, "migrations"); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
@@ -154,6 +139,6 @@ func (s *Sink) Count(ctx context.Context, name string) (int, error) {
 }
 
 func (s *Sink) Close() error {
-	s.pool.RemoveAll()
+	s.adapter.Close()
 	return nil
 }

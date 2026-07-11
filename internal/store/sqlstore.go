@@ -7,6 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/loykin/dbstore"
+	prometheusadapter "github.com/loykin/dbstore/adapters/prometheus"
+	sqlxadapter "github.com/loykin/dbstore/adapters/sqlx"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
@@ -17,13 +19,12 @@ const genericStoreSource = "generic"
 // sqlStore is the dbstore-backed implementation shared by both SQLite and
 // PostgreSQL generic stores — same pattern as authStore (authstore.go): the
 // only per-dialect difference is the DSN/driver, handled in the constructors
-// below. Embedding SQLRepo (not just holding a raw db handle) means Ping
-// goes through the pool's throttle/lifecycle like every other query, same
-// as the repo pattern used by the history sinks and authStore.
+// below. Embedding sqlxadapter.Source means Ping goes through dbstore's
+// throttle/lifecycle like every other query, same as the repo pattern used
+// by the history sinks and authStore.
 type sqlStore struct {
-	dbstore.SQLRepo
-	pool *dbstore.Pool[*sqlx.DB]
-	db   *sqlx.DB // direct handle, kept only for BeginTx/Transaction compat
+	sqlxadapter.Source
+	adapter *sqlxadapter.Adapter
 }
 
 // SQLiteStore implements Store backed by SQLite.
@@ -32,30 +33,11 @@ type SQLiteStore struct{ *sqlStore }
 // PostgreSQLStore implements Store backed by PostgreSQL.
 type PostgreSQLStore struct{ *sqlStore }
 
-type genericDriverAdapter struct {
-	driverName string
-	db         *sqlx.DB
-}
-
-func (d *genericDriverAdapter) Open(cfg dbstore.DriverConfig) (*sqlx.DB, error) {
-	db, err := sqlx.Connect(d.driverName, cfg.DSN)
-	if err != nil {
-		return nil, err
-	}
-	d.db = db
-	return db, nil
-}
-
-func (d *genericDriverAdapter) ApplyPoolConfig(db *sqlx.DB, cfg dbstore.PoolConfig) {
-	dbstore.DefaultApplyPoolConfig(db, cfg)
-}
-
 func newSQLStore(driverName, dsn string, poolCfg dbstore.PoolConfig) (*sqlStore, error) {
-	adapter := &genericDriverAdapter{driverName: driverName}
-	registry := dbstore.NewDriverRegistry[*sqlx.DB]()
-	registry.Register(driverName, adapter)
-	pool := dbstore.NewPool(registry)
-	if err := pool.Register(genericStoreSource, dbstore.DriverConfig{
+	adapter := sqlxadapter.New()
+	adapter.RegisterDriver(driverName, sqlxadapter.NewDriver(driverName))
+	adapter.SetObserver(prometheusadapter.New("provisr_store", nil))
+	if err := adapter.Open(genericStoreSource, dbstore.SourceConfig{
 		Driver:     driverName,
 		DSN:        dsn,
 		PoolConfig: poolCfg,
@@ -63,11 +45,9 @@ func newSQLStore(driverName, dsn string, poolCfg dbstore.PoolConfig) (*sqlStore,
 		return nil, fmt.Errorf("register store pool: %w", err)
 	}
 
-	executor := dbstore.NewExecutor(pool)
 	return &sqlStore{
-		SQLRepo: dbstore.NewSQLRepo(genericStoreSource, executor),
-		pool:    pool,
-		db:      adapter.db,
+		Source:  sqlxadapter.NewSource(genericStoreSource, adapter.Executor()),
+		adapter: adapter,
 	}, nil
 }
 
@@ -79,7 +59,7 @@ func NewSQLiteStore(config Config) (*SQLiteStore, error) {
 	}
 	dsn := path + "?_journal=WAL&_timeout=5000&_fk=1"
 
-	poolCfg := dbstore.PoolConfig{MaxOpenConns: 1, MaxIdleConns: 1, MaxIdleTime: 5 * time.Minute}
+	poolCfg := dbstore.PoolConfig{MaxOpenConns: 1, MaxIdleConns: 1, MaxIdleTime: 5 * time.Minute, MaxConcurrency: 1}
 	if config.MaxOpenConns > 0 {
 		poolCfg.MaxOpenConns = config.MaxOpenConns
 	}
@@ -130,7 +110,7 @@ func NewPostgreSQLStore(config Config) (*PostgreSQLStore, error) {
 }
 
 func (s *sqlStore) Close() error {
-	s.pool.RemoveAll()
+	s.adapter.Close()
 	return nil
 }
 
@@ -142,7 +122,12 @@ func (s *sqlStore) Ping(ctx context.Context) error {
 
 // BeginTx starts a new transaction. Kept for Store interface compatibility.
 func (s *sqlStore) BeginTx(ctx context.Context) (Transaction, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	var tx *sqlx.Tx
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		var err error
+		tx, err = db.BeginTxx(ctx, nil)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}

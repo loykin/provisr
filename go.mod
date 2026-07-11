@@ -10,7 +10,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.12.3
-	github.com/loykin/dbstore v0.0.0-dev.2
+	github.com/loykin/dbstore v0.0.1
 	github.com/opensearch-project/opensearch-go/v4 v4.6.0
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/prometheus/client_golang v1.23.2

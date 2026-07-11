@@ -10,6 +10,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/loykin/dbstore"
+	prometheusadapter "github.com/loykin/dbstore/adapters/prometheus"
+	sqlxadapter "github.com/loykin/dbstore/adapters/sqlx"
 	"github.com/pressly/goose/v3"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -25,8 +27,8 @@ const source = "process_history"
 // Sink writes history events to PostgreSQL via dbstore, and can read them
 // back.
 type Sink struct {
-	dbstore.BaseRepo[*sqlx.DB]
-	pool *dbstore.Pool[*sqlx.DB]
+	sqlxadapter.Source
+	adapter *sqlxadapter.Adapter
 }
 
 // Record is a single stored history row.
@@ -38,23 +40,6 @@ type Record struct {
 	Error     *string   `db:"error" json:"error,omitempty"`
 }
 
-type driverAdapter struct {
-	db *sqlx.DB
-}
-
-func (d *driverAdapter) Open(cfg dbstore.DriverConfig) (*sqlx.DB, error) {
-	db, err := sqlx.Connect("pgx", cfg.DSN)
-	if err != nil {
-		return nil, err
-	}
-	d.db = db
-	return db, nil
-}
-
-func (d *driverAdapter) ApplyPoolConfig(db *sqlx.DB, cfg dbstore.PoolConfig) {
-	dbstore.DefaultApplyPoolConfig(db, cfg)
-}
-
 // New creates a new PostgreSQL-backed history sink.
 // DSN format: postgres://user:pass@host:port/db?sslmode=disable
 func New(dsn string) (*Sink, error) {
@@ -63,11 +48,10 @@ func New(dsn string) (*Sink, error) {
 		return nil, errors.New("empty PostgreSQL DSN")
 	}
 
-	adapter := &driverAdapter{}
-	registry := dbstore.NewDriverRegistry[*sqlx.DB]()
-	registry.Register("pgx", adapter)
-	pool := dbstore.NewPool(registry)
-	if err := pool.Register(source, dbstore.DriverConfig{
+	adapter := sqlxadapter.New()
+	adapter.RegisterDriver("pgx", sqlxadapter.NewDriver("pgx"))
+	adapter.SetObserver(prometheusadapter.New("provisr_history_postgres", nil))
+	if err := adapter.Open(source, dbstore.SourceConfig{
 		Driver:     "pgx",
 		DSN:        dsn,
 		PoolConfig: dbstore.DefaultPoolConfig,
@@ -75,22 +59,24 @@ func New(dsn string) (*Sink, error) {
 		return nil, fmt.Errorf("register postgres pool: %w", err)
 	}
 
-	if err := migrate(adapter.db); err != nil {
-		pool.RemoveAll()
+	src := sqlxadapter.NewSource(source, adapter.Executor())
+	if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
+		return migrate(ctx, db)
+	}); err != nil {
+		adapter.Close()
 		return nil, err
 	}
 
-	executor := dbstore.NewExecutor(pool)
-	return &Sink{BaseRepo: dbstore.NewBaseRepo(source, executor), pool: pool}, nil
+	return &Sink{Source: src, adapter: adapter}, nil
 }
 
-func migrate(db *sqlx.DB) error {
+func migrate(ctx context.Context, db *sqlx.DB) error {
 	goose.SetBaseFS(migrationsFS)
 	goose.SetLogger(goose.NopLogger())
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("goose set dialect: %w", err)
 	}
-	if err := goose.RunContext(context.Background(), "up", db.DB, "migrations"); err != nil {
+	if err := goose.RunContext(ctx, "up", db.DB, "migrations"); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
@@ -125,7 +111,7 @@ func (s *Sink) List(ctx context.Context, name string, limit int) ([]Record, erro
 }
 
 func (s *Sink) Close() error {
-	s.pool.RemoveAll()
+	s.adapter.Close()
 	return nil
 }
 

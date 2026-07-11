@@ -8,6 +8,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/loykin/dbstore"
+	prometheusadapter "github.com/loykin/dbstore/adapters/prometheus"
+	sqlxadapter "github.com/loykin/dbstore/adapters/sqlx"
 	"github.com/pressly/goose/v3"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -28,9 +30,8 @@ const authSource = "auth"
 // every CRUD method (auth.go, auth_client.go) is written once against
 // *sqlx.DB and uses db.Rebind to adapt "?" placeholders to each driver.
 type authStore struct {
-	dbstore.SQLRepo
-	pool *dbstore.Pool[*sqlx.DB]
-	db   *sqlx.DB // direct handle, kept only for BeginTx/Transaction compat
+	sqlxadapter.Source
+	adapter *sqlxadapter.Adapter
 }
 
 // SQLiteAuthStore implements AuthStore backed by SQLite.
@@ -39,30 +40,11 @@ type SQLiteAuthStore struct{ *authStore }
 // PostgreSQLAuthStore implements AuthStore backed by PostgreSQL.
 type PostgreSQLAuthStore struct{ *authStore }
 
-type authDriverAdapter struct {
-	driverName string
-	db         *sqlx.DB
-}
-
-func (d *authDriverAdapter) Open(cfg dbstore.DriverConfig) (*sqlx.DB, error) {
-	db, err := sqlx.Connect(d.driverName, cfg.DSN)
-	if err != nil {
-		return nil, err
-	}
-	d.db = db
-	return db, nil
-}
-
-func (d *authDriverAdapter) ApplyPoolConfig(db *sqlx.DB, cfg dbstore.PoolConfig) {
-	dbstore.DefaultApplyPoolConfig(db, cfg)
-}
-
 func newAuthStore(driverName, dsn string, poolCfg dbstore.PoolConfig, migrationsFS embed.FS, dialect goose.Dialect) (*authStore, error) {
-	adapter := &authDriverAdapter{driverName: driverName}
-	registry := dbstore.NewDriverRegistry[*sqlx.DB]()
-	registry.Register(driverName, adapter)
-	pool := dbstore.NewPool(registry)
-	if err := pool.Register(authSource, dbstore.DriverConfig{
+	adapter := sqlxadapter.New()
+	adapter.RegisterDriver(driverName, sqlxadapter.NewDriver(driverName))
+	adapter.SetObserver(prometheusadapter.New("provisr_auth_store", nil))
+	if err := adapter.Open(authSource, dbstore.SourceConfig{
 		Driver:     driverName,
 		DSN:        dsn,
 		PoolConfig: poolCfg,
@@ -73,23 +55,24 @@ func newAuthStore(driverName, dsn string, poolCfg dbstore.PoolConfig, migrations
 	goose.SetBaseFS(migrationsFS)
 	goose.SetLogger(goose.NopLogger())
 	if err := goose.SetDialect(string(dialect)); err != nil {
-		pool.RemoveAll()
+		adapter.Close()
 		return nil, fmt.Errorf("goose set dialect: %w", err)
 	}
 	dir := "migrations/sqlite"
 	if dialect == goose.DialectPostgres {
 		dir = "migrations/postgres"
 	}
-	if err := goose.RunContext(context.Background(), "up", adapter.db.DB, dir); err != nil {
-		pool.RemoveAll()
+	src := sqlxadapter.NewSource(authSource, adapter.Executor())
+	if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
+		return goose.RunContext(ctx, "up", db.DB, dir)
+	}); err != nil {
+		adapter.Close()
 		return nil, fmt.Errorf("goose up: %w", err)
 	}
 
-	executor := dbstore.NewExecutor(pool)
 	return &authStore{
-		SQLRepo: dbstore.NewSQLRepo(authSource, executor),
-		pool:    pool,
-		db:      adapter.db,
+		Source:  src,
+		adapter: adapter,
 	}, nil
 }
 
@@ -101,7 +84,7 @@ func NewSQLiteAuthStore(config Config) (*SQLiteAuthStore, error) {
 	}
 	dsn := path + "?_journal=WAL&_timeout=5000&_fk=1"
 
-	poolCfg := dbstore.PoolConfig{MaxOpenConns: 1, MaxIdleConns: 1, MaxIdleTime: 5 * time.Minute}
+	poolCfg := dbstore.PoolConfig{MaxOpenConns: 1, MaxIdleConns: 1, MaxIdleTime: 5 * time.Minute, MaxConcurrency: 1}
 	if config.MaxOpenConns > 0 {
 		poolCfg.MaxOpenConns = config.MaxOpenConns
 	}
@@ -152,7 +135,7 @@ func NewPostgreSQLAuthStore(config Config) (*PostgreSQLAuthStore, error) {
 }
 
 func (s *authStore) Close() error {
-	s.pool.RemoveAll()
+	s.adapter.Close()
 	return nil
 }
 
@@ -165,7 +148,12 @@ func (s *authStore) Ping(ctx context.Context) error {
 // BeginTx starts a new transaction. Kept for Store interface compatibility;
 // none of provisr's own code calls it today.
 func (s *authStore) BeginTx(ctx context.Context) (Transaction, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	var tx *sqlx.Tx
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		var err error
+		tx, err = db.BeginTxx(ctx, nil)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}

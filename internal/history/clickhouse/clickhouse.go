@@ -13,6 +13,8 @@ import (
 	_ "github.com/ClickHouse/clickhouse-go/v2" // registers the "clickhouse" database/sql driver
 	"github.com/jmoiron/sqlx"
 	"github.com/loykin/dbstore"
+	prometheusadapter "github.com/loykin/dbstore/adapters/prometheus"
+	sqlxadapter "github.com/loykin/dbstore/adapters/sqlx"
 
 	corehistory "github.com/loykin/provisr/core/history"
 )
@@ -22,9 +24,9 @@ const source = "process_history"
 // Sink sends events to ClickHouse over database/sql (via dbstore), using
 // the official ClickHouse Go client's stdlib driver.
 type Sink struct {
-	dbstore.BaseRepo[*sqlx.DB]
-	pool  *dbstore.Pool[*sqlx.DB]
-	table string
+	sqlxadapter.Source
+	adapter *sqlxadapter.Adapter
+	table   string
 }
 
 // Record is a single stored history row.
@@ -35,26 +37,16 @@ type Record struct {
 	PID        int       `db:"record_pid" json:"record_pid"`
 }
 
-type driverAdapter struct{}
-
-func (driverAdapter) Open(cfg dbstore.DriverConfig) (*sqlx.DB, error) {
-	return sqlx.Connect("clickhouse", cfg.DSN)
-}
-
-func (driverAdapter) ApplyPoolConfig(db *sqlx.DB, cfg dbstore.PoolConfig) {
-	dbstore.DefaultApplyPoolConfig(db, cfg)
-}
-
 // New opens a ClickHouse connection using dsn (e.g.
 // "clickhouse://user:pass@host:9000?database=default") and returns a Sink
 // that writes events to table. table must already exist — this package
 // does not manage schema/migrations.
 func New(dsn, table string) (*Sink, error) {
-	registry := dbstore.NewDriverRegistry[*sqlx.DB]()
-	registry.Register("clickhouse", driverAdapter{})
-	pool := dbstore.NewPool(registry)
+	adapter := sqlxadapter.New()
+	adapter.RegisterDriver(sqlxadapter.DriverClickHouse, sqlxadapter.ClickHouseDriver())
+	adapter.SetObserver(prometheusadapter.New("provisr_history_clickhouse", nil))
 
-	if err := pool.Register(source, dbstore.DriverConfig{
+	if err := adapter.Open(source, dbstore.SourceConfig{
 		Driver:     "clickhouse",
 		DSN:        dsn,
 		PoolConfig: dbstore.DefaultPoolConfig,
@@ -62,13 +54,12 @@ func New(dsn, table string) (*Sink, error) {
 		return nil, fmt.Errorf("clickhouse: register pool: %w", err)
 	}
 
-	executor := dbstore.NewExecutor(pool)
-	sink := &Sink{BaseRepo: dbstore.NewBaseRepo(source, executor), pool: pool, table: table}
+	sink := &Sink{Source: sqlxadapter.NewSource(source, adapter.Executor()), adapter: adapter, table: table}
 
 	if err := sink.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
 		return db.PingContext(ctx)
 	}); err != nil {
-		pool.RemoveAll()
+		adapter.Close()
 		return nil, fmt.Errorf("clickhouse: ping: %w", err)
 	}
 
@@ -77,7 +68,7 @@ func New(dsn, table string) (*Sink, error) {
 
 // Close releases the underlying connection pool.
 func (s *Sink) Close() error {
-	s.pool.RemoveAll()
+	s.adapter.Close()
 	return nil
 }
 

@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/opensearch-project/opensearch-go/v4"
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 
 	"github.com/loykin/dbstore"
+	opensearchadapter "github.com/loykin/dbstore/adapters/opensearch"
+	prometheusadapter "github.com/loykin/dbstore/adapters/prometheus"
 
 	corehistory "github.com/loykin/provisr/core/history"
 )
@@ -23,38 +24,25 @@ const source = "primary"
 // in opensearchapi — see dbstore's own opensearch_repo_test.go for the same
 // pattern.
 type Sink struct {
-	dbstore.BaseRepo[*opensearchapi.Client]
-	pool  *dbstore.Pool[*opensearchapi.Client]
-	index string
-}
-
-// driverAdapter implements dbstore.DriverBuilder[*opensearchapi.Client].
-// It intentionally has no ApplyPoolConfig: PoolConfigApplier is an optional
-// capability, and none of PoolConfig's fields (MaxOpenConns, ...) apply to
-// an HTTP client.
-type driverAdapter struct{}
-
-func (driverAdapter) Open(cfg dbstore.DriverConfig) (*opensearchapi.Client, error) {
-	return opensearchapi.NewClient(opensearchapi.Config{
-		Client: opensearch.Config{Addresses: []string{cfg.DSN}},
-	})
+	opensearchadapter.Source
+	adapter *opensearchadapter.Adapter
+	index   string
 }
 
 // New opens a connection to OpenSearch at baseURL and returns a Sink that
 // writes events to index.
 func New(baseURL, index string) (*Sink, error) {
-	registry := dbstore.NewDriverRegistry[*opensearchapi.Client]()
-	registry.Register("opensearch", driverAdapter{})
-	pool := dbstore.NewPool(registry)
-	if err := pool.Register(source, dbstore.DriverConfig{
+	adapter := opensearchadapter.New()
+	adapter.RegisterDriver("opensearch", opensearchadapter.Driver{})
+	adapter.SetObserver(prometheusadapter.New("provisr_history_opensearch", nil))
+	if err := adapter.Open(source, dbstore.SourceConfig{
 		Driver: "opensearch",
 		DSN:    strings.TrimRight(baseURL, "/"),
 	}); err != nil {
 		return nil, fmt.Errorf("opensearch: register pool: %w", err)
 	}
 
-	executor := dbstore.NewExecutor(pool)
-	return &Sink{BaseRepo: dbstore.NewBaseRepo(source, executor), pool: pool, index: index}, nil
+	return &Sink{Source: opensearchadapter.NewSource(source, adapter.Executor()), adapter: adapter, index: index}, nil
 }
 
 func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
@@ -122,7 +110,7 @@ func (s *Sink) List(ctx context.Context, name string, limit int) ([]corehistory.
 }
 
 func (s *Sink) Close() error {
-	s.pool.RemoveAll()
+	s.adapter.Close()
 	return nil
 }
 
