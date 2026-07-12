@@ -143,7 +143,7 @@ Error: server not reachable at http://localhost:8080/api - please start daemon f
 ## Best Practices
 
 1. **Change default passwords**: Always change default admin password
-2. **Use client credentials for automation**: Prefer client credentials for scripts/CI
+2. **Use a dedicated user for automation**: Assign only the roles required by scripts or CI
 3. **Regular logout**: Logout when done to clear sensitive tokens
 4. **Secure config**: Keep JWT secrets secure and rotate regularly
 5. **Monitor sessions**: Check ~/.provisr/session.json for unexpected sessions

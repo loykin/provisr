@@ -27,8 +27,8 @@ const authSource = "auth"
 // authStore is the dbstore-backed implementation shared by both SQLite and
 // PostgreSQL auth stores. The only per-dialect differences are the
 // DSN/driver/migration dialect, handled entirely in the constructors below;
-// every CRUD method (auth.go, auth_client.go) is written once against
-// *sqlx.DB and uses db.Rebind to adapt "?" placeholders to each driver.
+// user CRUD is written once against *sqlx.DB and uses db.Rebind to adapt
+// "?" placeholders to each driver.
 type authStore struct {
 	sqlxadapter.Source
 	adapter *sqlxadapter.Adapter

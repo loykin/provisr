@@ -12,9 +12,7 @@ var (
 	ErrLastActiveAdmin     = errors.New("at least one active admin must remain")
 )
 
-// Auth uses the store contracts as its persistence boundary. OAuth-style
-// client credentials are intentionally excluded; service accounts are users
-// with restricted roles.
+// Auth uses the store contracts as its persistence boundary.
 type (
 	User      = store.User
 	UserStore = store.UserStore

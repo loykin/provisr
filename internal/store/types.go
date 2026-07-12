@@ -30,68 +30,8 @@ type Config struct {
 	Options map[string]string `toml:"options,omitempty" yaml:"options,omitempty" json:"options,omitempty"`
 }
 
-// Store represents a generic data store interface
+// Store defines the connection lifecycle required by authentication storage.
 type Store interface {
-	// Connection management
 	Close() error
 	Ping(ctx context.Context) error
-}
-
-// Repository represents a generic repository pattern
-type Repository[T any] interface {
-	// CRUD operations
-	Create(ctx context.Context, entity *T) error
-	GetByID(ctx context.Context, id string) (*T, error)
-	Update(ctx context.Context, entity *T) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, offset, limit int) ([]*T, int, error)
-
-	// Query operations
-	FindBy(ctx context.Context, criteria map[string]interface{}) ([]*T, error)
-	Count(ctx context.Context, criteria map[string]interface{}) (int, error)
-}
-
-// KeyValueStore represents a simple key-value store
-type KeyValueStore interface {
-	Store
-	Get(ctx context.Context, key string) ([]byte, error)
-	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
-	Delete(ctx context.Context, key string) error
-	Exists(ctx context.Context, key string) (bool, error)
-	Keys(ctx context.Context, pattern string) ([]string, error)
-}
-
-// CacheStore represents a caching layer
-type CacheStore interface {
-	KeyValueStore
-	Flush(ctx context.Context) error
-	Size(ctx context.Context) (int64, error)
-}
-
-// TimeSeriesStore represents a time-series data store
-type TimeSeriesStore interface {
-	Store
-	Write(ctx context.Context, series string, timestamp time.Time, value interface{}, tags map[string]string) error
-	Query(ctx context.Context, series string, start, end time.Time, tags map[string]string) ([]TimeSeriesPoint, error)
-}
-
-// TimeSeriesPoint represents a single point in time series data
-type TimeSeriesPoint struct {
-	Timestamp time.Time              `json:"timestamp"`
-	Value     interface{}            `json:"value"`
-	Tags      map[string]string      `json:"tags"`
-	Fields    map[string]interface{} `json:"fields"`
-}
-
-// StoreOptions represents options for store operations
-type StoreOptions struct {
-	Timeout     time.Duration
-	Retries     int
-	Consistency string // "strong", "eventual", etc.
-}
-
-// Factory represents a store factory interface
-type Factory interface {
-	CreateStore(config Config) (Store, error)
-	SupportedTypes() []string
 }

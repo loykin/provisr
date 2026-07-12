@@ -281,35 +281,20 @@ curl -H "Authorization: Bearer <jwt-token>" http://localhost:8080/api/status
 - Server URL validation prevents token reuse on wrong servers
 - Support for multiple server sessions (logout and login to switch)
 
-## Storage
+## Authentication Storage
 
-Provisr uses a flexible storage layer that supports multiple backends:
+Authentication data can use either supported database backend:
 
 ### Supported Backends
 
 - **SQLite**: File-based database (default)
 - **PostgreSQL**: Production-ready relational database
 
-### Generic Store Interface
-
-```go
-// Create store using factory
-config := store.Config{
-    Type: "sqlite",
-    Path: "data.db",
-}
-store, _ := store.CreateStore(config)
-
-// Or use specific auth store
-authStore, _ := store.NewAuthStore(config)
-```
-
 ### Features
 
-- **Transaction Support**: ACID transactions across operations
+- **User Persistence**: Authentication users and roles
+- **Migration Control**: Optional schema migration on startup
 - **Connection Pooling**: Configurable connection limits
-- **Type Safety**: Generic interfaces with compile-time safety
-- **Extensible**: Easy to add new storage backends
 
 ## Configuration
 
@@ -933,7 +918,6 @@ Available metrics: process starts/stops/restarts, job completions, cronjob sched
 ### Storage & Authentication
 - `auth_basic` - Authentication system usage and API examples
 - `auth_login` - CLI login and session management examples
-- `store_basic` - Generic store interface examples
 
 See the `examples/` directory for complete implementations.
 
