@@ -41,7 +41,7 @@ func TestPIDFileContainsPIDAndSpec(t *testing.T) {
 	if !ok {
 		t.Fatalf("pidfile not written in time")
 	}
-	pid, specOut, err := ReadPIDFile(pidfile)
+	pid, specOut, _, err := ReadPIDFileWithMeta(pidfile)
 	if err != nil {
 		t.Fatalf("ReadPIDFile: %v", err)
 	}
@@ -50,24 +50,6 @@ func TestPIDFileContainsPIDAndSpec(t *testing.T) {
 	}
 	if specOut == nil || specOut.Name != spec.Name || specOut.Command != spec.Command {
 		t.Fatalf("spec not persisted correctly: %+v", specOut)
-	}
-}
-
-func TestReadPIDFileLegacyFormat(t *testing.T) {
-	dir := t.TempDir()
-	pidfile := filepath.Join(dir, "legacy.pid")
-	if err := os.WriteFile(pidfile, []byte("12345\n"), 0o600); err != nil {
-		t.Fatalf("write legacy: %v", err)
-	}
-	pid, specOut, err := ReadPIDFile(pidfile)
-	if err != nil {
-		t.Fatalf("ReadPIDFile legacy: %v", err)
-	}
-	if pid != 12345 {
-		t.Fatalf("pid mismatch: got %d want 12345", pid)
-	}
-	if specOut != nil {
-		t.Fatalf("expected nil spec for legacy pidfile, got %+v", specOut)
 	}
 }
 

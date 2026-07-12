@@ -270,7 +270,7 @@ func (r *Process) WritePIDFile() {
 		return
 	}
 
-	// Write PID in first line for backward compatibility, then JSON-encoded Spec,
+	// Write PID in the first line, followed by the JSON-encoded Spec,
 	// and optionally a third line with PIDMeta JSON containing process start time.
 	var body []byte
 	if specCopy != nil {
@@ -457,12 +457,6 @@ func (r *Process) StopWithSignal(sig syscall.Signal) error {
 		}
 	}
 	return nil
-}
-
-// Stop keeps backward compatibility with previous API. It sends SIGTERM and returns immediately.
-// The wait parameter is ignored to preserve SRP; upper layers handle waiting and state.
-func (r *Process) Stop(_ time.Duration) error {
-	return r.StopWithSignal(syscall.SIGTERM)
 }
 
 // Kill sends SIGKILL to the process group and attempts to reap promptly.

@@ -132,9 +132,28 @@ func (e *Env) Merge(perProc []string) []string {
 }
 
 func expand(s string, m Var) string {
-	res := s
-	for k, v := range m {
-		res = strings.ReplaceAll(res, "${"+k+"}", v)
+	var out strings.Builder
+	for {
+		start := strings.Index(s, "${")
+		if start < 0 {
+			out.WriteString(s)
+			return out.String()
+		}
+		out.WriteString(s[:start])
+		rest := s[start+2:]
+		end := strings.IndexByte(rest, '}')
+		if end < 0 {
+			out.WriteString(s[start:])
+			return out.String()
+		}
+		key := rest[:end]
+		if value, ok := m[key]; ok {
+			out.WriteString(value)
+		} else {
+			out.WriteString("${")
+			out.WriteString(key)
+			out.WriteByte('}')
+		}
+		s = rest[end+1:]
 	}
-	return res
 }

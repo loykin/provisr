@@ -76,12 +76,6 @@ func ReadPIDFileWithMeta(path string) (int, *Spec, *PIDMeta, error) {
 	return pid, specPtr, metaPtr, nil
 }
 
-// ReadPIDFile is a compatibility wrapper returning only pid and spec.
-func ReadPIDFile(path string) (int, *Spec, error) {
-	pid, spec, _, err := ReadPIDFileWithMeta(path)
-	return pid, spec, err
-}
-
 // VerifyPIDFile reads the PID file at path and performs best-effort identity
 // verification via start-time comparison when meta is present.
 // It does NOT check whether the process is currently alive; that is left to

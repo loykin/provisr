@@ -12,12 +12,9 @@ var (
 	ErrLastActiveAdmin     = errors.New("at least one active admin must remain")
 )
 
-// Re-export store types and errors for backward compatibility. The store
-// package's ClientCredential/ClientStore (OAuth2-style client_id/secret
-// auth) are intentionally not re-exported here — provisr only authenticates
-// users (HTTP Basic or a Bearer JWT from /auth/login), and a service account
-// is just a User with a narrower role, so that mechanism was unused surface
-// area. The underlying store-layer types/table are untouched.
+// Auth uses the store contracts as its persistence boundary. OAuth-style
+// client credentials are intentionally excluded; service accounts are users
+// with restricted roles.
 type (
 	User      = store.User
 	UserStore = store.UserStore

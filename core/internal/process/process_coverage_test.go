@@ -116,7 +116,7 @@ func TestProcess_Stop(t *testing.T) {
 		t.Skip("process not properly started, skipping stop test")
 	}
 
-	err = proc.Stop(3 * time.Second)
+	err = proc.StopWithSignal(syscall.SIGTERM)
 	if err != nil {
 		t.Errorf("Stop failed: %v", err)
 	}

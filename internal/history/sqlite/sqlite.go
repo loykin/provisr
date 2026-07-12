@@ -29,10 +29,6 @@ type Sink struct {
 	adapter *sqlxadapter.Adapter
 }
 
-// Record is kept as an alias for source compatibility. New code should use
-// core/history.Entry through the Reader port.
-type Record = corehistory.Entry
-
 // New creates a new SQLite-backed history sink.
 // DSN format:
 //   - "sqlite:///path/to/file.db"
@@ -117,7 +113,7 @@ func containsPattern(value string) string {
 // is empty, rows for all processes are returned. Otherwise name is treated as
 // a case-insensitive contains filter. limit is capped at 500 (defaults to
 // 100); offset must be >= 0.
-func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]Record, error) {
+func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]corehistory.Entry, error) {
 	name = strings.TrimSpace(name)
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -125,7 +121,7 @@ func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]Reco
 	if offset < 0 {
 		offset = 0
 	}
-	var rows []Record
+	var rows []corehistory.Entry
 	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
 		if name == "" {
 			return db.SelectContext(ctx, &rows,

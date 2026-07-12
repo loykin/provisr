@@ -420,7 +420,7 @@ func (up *ManagedProcess) doStop(wait time.Duration) error {
 
 	up.proc.SetStopRequested(true)
 
-	if err := up.proc.Stop(wait); err != nil {
+	if err := up.proc.StopWithSignal(syscall.SIGTERM); err != nil {
 		if alive, _ := up.proc.DetectAlive(); alive {
 			up.proc.SetStopRequested(false)
 			up.setState(StateRunning)

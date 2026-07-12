@@ -141,7 +141,12 @@ func QuickSelfSignedTLS(certDir string) (*tls.Config, error) {
 
 // createTLSConfig creates TLS configuration with certificate files
 func createTLSConfig(certPath, keyPath string, minVer, maxVer uint16) (*tls.Config, error) {
-	// #nosec G402 TLS backward compatibility considered
+	if minVer < tls.VersionTLS12 {
+		minVer = tls.VersionTLS12
+	}
+	if maxVer != 0 && maxVer < minVer {
+		return nil, fmt.Errorf("maximum TLS version must be at least TLS 1.2")
+	}
 	return &tls.Config{
 		GetCertificate: getCertificationFunc(certPath, keyPath),
 		MinVersion:     minVer,
