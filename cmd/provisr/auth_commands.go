@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/loykin/provisr/internal/auth"
+	"github.com/loykin/provisr/internal/auth/store"
 	"github.com/loykin/provisr/internal/config"
-	"github.com/loykin/provisr/internal/store"
 )
 
 // createAuthenticatedAPIClient creates an API client with session authentication
@@ -50,12 +50,7 @@ func (c *command) createAuthStore(configPath string) (store.AuthStore, error) {
 			return nil, fmt.Errorf("load config: %w", err)
 		}
 		if cfg.Server != nil && cfg.Server.Auth != nil {
-			s := cfg.Server.Auth.Store
-			authConfig = store.Config{
-				Type: s.Type, Migrate: s.Migrate, Path: s.Path, Host: s.Host, Port: s.Port,
-				Database: s.Database, Username: s.Username, Password: s.Password,
-				SSLMode: s.SSLMode, MaxOpenConns: s.MaxOpenConns, MaxIdleConns: s.MaxIdleConns,
-			}
+			authConfig = cfg.Server.Auth.Store
 		}
 	}
 

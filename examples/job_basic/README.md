@@ -1,10 +1,10 @@
 # Basic Job Example
 
-This example demonstrates how to create and manage batch jobs in Provisr using configuration files.
+This example demonstrates how to create and monitor a batch Job through the Go API.
 
 ## What it demonstrates
 
-- Creating jobs from TOML configuration
+- Creating Jobs with `JobManager`
 - Parallel job execution with multiple instances
 - Job completion tracking and requirements
 - Retry policies and backoff limits
@@ -26,33 +26,11 @@ go run main.go
 
 ```
 === Job Basic Example ===
-Loaded configuration with 1 process definitions
-Job started successfully!
+Job created successfully!
 Monitoring job status...
-Iteration 1: Found 2 job instances
-  - hello-job-0: Running=true, PID=12345
-  - hello-job-1: Running=true, PID=12346
-Iteration 2: Found 2 job instances
-  - hello-job-0: Running=false, PID=0
-  - hello-job-1: Running=false, PID=0
-All job instances completed!
+Iteration 1: phase=Running active=2 succeeded=0 failed=0
+Iteration 2: phase=Succeeded active=0 succeeded=2 failed=0
 Example completed
-```
-
-## Configuration (job_example.toml)
-
-The example defines a job with the following characteristics:
-
-```toml
-[processes.spec]
-name = "hello-job"
-command = "echo 'Hello from job!'; sleep 2"
-parallelism = 2                    # Run 2 instances in parallel
-completions = 2                    # Need 2 successful completions
-backoff_limit = 3                  # Allow up to 3 retries
-restart_policy = "Never"
-active_deadline_seconds = 30       # 30 second timeout
-ttl_seconds_after_finished = 60    # Cleanup after 1 minute
 ```
 
 ## Key Job Configuration Options
@@ -69,7 +47,6 @@ ttl_seconds_after_finished = 60    # Cleanup after 1 minute
 ### Restart Policy
 - **Never**: Don't restart failed instances (rely on backoff_limit)
 - **OnFailure**: Restart failed instances
-- **Always**: Always restart instances
 
 ## Job Lifecycle
 
@@ -92,16 +69,9 @@ Jobs are perfect for:
 
 ## Monitoring Jobs
 
-```bash
-# View job status
-provisr status --name=hello-job
-
-# View all job instances
-provisr status --wildcard=hello-job-*
-
-# View job logs
-provisr logs --name=hello-job
-```
+The standalone CLI has no Job-specific status or logs command. Inspect Jobs
+through `/ui/jobs`, `GET /api/jobs`, or the `JobManager` methods demonstrated
+by this example.
 
 ## Advanced Features
 
@@ -109,7 +79,6 @@ For more advanced job features, see:
 - `../job_advanced/` - Advanced job configuration
 - `../embedded_job_lifecycle/` - Job lifecycle hooks
 - `../cronjob_basic/` - Scheduled jobs
-- `../job_config/` - Configuration-driven jobs
 
 ## Error Handling
 

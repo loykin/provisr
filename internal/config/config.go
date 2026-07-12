@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/loykin/provisr/core"
+	"github.com/loykin/provisr/internal/auth"
+	metricsadapter "github.com/loykin/provisr/pkg/metrics"
 )
 
 type Config struct {
@@ -97,11 +99,7 @@ type MetricsConfig struct {
 	ProcessMetrics *ProcessMetricsConfig `mapstructure:"process_metrics"`
 }
 
-type ProcessMetricsConfig struct {
-	Enabled    bool          `mapstructure:"enabled"`
-	Interval   time.Duration `mapstructure:"interval"`
-	MaxHistory int           `mapstructure:"max_history"`
-}
+type ProcessMetricsConfig = metricsadapter.ProcessMetricsConfig
 
 type DaemonConfig struct {
 	PIDFile string `mapstructure:"pid_file"`
@@ -142,19 +140,7 @@ type AuthConfig struct {
 	BcryptCost int             `mapstructure:"bcrypt_cost"`
 }
 
-type AuthStoreConfig struct {
-	Type         string `mapstructure:"type"` // "sqlite" or "postgresql"
-	Migrate      *bool  `mapstructure:"migrate"`
-	Path         string `mapstructure:"path,omitempty"`
-	Host         string `mapstructure:"host,omitempty"`
-	Port         int    `mapstructure:"port,omitempty"`
-	Database     string `mapstructure:"database,omitempty"`
-	Username     string `mapstructure:"username,omitempty"`
-	Password     string `mapstructure:"password,omitempty"`
-	SSLMode      string `mapstructure:"ssl_mode,omitempty"`
-	MaxOpenConns int    `mapstructure:"max_open_conns,omitempty"`
-	MaxIdleConns int    `mapstructure:"max_idle_conns,omitempty"`
-}
+type AuthStoreConfig = auth.StoreConfig
 
 type ProcessConfig struct {
 	Type string         `mapstructure:"type"` // process, cronjob

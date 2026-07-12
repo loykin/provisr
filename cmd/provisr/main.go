@@ -130,7 +130,8 @@ func createRootCommand(flags *GlobalFlags) *cobra.Command {
 and monitoring processes locally or via remote daemon connection.
 
 Examples:
-  provisr start --name=myapp --cmd="python app.py"
+	provisr register --name=myapp --command="python app.py"
+	provisr start --name=myapp
   provisr status --name=myapp
   provisr serve                     # Start daemon
   provisr status --api-url=http://remote:8080/api  # Remote status`,
@@ -682,11 +683,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		mgr.SetObservers(provisr.MetricsObserver())
 		// Configure process metrics if enabled
 		if cfg.Metrics.ProcessMetrics != nil && cfg.Metrics.ProcessMetrics.Enabled {
-			processMetricsConfig := provisr.ProcessMetricsConfig{
-				Enabled:    cfg.Metrics.ProcessMetrics.Enabled,
-				Interval:   cfg.Metrics.ProcessMetrics.Interval,
-				MaxHistory: cfg.Metrics.ProcessMetrics.MaxHistory,
-			}
+			processMetricsConfig := *cfg.Metrics.ProcessMetrics
 
 			// Register metrics with process metrics support
 			if err := provisr.RegisterMetricsWithProcessMetricsDefault(processMetricsConfig); err != nil {
@@ -733,7 +730,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	// Always create the cron scheduler (even with zero initial jobs) so the
 	// HTTP /cronjobs* endpoints can register jobs on a running daemon, not
 	// just at startup from config.
-	cronScheduler := provisr.NewCronSchedulerWithJobManager(mgr, jobManager)
+	cronScheduler := provisr.NewCronScheduler(jobManager)
 	for _, j := range cfg.CronJobs {
 		jb := provisr.CronJob(j) // Direct assignment since they're the same type
 		if err := cronScheduler.Add(jb); err != nil {

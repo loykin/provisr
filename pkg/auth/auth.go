@@ -3,7 +3,7 @@ package auth
 
 import (
 	"github.com/loykin/provisr/internal/auth"
-	"github.com/loykin/provisr/internal/store"
+	"github.com/loykin/provisr/internal/auth/store"
 )
 
 type (
@@ -20,12 +20,6 @@ type (
 const (
 	AuthMethodBasic = auth.AuthMethodBasic
 	AuthMethodJWT   = auth.AuthMethodJWT
-)
-
-var (
-	ErrInvalidCredentials = auth.ErrInvalidCredentials
-	ErrUserNotFound       = auth.ErrUserNotFound
-	ErrUserAlreadyExists  = auth.ErrUserAlreadyExists
 )
 
 // NewAuthService creates a new AuthService from the given config.

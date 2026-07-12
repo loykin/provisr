@@ -174,12 +174,10 @@ func (j *Spec) ToProcessSpec() *process.Spec {
 		}
 	}
 
-	// Configure parallelism as instances
-	if j.Parallelism != nil {
-		spec.Instances = int(*j.Parallelism)
-	} else {
-		spec.Instances = 1
-	}
+	// Job owns parallelism and creates one JobProcess per execution slot.
+	// Expanding instances again in Manager.RegisterN would multiply workers
+	// and leave this Job monitoring a base name that was never registered.
+	spec.Instances = 1
 
 	return spec
 }

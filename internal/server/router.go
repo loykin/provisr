@@ -76,19 +76,7 @@ func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.Aut
 	}
 
 	authService, err := auth.NewAuthService(auth.AuthConfig{
-		Store: auth.StoreConfig{
-			Type:         authCfg.Store.Type,
-			Migrate:      authCfg.Store.Migrate,
-			Path:         authCfg.Store.Path,
-			Host:         authCfg.Store.Host,
-			Port:         authCfg.Store.Port,
-			Database:     authCfg.Store.Database,
-			Username:     authCfg.Store.Username,
-			Password:     authCfg.Store.Password,
-			SSLMode:      authCfg.Store.SSLMode,
-			MaxOpenConns: authCfg.Store.MaxOpenConns,
-			MaxIdleConns: authCfg.Store.MaxIdleConns,
-		},
+		Store:      authCfg.Store,
 		JWTSecret:  authCfg.JWTSecret,
 		TokenTTL:   authCfg.TokenTTL,
 		BcryptCost: authCfg.BcryptCost,

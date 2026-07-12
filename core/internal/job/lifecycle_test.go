@@ -153,8 +153,8 @@ func TestJobSpec_LifecycleWithJobSettings(t *testing.T) {
 	processSpec := spec.ToProcessSpec()
 
 	// Test that job settings are preserved
-	if processSpec.Instances != int(parallelism) {
-		t.Errorf("ToProcessSpec() Instances = %d, want %d", processSpec.Instances, parallelism)
+	if processSpec.Instances != 1 {
+		t.Errorf("ToProcessSpec() Instances = %d, want 1; Job manages parallelism", processSpec.Instances)
 	}
 	if processSpec.RetryCount != uint32(backoffLimit) {
 		t.Errorf("ToProcessSpec() RetryCount = %d, want %d", processSpec.RetryCount, backoffLimit)

@@ -1,3 +1,4 @@
+// oxlint-disable react/only-export-components -- create pages and edit panels intentionally share one form state conversion boundary
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { DataBodyTemplate, PanelTemplate } from '@loykin/designkit'
@@ -73,6 +74,7 @@ export function ProcessFormFields({
     <DataBodyTemplate.Group layout="stacked">
       <DataBodyTemplate.Row label="Name" required>
         <Input
+		  aria-label="Name"
           value={form.name}
           disabled={mode === 'edit'}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -81,6 +83,7 @@ export function ProcessFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Command" required>
         <Input
+		  aria-label="Command"
           placeholder="e.g. /usr/bin/myapp --flag"
           value={form.command}
           onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
@@ -89,6 +92,7 @@ export function ProcessFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Working directory">
         <Input
+		  aria-label="Working directory"
           placeholder="(optional) absolute path"
           value={form.workDir}
           onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
@@ -96,6 +100,7 @@ export function ProcessFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Environment" description="One KEY=VALUE per line">
         <Textarea
+		  aria-label="Environment"
           rows={4}
           className="font-mono text-xs"
           value={form.env}
@@ -105,6 +110,7 @@ export function ProcessFormFields({
       {mode === 'create' && (
         <DataBodyTemplate.Row label="Instances">
           <Input
+			aria-label="Instances"
             type="number"
             min={1}
             placeholder="1"

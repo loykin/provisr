@@ -1,3 +1,4 @@
+// oxlint-disable react/only-export-components -- lifecycle display components share their small wire-type and counting helpers
 import { Badge } from '@/components/ui/badge'
 
 export interface LifecycleHook {

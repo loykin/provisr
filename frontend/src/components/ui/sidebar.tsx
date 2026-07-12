@@ -1,3 +1,4 @@
+// oxlint-disable react/only-export-components -- this generated primitive intentionally exports its component family and context hook together
 "use client"
 
 import * as React from "react"

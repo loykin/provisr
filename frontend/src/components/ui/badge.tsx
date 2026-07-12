@@ -1,1 +1,1 @@
-export { Badge, badgeVariants } from '@loykin/designkit'
+export { Badge } from '@loykin/designkit'

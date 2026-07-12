@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/loykin/provisr/core"
-	metricsadapter "github.com/loykin/provisr/metrics"
+	metricsadapter "github.com/loykin/provisr/pkg/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

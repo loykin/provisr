@@ -1,3 +1,4 @@
+// oxlint-disable react/only-export-components -- create pages and edit panels intentionally share one form state conversion boundary
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { DataBodyTemplate, PanelTemplate } from '@loykin/designkit'
@@ -80,6 +81,7 @@ export function CronJobFormFields({
     <DataBodyTemplate.Group layout="stacked">
       <DataBodyTemplate.Row label="Name" required>
         <Input
+		  aria-label="Name"
           value={form.name}
           disabled={mode === 'edit'}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -88,6 +90,7 @@ export function CronJobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Schedule" required>
         <Input
+		  aria-label="Schedule"
           placeholder="e.g. 0 */6 * * * or @every 1h"
           value={form.schedule}
           onChange={(e) => setForm((f) => ({ ...f, schedule: e.target.value }))}
@@ -96,6 +99,7 @@ export function CronJobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Command" required>
         <Input
+		  aria-label="Command"
           placeholder="e.g. /usr/bin/backup.sh"
           value={form.command}
           onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
@@ -104,6 +108,7 @@ export function CronJobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Working directory">
         <Input
+		  aria-label="Working directory"
           placeholder="(optional) absolute path"
           value={form.workDir}
           onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
@@ -111,6 +116,7 @@ export function CronJobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Environment" description="One KEY=VALUE per line">
         <Textarea
+		  aria-label="Environment"
           rows={4}
           className="font-mono text-xs"
           value={form.env}
@@ -119,6 +125,7 @@ export function CronJobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Concurrency policy">
         <select
+		  aria-label="Concurrency policy"
           className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
           value={form.concurrencyPolicy}
           onChange={(e) =>
@@ -135,7 +142,7 @@ export function CronJobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row
         label="Cronjob lifecycle hooks"
-        description="Commands run around the cronjob schedule itself (not each run)"
+        description="Commands merged into every Job created by this schedule"
       >
         <LifecycleHookEditor
           value={form.lifecycle}

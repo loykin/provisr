@@ -1,3 +1,4 @@
+// oxlint-disable react/only-export-components -- create pages and edit panels intentionally share one form state conversion boundary
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { DataBodyTemplate, PanelTemplate } from '@loykin/designkit'
@@ -80,6 +81,7 @@ export function JobFormFields({
     <DataBodyTemplate.Group layout="stacked">
       <DataBodyTemplate.Row label="Name" required>
         <Input
+		  aria-label="Name"
           value={form.name}
           disabled={mode === 'edit'}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -88,6 +90,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Command" required>
         <Input
+		  aria-label="Command"
           placeholder="e.g. /usr/bin/backup.sh"
           value={form.command}
           onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
@@ -96,6 +99,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Working directory">
         <Input
+		  aria-label="Working directory"
           placeholder="(optional) absolute path"
           value={form.workDir}
           onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
@@ -103,6 +107,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Environment" description="One KEY=VALUE per line">
         <Textarea
+		  aria-label="Environment"
           rows={4}
           className="font-mono text-xs"
           value={form.env}
@@ -111,6 +116,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Parallelism">
         <Input
+		  aria-label="Parallelism"
           type="number"
           min={1}
           placeholder="1"
@@ -120,6 +126,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Completions">
         <Input
+		  aria-label="Completions"
           type="number"
           min={1}
           placeholder="1"
@@ -129,6 +136,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Restart policy">
         <select
+		  aria-label="Restart policy"
           className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
           value={form.restartPolicy}
           onChange={(e) =>
@@ -141,6 +149,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Backoff limit">
         <Input
+		  aria-label="Backoff limit"
           type="number"
           min={0}
           placeholder="6"
@@ -150,6 +159,7 @@ export function JobFormFields({
       </DataBodyTemplate.Row>
       <DataBodyTemplate.Row label="Active deadline seconds">
         <Input
+		  aria-label="Active deadline seconds"
           type="number"
           min={1}
           value={form.activeDeadlineSeconds}

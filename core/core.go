@@ -244,14 +244,17 @@ type CronJob = cronjob.CronJobSpec
 type CronJobStatus = cronjob.CronJobStatus
 type CronJobHistoryEntry = cronjob.JobHistoryEntry
 
-type CronScheduler struct{ inner *cronjob.Manager }
+type CronScheduler struct {
+	inner *cronjob.Manager
+	jobs  *JobManager
+}
 
-func NewCronSchedulerWithJobManager(m *Manager, jm *JobManager) *CronScheduler {
-	return &CronScheduler{inner: cronjob.NewManagerWithJobManager(m.inner, jm.inner)}
+func NewCronScheduler(jm *JobManager) *CronScheduler {
+	return &CronScheduler{inner: cronjob.NewManager(jm.inner), jobs: jm}
 }
 
 func (s *CronScheduler) JobManager() *JobManager {
-	return &JobManager{inner: s.inner.JobManager()}
+	return s.jobs
 }
 
 func (s *CronScheduler) Add(j CronJob) error { _, err := s.inner.CreateCronJob(j); return err }

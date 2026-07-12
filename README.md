@@ -46,19 +46,19 @@ go get github.com/loykin/provisr
 - **HTTP API**: RESTful API with JSON I/O, embeddable in Gin/Echo applications
 - **Metrics**: Prometheus metrics for monitoring processes, jobs, and cronjobs
 - **Output streaming**: Inject `io.Writer` into `Spec.Log.File.StdoutWriter` / `StderrWriter` for real-time output capture
-- **Configuration**: TOML/YAML/JSON config with hot reload and reconciliation
+- **Configuration**: TOML/YAML/JSON config with startup reconciliation and PID-file recovery
 - **Security**: TLS support, input validation, and secure PID management
 - **Lightweight core**: `github.com/loykin/provisr/core` for embedding without gin, jwt, or database deps
 
 ## Using as a Library
 
-provisr is split into modules so you can pull in only what you need:
+provisr exposes separate packages so applications can keep the compiled
+dependency graph appropriate to their use case:
 
 | Module | Use case | Extra deps |
 |--------|----------|------------|
-| `github.com/loykin/provisr/core` | Embed process/job control only | prometheus, cron, gopsutil |
-| `github.com/loykin/provisr` | Full orchestrator (HTTP API, auth, config, history) | gin, jwt, sqlite, postgres |
-| `github.com/loykin/provisr/history/clickhouse` | ClickHouse history backend | clickhouse-go |
+| `github.com/loykin/provisr/core` | Embed process/job control only | cron, gopsutil |
+| `github.com/loykin/provisr` | Full orchestrator (HTTP API, auth, config, history) | gin, jwt, sqlite, postgres, ClickHouse, OpenSearch |
 
 ### Lightweight embedding (core only)
 
@@ -91,22 +91,24 @@ go get github.com/loykin/provisr
 
 ### Basic Process Management
 
+With a configured daemon running and an authenticated CLI session:
+
 ```shell
-# Register and manage a simple process
-provisr register --name demo --command "sleep 10"
-provisr start --name demo
+# Register through the daemon; registration starts the process immediately
+provisr register --name demo --command "sleep 10" --api-url http://localhost:8080/api
 provisr status --name demo
 provisr stop --name demo
+provisr start --name demo
 ```
 
 ### Config-driven Workflow
 
 ```shell
 # Start daemon with configuration file
-provisr serve --config config/config.toml
+provisr serve config/config.toml
 
 # Login with admin credentials
-provisr login admin  # Password will be prompted securely
+provisr login --username admin  # Password will be prompted securely
 
 # Manage process groups
 provisr group-start --group backend
@@ -160,17 +162,22 @@ make ci
 
 ### Endpoints
 
-- `POST /api/start` - Start processes (JSON body with process spec)
+- `POST /api/register` - Persist, register, and start a process from a JSON spec
+- `POST /api/start` - Start an existing process (query: name)
 - `GET /api/status` - Get process status (query: name, base, or wildcard)
 - `POST /api/stop` - Stop processes (query: name, base, or wildcard)
 
 ### Examples
 
 ```shell
-# Start multiple instances
-curl -X POST localhost:8080/api/start \
+# Register and start multiple instances
+curl -X POST localhost:8080/api/register \
   -H 'Content-Type: application/json' \
   -d '{"name":"demo","command":"echo hello","instances":2}'
+
+# Stop and start an existing process
+curl -X POST 'localhost:8080/api/stop?name=demo'
+curl -X POST 'localhost:8080/api/start?name=demo'
 
 # Check status
 curl 'localhost:8080/api/status?base=demo'
@@ -193,10 +200,10 @@ log_file = "/var/log/provisr.log"
 
 ```shell
 # Start server
-provisr serve --config config/config.toml
+provisr serve config/config.toml
 
 # Start as daemon
-provisr serve --config config/config.toml --daemonize
+provisr serve config/config.toml --daemonize
 ```
 
 ## Authentication
@@ -206,7 +213,7 @@ the HTTP API and CLI sessions:
 
 ### Authentication Methods
 
-- **Basic Auth**: Username/password authentication
+- **Username/password login**: Credentials are exchanged for a JWT token
 - **JWT Tokens**: JSON Web Tokens for stateless authentication
 
 ### Configuration
@@ -298,7 +305,9 @@ Authentication data can use either supported database backend:
 
 ## Configuration
 
-Provisr supports three entity types: `process`, `job`, and `cronjob`. Each can be defined in:
+Provisr configuration files support `process` and `cronjob` entries. CronJobs
+contain a Job template; standalone Jobs are created through the Go or HTTP API.
+Configuration entries can be defined in:
 - Main config file under `[[processes]]` sections
 - Individual files in the programs directory (TOML/YAML/JSON)
 
@@ -311,23 +320,6 @@ type = "process"
 name = "web"
 command = "sh -c 'while true; do echo web; sleep 2; done'"
 priority = 10
-```
-
-### Job Example
-
-```toml
-# One-time job execution
-type = "job"
-[spec]
-name = "data-processor"
-command = "python process_data.py"
-parallelism = 3                    # Run 3 instances in parallel
-completions = 10                   # Need 10 successful completions
-backoff_limit = 5                  # Allow up to 5 retries
-completion_mode = "NonIndexed"     # Standard completion mode
-restart_policy = "OnFailure"       # Restart failed instances
-active_deadline_seconds = 3600     # Job timeout: 1 hour
-ttl_seconds_after_finished = 300   # Auto-cleanup after 5 minutes
 ```
 
 ### CronJob Example
@@ -376,7 +368,7 @@ Jobs are used for one-time task execution with support for:
 - **Timeouts**: Active deadline for job execution
 - **TTL**: Automatic cleanup after completion
 
-#### Job Configuration Fields
+#### Job Spec Fields
 
 | Field                        | Type     | Description                                       |
 |------------------------------|----------|---------------------------------------------------|
@@ -463,7 +455,7 @@ import (
 func main() {
 	mgr := provisr.New()
 	jobMgr := provisr.NewJobManager(mgr)
-	scheduler := provisr.NewCronScheduler(mgr)
+	scheduler := provisr.NewCronScheduler(jobMgr)
 
 	jobSpec := provisr.JobSpec{
 		Name:        "my-job",
@@ -598,39 +590,9 @@ run_mode = "async"
 
 ### Job Lifecycle Hooks
 
-```toml
-type = "job"
-[spec]
-name = "data-processor"
-command = "python process_data.py"
-parallelism = 2
-completions = 5
-
-[spec.lifecycle]
-[[spec.lifecycle.pre_start]]
-name = "download-data"
-command = "aws s3 sync s3://data-bucket /tmp/input/"
-failure_mode = "fail"
-run_mode = "blocking"
-
-[[spec.lifecycle.pre_start]]
-name = "validate-input"
-command = "python validate_data.py /tmp/input/"
-failure_mode = "fail"
-run_mode = "blocking"
-
-[[spec.lifecycle.post_stop]]
-name = "upload-results"
-command = "aws s3 sync /tmp/output/ s3://results-bucket/"
-failure_mode = "retry"
-run_mode = "blocking"
-
-[[spec.lifecycle.post_stop]]
-name = "cleanup-workspace"
-command = "rm -rf /tmp/input /tmp/output"
-failure_mode = "ignore"
-run_mode = "blocking"
-```
+Jobs accept the same `LifecycleHooks` structure through `JobSpec` in the Go
+API or the JSON body sent to `POST /api/jobs`. Standalone `type = "job"`
+configuration files are not supported.
 
 ### CronJob Lifecycle Hooks
 
@@ -745,7 +707,7 @@ func main() {
 
 ### Security Considerations
 
-- **Command validation**: Hook commands are validated to prevent path traversal attacks
+- **Working-directory validation**: Hook work directories reject `..` traversal
 - **Environment isolation**: Hooks run with the same environment as the main process
 - **Timeout enforcement**: All hooks have configurable timeouts to prevent hanging
 - **Failure isolation**: Hook failures don't affect other hooks (except in fail mode)
@@ -908,7 +870,6 @@ Available metrics: process starts/stops/restarts, job completions, cronjob sched
 ### Jobs and Scheduling
 - `job_basic` / `job_advanced` - One-time job execution
 - `cronjob_basic` - Scheduled recurring jobs
-- `job_config` - Job configuration examples
 
 ### Advanced Features
 - `embedded_lifecycle_hooks` - Lifecycle hook patterns

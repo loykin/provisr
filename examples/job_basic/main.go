@@ -10,49 +10,36 @@ import (
 
 func main() {
 	fmt.Println("=== Job Basic Example ===")
-
-	// Load configuration with job definitions
-	config, err := provisr.LoadConfig("job_example.toml")
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
-	fmt.Printf("Loaded configuration with %d process definitions\n", len(config.Specs))
-
-	// Create manager
 	mgr := provisr.New()
+	defer func() { _ = mgr.Shutdown() }()
+	jobs := provisr.NewJobManager(mgr)
 
-	// Apply configuration (this will start the job)
-	if err := mgr.ApplyConfig(config.Specs); err != nil {
-		log.Fatalf("Failed to apply config: %v", err)
+	parallelism := int32(2)
+	completions := int32(2)
+	spec := provisr.JobSpec{
+		Name:          "hello-job",
+		Command:       "sh -c 'echo Hello-from-job; sleep 2'",
+		Parallelism:   &parallelism,
+		Completions:   &completions,
+		RestartPolicy: "Never",
+	}
+	if err := jobs.CreateJob(spec); err != nil {
+		log.Fatalf("Failed to create job: %v", err)
 	}
 
-	fmt.Println("Job started successfully!")
-
-	// Monitor job status
+	fmt.Println("Job created successfully!")
 	fmt.Println("Monitoring job status...")
 	for i := 0; i < 10; i++ {
-		statuses, err := mgr.StatusAll("hello-job")
-		if err != nil {
-			log.Printf("Failed to get status: %v", err)
-			continue
+		status, exists := jobs.GetJob(spec.Name)
+		if !exists {
+			log.Fatalf("Job disappeared before completion")
 		}
-
-		fmt.Printf("Iteration %d: Found %d job instances\n", i+1, len(statuses))
-		activeCount := 0
-		for _, status := range statuses {
-			if status.Running {
-				activeCount++
-			}
-			fmt.Printf("  - %s: Running=%v, PID=%d\n", status.Name, status.Running, status.PID)
-		}
-
-		if activeCount == 0 {
-			fmt.Println("All job instances completed!")
+		fmt.Printf("Iteration %d: phase=%s active=%d succeeded=%d failed=%d\n",
+			i+1, status.Phase, status.Active, status.Succeeded, status.Failed)
+		if status.Phase == "Succeeded" || status.Phase == "Failed" {
 			break
 		}
-
-		time.Sleep(2 * time.Second)
+		time.Sleep(time.Second)
 	}
 
 	fmt.Println("Example completed")

@@ -17,7 +17,7 @@ type CronJob struct {
 	mu     sync.RWMutex
 	spec   CronJobSpec
 	status CronJobStatus
-	jobs   *job.Manager
+	jobs   JobRunner
 
 	// Scheduling state
 	ctx         context.Context
@@ -41,7 +41,7 @@ type JobHistoryEntry struct {
 }
 
 // NewCronJob creates a new cronjob instance
-func NewCronJob(spec CronJobSpec, jobs *job.Manager) *CronJob {
+func NewCronJob(spec CronJobSpec, jobs JobRunner) *CronJob {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Apply defaults

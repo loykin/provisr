@@ -95,18 +95,18 @@ Job Instances (actual executions)
 
 ## Monitoring
 
-To see cronjob status and history:
+Use `/ui/cronjobs` for status, next-run time, suspend/resume, manual trigger,
+and recent run history. The corresponding HTTP endpoints are:
 
 ```bash
-# View all process status
-provisr status
-
-# View specific cronjob status
-provisr status --name=hello-cronjob
-
-# View job execution history
-provisr logs --name=hello-cronjob
+curl http://localhost:8080/api/cronjobs
+curl http://localhost:8080/api/cronjobs/hello-cronjob
+curl http://localhost:8080/api/cronjobs/hello-cronjob/history
 ```
+
+Add the saved session's JWT `Authorization` header when authentication is
+enabled. The `provisr cron` command only checks daemon readiness; it does not
+print CronJob status or history.
 
 ## Advanced Usage
 

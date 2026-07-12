@@ -18,7 +18,9 @@ export function UserFormFields({
     <DataBodyTemplate.Group layout="stacked">
       <DataBodyTemplate.Row label="Username" required>
         <Input
-          value={form.username}
+		  id="user-username"
+		  aria-label="Username"
+		  value={form.username}
           disabled={mode === 'edit'}
           onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
           required
@@ -27,6 +29,8 @@ export function UserFormFields({
       {mode === 'create' && (
         <DataBodyTemplate.Row label="Password" required>
           <Input
+			id="user-password"
+			aria-label="Password"
             type="password"
             value={form.password}
             onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
@@ -36,6 +40,8 @@ export function UserFormFields({
       )}
       <DataBodyTemplate.Row label="Email">
         <Input
+		  id="user-email"
+		  aria-label="Email"
           type="email"
           placeholder="(optional)"
           value={form.email}

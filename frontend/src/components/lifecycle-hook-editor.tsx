@@ -1,3 +1,4 @@
+// oxlint-disable react/only-export-components -- form panels reuse the editor's validation helpers to enforce the same limits
 import { Plus, Trash2 } from 'lucide-react'
 import { DetailBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'

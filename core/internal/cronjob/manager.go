@@ -6,29 +6,24 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/loykin/provisr/core/internal/job"
 	"github.com/loykin/provisr/core/observability"
 )
 
 // Manager manages cronjobs
 type Manager struct {
-	mu         sync.RWMutex
-	cronJobs   map[string]*CronJob
-	jobManager *job.Manager
+	mu        sync.RWMutex
+	cronJobs  map[string]*CronJob
+	jobRunner JobRunner
 }
 
 // NewManagerWithJobManager creates a cronjob manager backed by a shared job
 // manager, so scheduled jobs and ad-hoc jobs are visible through the same
 // workload inventory.
-func NewManagerWithJobManager(_ job.ProcessRunner, jobManager *job.Manager) *Manager {
+func NewManager(jobRunner JobRunner) *Manager {
 	return &Manager{
-		cronJobs:   make(map[string]*CronJob),
-		jobManager: jobManager,
+		cronJobs:  make(map[string]*CronJob),
+		jobRunner: jobRunner,
 	}
-}
-
-func (m *Manager) JobManager() *job.Manager {
-	return m.jobManager
 }
 
 // CreateCronJob creates and starts a new cronjob
@@ -52,7 +47,7 @@ func (m *Manager) CreateCronJob(spec CronJobSpec) (*CronJob, error) {
 	}
 
 	// Create cronjob
-	cronJob := NewCronJob(spec, m.jobManager)
+	cronJob := NewCronJob(spec, m.jobRunner)
 	m.cronJobs[spec.Name] = cronJob
 
 	// Start cronjob
@@ -62,7 +57,7 @@ func (m *Manager) CreateCronJob(spec CronJobSpec) (*CronJob, error) {
 	}
 
 	// Update metrics
-	m.jobManager.Observe(observability.Event{Kind: observability.CronJobActivated, Name: spec.Name})
+	m.jobRunner.Observe(observability.Event{Kind: observability.CronJobActivated, Name: spec.Name})
 
 	slog.Info("CronJob created and started", "name", spec.Name, "schedule", spec.Schedule)
 	return cronJob, nil
@@ -103,7 +98,7 @@ func (m *Manager) UpdateCronJob(name string, spec CronJobSpec) error {
 
 	// Create new cronjob with updated spec
 	m.mu.Lock()
-	newCronJob := NewCronJob(spec, m.jobManager)
+	newCronJob := NewCronJob(spec, m.jobRunner)
 	m.cronJobs[name] = newCronJob
 	m.mu.Unlock()
 
@@ -159,7 +154,7 @@ func (m *Manager) DeleteCronJob(name string) error {
 	delete(m.cronJobs, name)
 
 	// Update metrics
-	m.jobManager.Observe(observability.Event{Kind: observability.CronJobDeactivated, Name: name})
+	m.jobRunner.Observe(observability.Event{Kind: observability.CronJobDeactivated, Name: name})
 
 	slog.Info("CronJob deleted", "name", name)
 	return nil

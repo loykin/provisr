@@ -1,4 +1,4 @@
-.PHONY: build build-frontend build-backend test test-unit test-integration clean ui
+.PHONY: build build-frontend build-backend test test-unit test-examples test-integration clean ui
 
 # Build the web UI and copy it into internal/ui/dist for go:embed. Always
 # runs as part of `build` so the binary never silently embeds a stale UI.
@@ -21,11 +21,15 @@ ui: build-frontend
 	@echo "UI built. Commit internal/ui/dist/ to include it in the binary."
 
 # Run all tests
-test: test-unit test-integration
+test: test-unit test-examples test-integration
 
 # Run unit tests
 test-unit:
 	go test -v ./...
+
+# Compile every public example against the current API.
+test-examples:
+	go test ./examples/...
 
 # Run integration tests
 test-integration: build-backend

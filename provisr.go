@@ -15,7 +15,7 @@ import (
 	cfg "github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/history/factory"
 	iapi "github.com/loykin/provisr/internal/server"
-	metricsadapter "github.com/loykin/provisr/metrics"
+	metricsadapter "github.com/loykin/provisr/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -90,8 +90,8 @@ func NewGroup(m *Manager) *Group { return core.NewGroup(m) }
 // NewJobManager constructs a JobManager bound to the given Manager.
 func NewJobManager(m *Manager) *JobManager { return core.NewJobManager(m) }
 
-func NewCronSchedulerWithJobManager(m *Manager, jm *JobManager) *CronScheduler {
-	return core.NewCronSchedulerWithJobManager(m, jm)
+func NewCronScheduler(jm *JobManager) *CronScheduler {
+	return core.NewCronScheduler(jm)
 }
 
 // NewProcessMetricsCollector constructs a new process metrics collector.

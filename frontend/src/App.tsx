@@ -245,7 +245,7 @@ const routeTree = rootRoute.addChildren([
   userEditRoute,
 ])
 
-export const router = createRouter({ routeTree, basepath: '/ui' })
+const router = createRouter({ routeTree, basepath: '/ui' })
 
 declare module '@tanstack/react-router' {
   interface Register {

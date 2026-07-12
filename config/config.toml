@@ -37,8 +37,7 @@ pid_file = "./provisr.pid"
 log_file = "./provisr.log"
 
 # Optional HTTP API server configuration
-# When enabled, `provisr serve --config config/config.toml` will start an HTTP server.
-# You can override these with CLI flags: --api-listen and --api-base.
+# `provisr serve config/config.toml` starts the configured HTTP server.
 # Optional lifecycle history. The entire feature is disabled when this table
 # is omitted or enabled=false. Events are written to every enabled store;
 # primary selects the store used by the history read API.
@@ -138,9 +137,9 @@ interval = "5s"
 # Maximum number of historical metrics to keep per process
 max_history = 100
 
-# Authentication configuration for the HTTP API server (mounts /auth/login,
-# /auth/users, /auth/clients when enabled). Users/clients are managed via
-# `provisr auth user create` etc, not auto-provisioned from this file.
+# Authentication configuration for the HTTP API server (mounts /auth/login
+# and /auth/users when enabled). Users are managed through the bootstrap API
+# or `provisr auth user create`, not auto-provisioned from this file.
 [server.auth]
 # Enable authentication for the API server
 enabled = true

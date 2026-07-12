@@ -15,7 +15,8 @@ func main() {
 	mgr := provisr.New()
 
 	// Create cronjob scheduler
-	scheduler := provisr.NewCronScheduler(mgr)
+	jobManager := provisr.NewJobManager(mgr)
+	scheduler := provisr.NewCronScheduler(jobManager)
 
 	// Define a cronjob spec
 	cronJobSpec := provisr.CronJob{
