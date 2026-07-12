@@ -86,7 +86,7 @@ wait_for_server() {
 create_test_config() {
     log_test "Creating test configuration"
 
-    cat > "$TEST_CONFIG" << 'EOF'
+    cat > "$TEST_CONFIG" << EOF
 # Simple test configuration for provisr
 pid_dir = "./run"
 
@@ -97,28 +97,11 @@ max_size_mb = 10
 
 # Server configuration
 [server]
-enabled = true
 listen = ":$TEST_PORT"
 base_path = "/api"
-pidfile = "./provisr.pid"
 
-# Authentication configuration
-[auth]
-enabled = true
-database_path = "auth.db"
-database_type = "sqlite"
-
-# JWT configuration
-[auth.jwt]
-secret = "test-secret-key"
-expires_in = "24h"
-
-# Default admin user
-[auth.admin]
-auto_create = true
-username = "admin"
-password = "admin"
-email = "admin@test.local"
+[daemon]
+pid_file = "./provisr.pid"
 
 # Test group for integration testing
 [[groups]]
@@ -300,7 +283,6 @@ test_error_handling() {
 pid_dir = "./run"
 
 [server]
-enabled = true
 listen = ":8082"
 base_path = "/api"
 

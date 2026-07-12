@@ -106,6 +106,31 @@ base_path = "/api"
 	}
 }
 
+func TestLoadConfigPreservesSQLiteMemoryDSN(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[server]
+listen = ":8080"
+
+[server.auth]
+enabled = true
+
+[server.auth.store]
+type = "sqlite"
+path = ":memory:"
+`
+	if err := os.WriteFile(file, []byte(data), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := LoadConfig(file)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if got := cfg.Server.Auth.Store.Path; got != ":memory:" {
+		t.Fatalf("auth sqlite path = %q, want :memory:", got)
+	}
+}
+
 func TestLoadConfigHistoryStoreHierarchy(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "config.toml")
 	data := `

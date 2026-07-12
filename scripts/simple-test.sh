@@ -8,7 +8,7 @@ echo "================================="
 cleanup() {
     echo "🧹 Cleaning up..."
     pkill -f "provisr serve" 2>/dev/null || true
-    rm -rf run/ provisr-logs/ programs/ test-*.toml auth.db provisr.pid 2>/dev/null || true
+    rm -rf run/ provisr-logs/ programs/ test.toml test-*.toml auth.db provisr.pid 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -37,7 +37,6 @@ cat > test.toml << 'EOF'
 pid_dir = "./run"
 
 [server]
-enabled = true
 listen = ":9999"
 base_path = "/api"
 
@@ -74,10 +73,11 @@ fi
 
 # Test 6: Process operations
 echo "⚙️  Testing process operations..."
-if curl -s -X POST http://localhost:9999/api/start -H "Content-Type: application/json" -d '{"name":"test-worker"}' | grep -q '"ok":true'; then
+if curl -s -X POST 'http://localhost:9999/api/start?name=test-worker' | grep -q '"ok":true'; then
     echo "✅ Process start works"
 else
     echo "❌ Process start failed"
+    exit 1
 fi
 
 sleep 3

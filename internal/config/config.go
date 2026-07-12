@@ -401,7 +401,9 @@ func resolveConfigPaths(cfg *Config, baseDir string) {
 			cfg.Server.TLS.Dir = resolve(cfg.Server.TLS.Dir)
 		}
 		if cfg.Server.Auth != nil && strings.EqualFold(cfg.Server.Auth.Store.Type, "sqlite") {
-			cfg.Server.Auth.Store.Path = resolve(cfg.Server.Auth.Store.Path)
+			if cfg.Server.Auth.Store.Path != ":memory:" {
+				cfg.Server.Auth.Store.Path = resolve(cfg.Server.Auth.Store.Path)
+			}
 		}
 	}
 	if cfg.History != nil && cfg.History.Stores.SQLite != nil {
