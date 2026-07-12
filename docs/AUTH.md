@@ -1,283 +1,113 @@
-# Authentication & Authorization
+# Authentication and authorization
 
-Provisr provides comprehensive authentication and authorization features for secure process management.
+Provisr uses username/password authentication to issue JWT access tokens. User
+data is stored through the configured SQLite or PostgreSQL auth store.
 
-## Overview
-
-The authentication system supports multiple authentication methods:
-- **Basic Authentication**: Username/password
-- **Client Credentials**: Client ID/secret for API access
-- **JWT Tokens**: Token-based authentication with expiration
-
-## Quick Start
-
-### 1. Enable Authentication
-
-Add authentication configuration to your `config.toml`:
+## Configuration
 
 ```toml
-[auth]
+[server.auth]
 enabled = true
-database_path = "auth.db"
-database_type = "sqlite"
+jwt_secret = "replace-with-a-stable-secret"
+token_ttl = "24h"
+bcrypt_cost = 10
 
-[auth.jwt]
-secret = "your-secret-key-change-this-in-production"
-expires_in = "24h"
-
-[auth.admin]
-auto_create = true
-username = "admin"
-password = "admin"
-email = "admin@localhost"
+[server.auth.store]
+type = "sqlite"
+path = "auth.db"
+migrate = true
+max_open_conns = 1
+max_idle_conns = 1
 ```
 
-### 2. Login via CLI
+Relative SQLite paths are resolved from the directory containing the main
+config file. `migrate = false` skips Goose migrations and requires the schema
+to have been created before Provisr starts.
+
+PostgreSQL uses the same hierarchy:
+
+```toml
+[server.auth.store]
+type = "postgresql"
+migrate = true
+host = "localhost"
+port = 5432
+database = "provisr_auth"
+username = "provisr"
+password = "replace-me"
+ssl_mode = "require"
+max_open_conns = 10
+max_idle_conns = 5
+```
+
+## First administrator
+
+Credentials are never read from the config file and an administrator is not
+created automatically. When the user store is empty, create the first admin
+through the bootstrap endpoint:
 
 ```bash
-# Login with username/password
-provisr login --username=admin --password=admin
-
-# Login with client credentials
-provisr login --method=client_secret --client-id=client_123 --client-secret=secret456
-
-# Login to remote server
-provisr login --server-url=http://remote:8080/api --username=admin --password=secret
+curl -X POST http://localhost:8080/api/auth/bootstrap \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"replace-me","email":"admin@example.com"}'
 ```
 
-### 3. Use Authenticated Commands
+Bootstrap is rejected after the first user has been created.
 
-Once logged in, all commands automatically use your saved session:
+## Login
 
 ```bash
-provisr status
-provisr start --name=myapp
-provisr stop --name=myapp
+provisr login \
+  --server-url=http://localhost:8080/api \
+  --username=admin \
+  --password=replace-me
 ```
 
-### 4. Logout
-
-```bash
-provisr logout
-```
-
-## User Management
-
-### Create Users
-
-```bash
-# Create admin user
-provisr auth user create --username=admin --password=secret --roles=admin
-
-# Create operator user
-provisr auth user create --username=operator --password=secret --email=op@example.com --roles=operator,user
-```
-
-### List Users
-
-```bash
-provisr auth user list
-```
-
-### Delete Users
-
-```bash
-provisr auth user delete --username=olduser
-```
-
-### Reset Password
-
-```bash
-provisr auth user password --username=operator --new-password=newpassword
-```
-
-## Client Management
-
-### Create Client Credentials
-
-```bash
-# Create API client
-provisr auth client create --name="API Client" --scopes=operator
-
-# Create admin client
-provisr auth client create --name="Admin Client" --scopes=admin,operator
-```
-
-### List Clients
-
-```bash
-provisr auth client list
-```
-
-### Delete Clients
-
-```bash
-provisr auth client delete --client-id=client_123
-```
-
-## HTTP API Authentication
-
-### Login Endpoint
+Or call the HTTP endpoint directly:
 
 ```bash
 curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "method": "basic",
-    "username": "admin",
-    "password": "secret"
-  }'
+  -H 'Content-Type: application/json' \
+  -d '{"method":"basic","username":"admin","password":"replace-me"}'
 ```
 
-Response:
-```json
-{
-  "success": true,
-  "user_id": "user-123",
-  "username": "admin",
-  "roles": ["admin"],
-  "token": {
-    "type": "Bearer",
-    "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "expires_at": "2025-09-30T11:16:15+09:00"
-  }
-}
-```
+The response contains the JWT used by protected API requests.
 
-### Using JWT Tokens
+## User management
 
-Include the JWT token in the Authorization header:
+`--roles` is required and accepts `admin`, `operator`, or `viewer`.
 
 ```bash
-curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
-  http://localhost:8080/api/status
+provisr auth user create \
+  --config config/config.toml \
+  --username operator \
+  --password replace-me \
+  --email operator@example.com \
+  --roles operator
+
+provisr auth user list --config config/config.toml
+provisr auth user password --config config/config.toml \
+  --username operator --new-password new-password
+provisr auth user delete --config config/config.toml --username operator
 ```
 
-## Session Management
+The CLI opens the same `[server.auth.store]` configured for the server.
 
-### Session Storage
+## Roles
 
-Login sessions are automatically saved to `~/.provisr/session.json`:
+- `admin`: full access, including user administration and write operations.
+- `operator`: operational access granted by the server permission table.
+- `viewer`: read-only access.
 
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "Bearer",
-  "expires_at": "2025-09-30T11:16:15+09:00",
-  "username": "admin",
-  "user_id": "user-123",
-  "roles": ["admin"],
-  "server_url": "http://localhost:8080/api"
-}
-```
+Authorization is enforced by server middleware. UI role checks only hide
+controls and are not a security boundary.
 
-### Security Features
+## Security notes
 
-- Session file has restricted permissions (0600)
-- Expired tokens are automatically removed
-- Server URL validation prevents token reuse on wrong servers
-
-## Roles and Permissions
-
-### Built-in Roles
-
-- **admin**: Full access to all operations
-- **operator**: Process management operations
-- **user**: Read-only access
-
-### Role Assignment
-
-Users can have multiple roles:
-
-```bash
-provisr auth user create --username=manager --password=secret --roles=admin,operator,user
-```
-
-## Database Support
-
-### SQLite (Default)
-
-```toml
-[auth]
-database_type = "sqlite"
-database_path = "auth.db"
-```
-
-### PostgreSQL
-
-```toml
-[auth]
-database_type = "postgresql"
-database_url = "postgres://user:password@localhost/provisr_auth?sslmode=disable"
-```
-
-## Testing Authentication
-
-### Test CLI Authentication
-
-```bash
-# Test basic auth
-provisr auth test --method=basic --username=admin --password=secret
-
-# Test client credentials
-provisr auth test --method=client_secret --client-id=client_123 --client-secret=secret456
-```
-
-### Test HTTP Authentication
-
-```bash
-# Test with curl
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"method":"basic","username":"admin","password":"secret"}'
-```
-
-## Configuration Reference
-
-### Full Authentication Configuration
-
-```toml
-[auth]
-# Enable authentication
-enabled = true
-
-# Database configuration
-database_path = "auth.db"
-database_type = "sqlite"  # or "postgresql"
-# database_url = "postgres://user:password@localhost/provisr_auth"
-
-[auth.jwt]
-# JWT signing secret (keep secure!)
-secret = "your-secret-key-change-this-in-production"
-# Token expiration time
-expires_in = "24h"
-
-[auth.admin]
-# Auto-create admin user on startup
-auto_create = true
-username = "admin"
-password = "admin"  # Change this immediately!
-email = "admin@localhost"
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Login fails**: Check server is running and credentials are correct
-2. **Permission denied**: Ensure user has required roles
-3. **Session expired**: Login again to refresh token
-4. **Database errors**: Check database path and permissions
-
-### Debug Commands
-
-```bash
-# Check current session
-cat ~/.provisr/session.json
-
-# Test server connectivity
-curl http://localhost:8080/api/status
-
-# View server logs
-provisr serve config.toml
-```
+- Configure a stable `jwt_secret`; generated secrets invalidate tokens after a
+  restart and are unsuitable for multiple server instances.
+- Use TLS for remote access.
+- Use PostgreSQL with TLS for distributed deployments.
+- Keep database credentials and JWT secrets outside committed sample files.
+- Set `migrate = false` when schema changes are managed by deployment tooling
+  or a database administrator.

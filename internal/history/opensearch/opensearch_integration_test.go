@@ -28,7 +28,7 @@ func TestSink_Integration_SendAndList(t *testing.T) {
 	addr, err := ctr.Address(ctx)
 	require.NoError(t, err)
 
-	sink, err := New(addr, "process_history")
+	sink, err := NewWithOptions(addr, "process_history", Options{Migrate: true})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sink.Close() })
 
@@ -47,14 +47,24 @@ func TestSink_Integration_SendAndList(t *testing.T) {
 	// OpenSearch indexing is near-real-time: a freshly created document
 	// isn't guaranteed to be visible to _search until the index refreshes.
 	require.Eventually(t, func() bool {
-		all, err := sink.List(ctx, "", 10)
+		all, err := sink.List(ctx, "", 10, 0)
 		return err == nil && len(all) == 2
 	}, 10*time.Second, 200*time.Millisecond, "expected both events to become searchable")
 
-	filtered, err := sink.List(ctx, "svc-a", 10)
+	filtered, err := sink.List(ctx, "svc-a", 10, 0)
 	require.NoError(t, err)
 	require.Len(t, filtered, 1)
-	require.Equal(t, "svc-a", filtered[0].Record.Name)
-	require.Equal(t, 123, filtered[0].Record.PID)
-	require.Equal(t, corehistory.EventStart, filtered[0].Type)
+	require.Equal(t, "svc-a", filtered[0].Name)
+	require.Equal(t, 123, filtered[0].PID)
+	require.Equal(t, "running", filtered[0].Status)
+	total, err := sink.Count(ctx, "")
+	require.NoError(t, err)
+	require.Equal(t, 2, total)
+	deleted, err := sink.PruneBefore(ctx, occurredAt.Add(30*time.Second))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted)
+	require.Eventually(t, func() bool {
+		count, err := sink.Count(ctx, "")
+		return err == nil && count == 1
+	}, 10*time.Second, 200*time.Millisecond, "expected retention delete to become visible")
 }

@@ -59,24 +59,6 @@ Expected output:
 Logged out successfully
 ```
 
-## Client Credentials Login
-
-### 1. Create API Client
-
-```bash
-provisr auth client create --name="Demo Client" --scopes=operator
-```
-
-Note the returned client_id and client_secret.
-
-### 2. Login with Client Credentials
-
-```bash
-provisr login --method=client_secret \
-  --client-id=client_abc123 \
-  --client-secret=secret_xyz789
-```
-
 ## Remote Server Login
 
 ### 1. Login to Remote Server
@@ -185,19 +167,4 @@ provisr status --name=web-server
 
 # Cleanup
 provisr logout
-```
-
-### CI/CD Example
-
-```bash
-# Use client credentials in CI
-provisr login --method=client_secret \
-  --client-id="$PROVISR_CLIENT_ID" \
-  --client-secret="$PROVISR_CLIENT_SECRET"
-
-# Deploy
-provisr start --name=production-api
-provisr status
-
-# No need to logout in CI (ephemeral environment)
 ```

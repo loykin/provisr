@@ -234,6 +234,9 @@ func NewServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Mana
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+	if r.authService != nil {
+		server.RegisterOnShutdown(func() { _ = r.authService.Close() })
+	}
 
 	// Start the server in a goroutine and handle potential errors
 	serverErrCh := make(chan error, 1)
@@ -279,6 +282,9 @@ func NewTLSServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.M
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	}
+	if r.authService != nil {
+		server.RegisterOnShutdown(func() { _ = r.authService.Close() })
 	}
 
 	// Start the server in a goroutine and handle potential errors

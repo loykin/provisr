@@ -133,8 +133,8 @@ func TestAuthTestFlags_MethodValidation(t *testing.T) {
 		shouldError bool
 	}{
 		{"basic", false},
-		{"client_secret", false},
 		{"jwt", false},
+		{"client_secret", true},
 		{"oauth", true},
 		{"invalid", true},
 		{"", true},
@@ -143,7 +143,7 @@ func TestAuthTestFlags_MethodValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("method_"+tt.method, func(t *testing.T) {
 			// This is more of a documentation test showing what methods are supported
-			supportedMethods := []string{"basic", "client_secret", "jwt"}
+			supportedMethods := []string{"basic", "jwt"}
 			isSupported := false
 			for _, supported := range supportedMethods {
 				if tt.method == supported {

@@ -269,6 +269,12 @@ func LoadConfig(configPath string) (*LoadedConfig, error) {
 		if err != nil {
 			return nil, err
 		}
+		if job != nil {
+			resolveCronJobPaths(job, filepath.Dir(configPath))
+			spec = *job.JobTemplate.ToProcessSpec()
+		} else {
+			resolveSpecPaths(&spec, filepath.Dir(configPath))
+		}
 		// convert detectors after decode
 		if err := convertDetectorConfigs(&spec); err != nil {
 			return nil, fmt.Errorf("failed to convert detectors for process %s: %w", spec.Name, err)
@@ -337,6 +343,9 @@ func LoadConfig(configPath string) (*LoadedConfig, error) {
 	}
 
 	// Build groups using the aggregated specs
+	if err := validateUniqueRuntimeEntries(config.Specs, config.CronJobs); err != nil {
+		return nil, err
+	}
 	groupSpecs, err := buildGroups(config.Groups, config.Specs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build groups: %w", err)
@@ -349,6 +358,24 @@ func LoadConfig(configPath string) (*LoadedConfig, error) {
 	config.GroupSpecs = groupSpecs
 
 	return config, nil
+}
+
+func validateUniqueRuntimeEntries(specs []core.Spec, jobs []core.CronJob) error {
+	processNames := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		if _, exists := processNames[spec.Name]; exists {
+			return fmt.Errorf("duplicate process name %q", spec.Name)
+		}
+		processNames[spec.Name] = struct{}{}
+	}
+	jobNames := make(map[string]struct{}, len(jobs))
+	for _, job := range jobs {
+		if _, exists := jobNames[job.Name]; exists {
+			return fmt.Errorf("duplicate cronjob name %q", job.Name)
+		}
+		jobNames[job.Name] = struct{}{}
+	}
+	return nil
 }
 
 func resolveConfigPaths(cfg *Config, baseDir string) {
@@ -450,12 +477,60 @@ func loadProgramEntries(programsDir string) ([]core.Spec, []core.CronJob, error)
 		if err != nil {
 			return nil, nil, err
 		}
-		specs = append(specs, sp)
 		if jb != nil {
+			resolveCronJobPaths(jb, filepath.Dir(full))
+			sp = *jb.JobTemplate.ToProcessSpec()
 			jobs = append(jobs, *jb)
+		} else {
+			resolveSpecPaths(&sp, filepath.Dir(full))
 		}
+		specs = append(specs, sp)
 	}
 	return specs, jobs, nil
+}
+
+func resolveSpecPaths(spec *core.Spec, baseDir string) {
+	resolve := func(path string) string {
+		if path == "" || filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Clean(filepath.Join(baseDir, path))
+	}
+	spec.WorkDir = resolve(spec.WorkDir)
+	spec.PIDFile = resolve(spec.PIDFile)
+	spec.Log.File.Dir = resolve(spec.Log.File.Dir)
+	spec.Log.File.StdoutPath = resolve(spec.Log.File.StdoutPath)
+	spec.Log.File.StderrPath = resolve(spec.Log.File.StderrPath)
+	for i := range spec.DetectorConfigs {
+		if spec.DetectorConfigs[i].Type == "pidfile" {
+			spec.DetectorConfigs[i].Path = resolve(spec.DetectorConfigs[i].Path)
+		}
+	}
+	resolveLifecyclePaths(&spec.Lifecycle, resolve)
+}
+
+func resolveCronJobPaths(job *core.CronJob, baseDir string) {
+	processSpec := job.JobTemplate.ToProcessSpec()
+	resolveSpecPaths(processSpec, baseDir)
+	job.JobTemplate.WorkDir = processSpec.WorkDir
+	job.JobTemplate.Log = processSpec.Log
+	job.JobTemplate.Lifecycle = processSpec.Lifecycle
+	resolve := func(path string) string {
+		if path == "" || filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Clean(filepath.Join(baseDir, path))
+	}
+	resolveLifecyclePaths(&job.Lifecycle, resolve)
+}
+
+func resolveLifecyclePaths(hooks *core.LifecycleHooks, resolve func(string) string) {
+	groups := [][]core.Hook{hooks.PreStart, hooks.PostStart, hooks.PreStop, hooks.PostStop}
+	for _, group := range groups {
+		for i := range group {
+			group[i].WorkDir = resolve(group[i].WorkDir)
+		}
+	}
 }
 
 func validateConfig(cfg *Config) error {
@@ -663,6 +738,7 @@ func buildGroups(groupConfigs []GroupConfig, specs []core.Spec) ([]core.ServiceG
 	}
 
 	groups := make([]core.ServiceGroup, 0, len(groupConfigs))
+	groupNames := make(map[string]struct{}, len(groupConfigs))
 	for _, gc := range groupConfigs {
 		if gc.Name == "" {
 			return nil, fmt.Errorf("group requires name")
@@ -670,6 +746,10 @@ func buildGroups(groupConfigs []GroupConfig, specs []core.Spec) ([]core.ServiceG
 		if len(gc.Members) == 0 {
 			return nil, fmt.Errorf("group %s requires members", gc.Name)
 		}
+		if _, exists := groupNames[gc.Name]; exists {
+			return nil, fmt.Errorf("duplicate group name %q", gc.Name)
+		}
+		groupNames[gc.Name] = struct{}{}
 
 		memberSpecs := make([]core.Spec, 0, len(gc.Members))
 		for _, memberName := range gc.Members {

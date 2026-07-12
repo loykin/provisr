@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -576,6 +577,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 	mgr.SetInstanceGroups(managerGroups)
 	var historyReader provisr.HistoryReader
+	var historyClosers []io.Closer
 	retentionCtx, stopRetention := context.WithCancel(context.Background())
 	defer stopRetention()
 
@@ -585,6 +587,9 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		var sinks []provisr.HistorySink
 		register := func(name string, sink provisr.HistorySink, retention, interval time.Duration) error {
 			sinks = append(sinks, sink)
+			if closer, ok := sink.(io.Closer); ok {
+				historyClosers = append(historyClosers, closer)
+			}
 			if name == cfg.History.Primary {
 				reader, ok := sink.(provisr.HistoryReader)
 				if !ok {
@@ -666,6 +671,11 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 			return fmt.Errorf("history primary store %q is not enabled", cfg.History.Primary)
 		}
 	}
+	defer func() {
+		for _, closer := range historyClosers {
+			_ = closer.Close()
+		}
+	}()
 
 	// Setup metrics from config
 	if cfg.Metrics != nil && cfg.Metrics.Enabled {
@@ -763,7 +773,9 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	if cronScheduler != nil {
 		_ = cronScheduler.Stop()
 	}
-	return server.Close()
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShutdown()
+	return server.Shutdown(shutdownCtx)
 }
 
 // createAuthCommand creates the auth command with subcommands

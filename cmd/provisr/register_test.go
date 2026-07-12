@@ -269,12 +269,14 @@ func TestCommand_IsProcessInConfigFile(t *testing.T) {
 # Some config
 
 [[processes]]
-name = "protected-process"
-command = "echo protected"
+type = "process"
+spec.name = "protected-process"
+spec.command = "echo protected"
 
 [[processes]]
-name = "another-protected"
-command = "sleep 1000"
+type = "process"
+spec.name = "another-protected"
+spec.command = "sleep 1000"
 
 [server]
 listen = "127.0.0.1:8080"

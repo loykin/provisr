@@ -73,4 +73,10 @@ func TestSink_Integration_SendAndList(t *testing.T) {
 	require.Equal(t, "svc-a", filtered[0].Name)
 	require.Equal(t, 123, filtered[0].PID)
 	require.Equal(t, "running", filtered[0].Status)
+	total, err := sink.Count(ctx, "")
+	require.NoError(t, err)
+	require.Equal(t, 2, total)
+	deleted, err := sink.PruneBefore(ctx, occurredAt.Add(30*time.Second))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted)
 }

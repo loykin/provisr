@@ -201,12 +201,12 @@ provisr serve --config config/config.toml --daemonize
 
 ## Authentication
 
-Provisr supports multiple authentication methods for securing both HTTP API and CLI access:
+Provisr uses username/password authentication to issue JWT access tokens for
+the HTTP API and CLI sessions:
 
 ### Authentication Methods
 
 - **Basic Auth**: Username/password authentication
-- **Client Credentials**: OAuth2-style client_id/client_secret
 - **JWT Tokens**: JSON Web Tokens for stateless authentication
 
 ### Configuration
@@ -236,9 +236,6 @@ The `provisr login` command provides persistent session management:
 # Login with username/password
 provisr login --username=admin --password=secret
 
-# Login with client credentials
-provisr login --method=client_secret --client-id=client_123 --client-secret=secret456
-
 # Login to remote server
 provisr login --server-url=http://remote:8080/api --username=admin --password=secret
 
@@ -254,18 +251,14 @@ cat ~/.provisr/session.json
 provisr logout
 ```
 
-### User & Client Management
+### User Management
 
 ```shell
 # Create users
 provisr auth user create --username=operator --password=secret --roles=operator
 
-# Create API clients
-provisr auth client create --name="CI Client" --scopes=operator
-
-# List users and clients
+# List users
 provisr auth user list
-provisr auth client list
 ```
 
 ### HTTP API Authentication

@@ -72,4 +72,10 @@ func TestSinkSendAndList(t *testing.T) {
 	require.Len(t, filtered, 2)
 	require.Equal(t, "stopped", filtered[0].Status)
 	require.Equal(t, "running", filtered[1].Status)
+	deleted, err := sink.PruneBefore(ctx, base.Add(30*time.Second))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted)
+	total, err := sink.Count(ctx, "")
+	require.NoError(t, err)
+	require.Equal(t, 2, total)
 }
