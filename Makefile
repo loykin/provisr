@@ -16,8 +16,7 @@ build-backend:
 # Build frontend then backend, so the binary always embeds the current UI.
 build: build-frontend build-backend
 
-# Alias for build-frontend, kept for the "run this after any frontend
-# change and commit internal/ui/dist" workflow documented in README.
+# Refresh the embedded UI assets after a frontend change.
 ui: build-frontend
 	@echo "UI built. Commit internal/ui/dist/ to include it in the binary."
 

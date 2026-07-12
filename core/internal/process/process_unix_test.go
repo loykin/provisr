@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// checkSysProcAttrs verifies Unix-specific process attributes
 func checkSysProcAttrs(t *testing.T, cmd *exec.Cmd) {
 	t.Helper()
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {

@@ -148,26 +148,3 @@ func (s *authStore) Ping(ctx context.Context) error {
 		return db.PingContext(ctx)
 	})
 }
-
-// BeginTx starts a new transaction. Kept for Store interface compatibility;
-// none of provisr's own code calls it today.
-func (s *authStore) BeginTx(ctx context.Context) (Transaction, error) {
-	var tx *sqlx.Tx
-	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
-		var err error
-		tx, err = db.BeginTxx(ctx, nil)
-		return err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	return &authStoreTx{authStore: s, tx: tx}, nil
-}
-
-type authStoreTx struct {
-	*authStore
-	tx *sqlx.Tx
-}
-
-func (t *authStoreTx) Commit() error   { return t.tx.Commit() }
-func (t *authStoreTx) Rollback() error { return t.tx.Rollback() }

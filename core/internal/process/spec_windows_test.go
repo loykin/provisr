@@ -8,13 +8,8 @@ import (
 )
 
 func TestBuildCommand_EmptyCommand_Windows(t *testing.T) {
-	spec := Spec{
-		Name:    "test",
-		Command: "",
-	}
+	spec := Spec{Name: "test", Command: ""}
 	cmd := spec.BuildCommand()
-
-	// On Windows, should be cmd.exe with /c rem
 	if !strings.Contains(cmd.Path, "cmd") {
 		t.Errorf("expected cmd for empty command, got %q", cmd.Path)
 	}

@@ -42,7 +42,7 @@ func main() {
 		slog.String("feature", "unified_logging"),
 		slog.Bool("slog_standard", true),
 		slog.Int("version", 2))
-	slog.Warn("Warning message", slog.String("status", "deprecated_types"))
+	slog.Warn("Warning message", slog.String("status", "warning_demo"))
 
 	// Show color formatting
 	if unifiedCfg.Slog.Color {

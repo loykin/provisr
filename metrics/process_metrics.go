@@ -39,17 +39,6 @@ type ProcessAggregatedMetrics struct {
 	Timestamp       time.Time         `json:"timestamp"`
 }
 
-// ProcessMetricsHistory stores historical metrics for a process
-type ProcessMetricsHistory struct {
-	ProcessName string           `json:"process_name"`
-	Metrics     []ProcessMetrics `json:"metrics"`
-	MaxSize     int              `json:"max_size"`
-	mu          sync.RWMutex
-	// Optimization: track the start index for circular buffer
-	startIdx int
-	count    int
-}
-
 // ProcessInstanceHistory stores historical metrics for process instances
 type ProcessInstanceHistory struct {
 	ProcessName string                      `json:"process_name"`
@@ -62,7 +51,6 @@ type ProcessInstanceHistory struct {
 type ProcessMetricsCollector struct {
 	enabled         bool
 	interval        time.Duration
-	history         map[string]*ProcessMetricsHistory  // legacy: processName -> history
 	instanceHistory map[string]*ProcessInstanceHistory // processName -> instance history
 	historyMu       sync.RWMutex
 	maxHistory      int
@@ -115,7 +103,6 @@ func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsColl
 	return &ProcessMetricsCollector{
 		enabled:         config.Enabled,
 		interval:        interval,
-		history:         make(map[string]*ProcessMetricsHistory),
 		instanceHistory: make(map[string]*ProcessInstanceHistory),
 		maxHistory:      maxHistory,
 		stopCh:          make(chan struct{}),
@@ -259,8 +246,6 @@ func (c *ProcessMetricsCollector) collectMetrics(processes map[string]int32) {
 			c.processNumFDs.WithLabelValues(processName, instanceID).Set(float64(metrics.NumFDs))
 		}
 
-		// Store in both legacy and new history structures
-		c.addToHistory(name, metrics)
 		c.addToInstanceHistory(processName, instanceID, metrics)
 	}
 
@@ -321,36 +306,10 @@ func (c *ProcessMetricsCollector) getProcessMetrics(name string, pid int32, time
 	return metrics, nil
 }
 
-// addToHistory adds metrics to the historical data using a circular buffer approach
+// addToHistory maps a full process instance name to the canonical instance history.
 func (c *ProcessMetricsCollector) addToHistory(name string, metrics ProcessMetrics) {
-	c.historyMu.Lock()
-	defer c.historyMu.Unlock()
-
-	history, exists := c.history[name]
-	if !exists {
-		history = &ProcessMetricsHistory{
-			ProcessName: name,
-			Metrics:     make([]ProcessMetrics, c.maxHistory),
-			MaxSize:     c.maxHistory,
-			startIdx:    0,
-			count:       0,
-		}
-		c.history[name] = history
-	}
-
-	history.mu.Lock()
-	defer history.mu.Unlock()
-
-	// Use circular buffer approach for O(1) operations
-	if history.count < history.MaxSize {
-		// Still filling the buffer
-		history.Metrics[history.count] = metrics
-		history.count++
-	} else {
-		// Buffer is full, overwrite oldest entry
-		history.Metrics[history.startIdx] = metrics
-		history.startIdx = (history.startIdx + 1) % history.MaxSize
-	}
+	processName, instanceID := parseProcessName(name)
+	c.addToInstanceHistory(processName, instanceID, metrics)
 }
 
 // addToInstanceHistory adds metrics to the instance-based historical data
@@ -389,19 +348,11 @@ func (c *ProcessMetricsCollector) addToInstanceHistory(processName, instanceID s
 // cleanupMetrics removes metrics for processes that no longer exist
 func (c *ProcessMetricsCollector) cleanupMetrics(activeProcesses map[string]int32) {
 	c.historyMu.RLock()
-	var toDelete []string
 	var toDeleteFromInstance []struct {
 		processName string
 		instanceID  string
 	}
 
-	for name := range c.history {
-		if _, exists := activeProcesses[name]; !exists {
-			toDelete = append(toDelete, name)
-		}
-	}
-
-	// Also cleanup instance history
 	for processName, history := range c.instanceHistory {
 		history.mu.RLock()
 		for instanceID := range history.Instances {
@@ -420,22 +371,15 @@ func (c *ProcessMetricsCollector) cleanupMetrics(activeProcesses map[string]int3
 	}
 	c.historyMu.RUnlock()
 
-	if len(toDelete) > 0 || len(toDeleteFromInstance) > 0 {
+	if len(toDeleteFromInstance) > 0 {
 		c.historyMu.Lock()
-		for _, name := range toDelete {
-			delete(c.history, name)
-			processName, instanceID := parseProcessName(name)
-			// Remove from Prometheus metrics with new labels
-			c.processCPUPercent.DeleteLabelValues(processName, instanceID)
-			c.processMemoryMB.DeleteLabelValues(processName, instanceID)
-			c.processNumThreads.DeleteLabelValues(processName, instanceID)
-			if runtime.GOOS != "windows" {
-				c.processNumFDs.DeleteLabelValues(processName, instanceID)
-			}
-		}
-
-		// Cleanup instance history
 		for _, item := range toDeleteFromInstance {
+			c.processCPUPercent.DeleteLabelValues(item.processName, item.instanceID)
+			c.processMemoryMB.DeleteLabelValues(item.processName, item.instanceID)
+			c.processNumThreads.DeleteLabelValues(item.processName, item.instanceID)
+			if runtime.GOOS != "windows" {
+				c.processNumFDs.DeleteLabelValues(item.processName, item.instanceID)
+			}
 			if history, exists := c.instanceHistory[item.processName]; exists {
 				history.mu.Lock()
 				delete(history.Instances, item.instanceID)
@@ -456,29 +400,12 @@ func (c *ProcessMetricsCollector) GetMetrics(name string) (ProcessMetrics, bool)
 		return ProcessMetrics{}, false
 	}
 
-	c.historyMu.RLock()
-	defer c.historyMu.RUnlock()
-
-	history, exists := c.history[name]
-	if !exists {
+	processName, instanceID := parseProcessName(name)
+	instance, ok := c.GetInstanceMetrics(processName, instanceID)
+	if !ok {
 		return ProcessMetrics{}, false
 	}
-
-	history.mu.RLock()
-	defer history.mu.RUnlock()
-
-	if history.count == 0 {
-		return ProcessMetrics{}, false
-	}
-
-	// Return the most recent metrics from circular buffer
-	var latestIdx int
-	if history.count < history.MaxSize {
-		latestIdx = history.count - 1
-	} else {
-		latestIdx = (history.startIdx - 1 + history.MaxSize) % history.MaxSize
-	}
-	return history.Metrics[latestIdx], true
+	return instance.ProcessMetrics, true
 }
 
 // GetHistory returns the historical metrics for a specific process
@@ -487,34 +414,8 @@ func (c *ProcessMetricsCollector) GetHistory(name string) ([]ProcessMetrics, boo
 		return nil, false
 	}
 
-	c.historyMu.RLock()
-	defer c.historyMu.RUnlock()
-
-	history, exists := c.history[name]
-	if !exists {
-		return nil, false
-	}
-
-	history.mu.RLock()
-	defer history.mu.RUnlock()
-
-	if history.count == 0 {
-		return nil, false
-	}
-
-	// Return metrics in chronological order from circular buffer
-	result := make([]ProcessMetrics, history.count)
-	if history.count < history.MaxSize {
-		// Buffer not full yet, copy in order
-		copy(result, history.Metrics[:history.count])
-	} else {
-		// Buffer is full, need to reconstruct order
-		// Copy from startIdx to end
-		n1 := copy(result, history.Metrics[history.startIdx:])
-		// Copy from beginning to startIdx
-		copy(result[n1:], history.Metrics[:history.startIdx])
-	}
-	return result, true
+	processName, instanceID := parseProcessName(name)
+	return c.GetInstanceHistory(processName, instanceID)
 }
 
 // GetAllMetrics returns the latest metrics for all processes
@@ -527,17 +428,16 @@ func (c *ProcessMetricsCollector) GetAllMetrics() map[string]ProcessMetrics {
 	defer c.historyMu.RUnlock()
 
 	result := make(map[string]ProcessMetrics)
-	for name, history := range c.history {
+	for processName, history := range c.instanceHistory {
 		history.mu.RLock()
-		if history.count > 0 {
-			// Get latest metrics from circular buffer
-			var latestIdx int
-			if history.count < history.MaxSize {
-				latestIdx = history.count - 1
-			} else {
-				latestIdx = (history.startIdx - 1 + history.MaxSize) % history.MaxSize
+		for instanceID, metrics := range history.Instances {
+			if len(metrics) > 0 {
+				name := processName
+				if instanceID != "0" {
+					name += "-" + instanceID
+				}
+				result[name] = metrics[len(metrics)-1]
 			}
-			result[name] = history.Metrics[latestIdx]
 		}
 		history.mu.RUnlock()
 	}
@@ -703,6 +603,4 @@ func (c *ProcessMetricsCollector) GetInstanceHistory(processName, instanceID str
 // AddToHistoryForTesting adds metrics to history for testing purposes
 func (c *ProcessMetricsCollector) AddToHistoryForTesting(name string, metrics ProcessMetrics) {
 	c.addToHistory(name, metrics)
-	processName, instanceID := parseProcessName(name)
-	c.addToInstanceHistory(processName, instanceID, metrics)
 }

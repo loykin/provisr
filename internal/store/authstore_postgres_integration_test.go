@@ -99,23 +99,4 @@ func TestPostgreSQLAuthStore_UserAndClientCRUD(t *testing.T) {
 	require.NoError(t, s.DeleteUser(ctx, "u1"))
 	require.ErrorIs(t, s.DeleteUser(ctx, "u1"), ErrUserNotFound)
 
-	client := &ClientCredential{
-		ID:           "c1",
-		ClientID:     "client-1",
-		ClientSecret: "secret1",
-		Name:         "Test Client",
-		Scopes:       []string{"read", "write"},
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Active:       true,
-	}
-	require.NoError(t, s.CreateClient(ctx, client))
-
-	gotClient, err := s.GetClientByClientID(ctx, "client-1")
-	require.NoError(t, err)
-	require.Equal(t, "c1", gotClient.ID)
-	require.Len(t, gotClient.Scopes, 2)
-
-	require.NoError(t, s.DeleteClient(ctx, "c1"))
-	require.ErrorIs(t, s.DeleteClient(ctx, "c1"), ErrClientNotFound)
 }

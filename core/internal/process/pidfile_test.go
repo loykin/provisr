@@ -41,7 +41,7 @@ func TestPIDFileContainsPIDAndSpec(t *testing.T) {
 	if !ok {
 		t.Fatalf("pidfile not written in time")
 	}
-	pid, specOut, _, err := ReadPIDFileWithMeta(pidfile)
+	pid, specOut, _, err := ReadPIDFile(pidfile)
 	if err != nil {
 		t.Fatalf("ReadPIDFile: %v", err)
 	}
@@ -144,23 +144,6 @@ func TestVerifyPIDFile_ZeroPID(t *testing.T) {
 	}
 	if pid != 0 {
 		t.Errorf("expected pid=0 for zero PID content, got %d", pid)
-	}
-}
-
-func TestVerifyPIDFile_NoMeta(t *testing.T) {
-	dir := t.TempDir()
-	pidfile := filepath.Join(dir, "legacy.pid")
-	// Legacy format: only PID, no spec or meta.
-	if err := os.WriteFile(pidfile, []byte("12345\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	pid, _, err := VerifyPIDFile(pidfile)
-	if err != nil {
-		t.Fatalf("VerifyPIDFile: %v", err)
-	}
-	// Without meta we cannot perform identity check; raw PID is returned as-is.
-	if pid != 12345 {
-		t.Errorf("expected pid=12345 (no meta to verify), got %d", pid)
 	}
 }
 

@@ -599,7 +599,7 @@ func (r *Router) handleStop(c *gin.Context) {
 	if selector.base != "" {
 		err = r.mgr.StopAll(selector.base, selector.wait)
 	} else if selector.wild != "" {
-		err = r.mgr.StopMatch(selector.wild, selector.wait)
+		err = r.mgr.StopAll(selector.wild, selector.wait)
 	} else {
 		// single process by name
 		err = r.mgr.Stop(selector.name, selector.wait)
@@ -646,7 +646,7 @@ func (r *Router) handleStatus(c *gin.Context) {
 		return
 	}
 	if wild != "" {
-		sts, err := r.mgr.StatusMatch(wild)
+		sts, err := r.mgr.StatusAll(wild)
 		if err != nil {
 			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 			return
@@ -1109,7 +1109,7 @@ func (r *Router) handleUnregister(c *gin.Context) {
 	} else if selector.base != "" {
 		err = r.mgr.UnregisterAll(selector.base, selector.wait)
 	} else {
-		err = r.mgr.UnregisterMatch(selector.wild, selector.wait)
+		err = r.mgr.UnregisterAll(selector.wild, selector.wait)
 	}
 
 	if err != nil {

@@ -75,26 +75,7 @@ func main() {
 	}
 	fmt.Printf("Retrieved user: %s (ID: %s)\n", retrievedUser.Username, retrievedUser.ID)
 
-	// Create a test client
-	client := &store.ClientCredential{
-		ID:           "client-456",
-		ClientID:     "test-client",
-		ClientSecret: "secret-123",
-		Name:         "Test Client",
-		Scopes:       []string{"read", "write"},
-		Metadata:     map[string]string{"app": "test-app"},
-		CreatedAt:    time.Now().UTC(),
-		UpdatedAt:    time.Now().UTC(),
-		Active:       true,
-	}
-
-	if err := authStore.CreateClient(ctx, client); err != nil {
-		log.Printf("Note: Client might already exist: %v", err)
-	} else {
-		fmt.Printf("Created client: %s\n", client.Name)
-	}
-
-	// List users and clients
+	// List users
 	users, userCount, err := authStore.ListUsers(ctx, 0, 10)
 	if err != nil {
 		log.Fatalf("Failed to list users: %v", err)
@@ -102,15 +83,6 @@ func main() {
 	fmt.Printf("Total users: %d\n", userCount)
 	for _, u := range users {
 		fmt.Printf("  - %s (%s)\n", u.Username, u.Email)
-	}
-
-	clients, clientCount, err := authStore.ListClients(ctx, 0, 10)
-	if err != nil {
-		log.Fatalf("Failed to list clients: %v", err)
-	}
-	fmt.Printf("Total clients: %d\n", clientCount)
-	for _, c := range clients {
-		fmt.Printf("  - %s (%s)\n", c.Name, c.ClientID)
 	}
 
 	// Example 3: Update user

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -270,28 +269,25 @@ func (r *Process) WritePIDFile() {
 		return
 	}
 
-	// Write PID in the first line, followed by the JSON-encoded Spec,
-	// and optionally a third line with PIDMeta JSON containing process start time.
-	var body []byte
-	if specCopy != nil {
-		if jb, err := json.Marshal(specCopy); err == nil {
-			body = append([]byte(strconv.Itoa(pid)), '\n')
-			body = append(body, jb...)
-			// Append meta
-			startUnix := getProcStartUnix(pid)
-			if startUnix > 0 {
-				meta := PIDMeta{StartUnix: startUnix}
-				if mb, err := json.Marshal(&meta); err == nil {
-					body = append(body, '\n')
-					body = append(body, mb...)
-				}
-			}
-		} else {
-			body = []byte(strconv.Itoa(pid))
-		}
-	} else {
-		body = []byte(strconv.Itoa(pid))
+	if specCopy == nil {
+		return
 	}
+	startUnix := getProcStartUnix(pid)
+	if startUnix <= 0 {
+		slog.Warn("Failed to determine process start time", "pid", pid)
+		return
+	}
+	specJSON, err := json.Marshal(specCopy)
+	if err != nil {
+		slog.Warn("Failed to encode PID file spec", "error", err)
+		return
+	}
+	metaJSON, err := json.Marshal(PIDMeta{StartUnix: startUnix})
+	if err != nil {
+		slog.Warn("Failed to encode PID file metadata", "error", err)
+		return
+	}
+	body := []byte(strconv.Itoa(pid) + "\n" + string(specJSON) + "\n" + string(metaJSON))
 	if err := os.WriteFile(pidFile, body, 0o600); err != nil {
 		slog.Warn("Failed to write PID file", "file", pidFile, "error", err)
 	}
@@ -369,10 +365,8 @@ func (r *Process) DetectAlive() (bool, string) {
 		if ok {
 			// Best-effort: if a PID file is configured, read it and seed internal PID for later signaling
 			if spec.PIDFile != "" {
-				if b, err := os.ReadFile(spec.PIDFile); err == nil {
-					if n, err2 := strconv.Atoi(strings.TrimSpace(string(b))); err2 == nil && n > 0 {
-						r.SeedPID(n)
-					}
+				if n, _, _, err := ReadPIDFile(spec.PIDFile); err == nil {
+					r.SeedPID(n)
 				}
 			}
 			return true, d.Describe()

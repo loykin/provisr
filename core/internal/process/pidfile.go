@@ -15,19 +15,19 @@ type PIDMeta struct {
 	StartUnix int64 `json:"start_unix"`
 }
 
-// ReadPIDFileWithMeta reads a PID file written by Process.WritePIDFile.
-// Returns PID, optional Spec (nil when the spec line is absent), and optional
-// Meta (nil when the meta line is absent).
-// A JSON line that is present but unparseable is treated as file corruption
-// and causes an error — absent lines are the only acceptable nil case.
-func ReadPIDFileWithMeta(path string) (int, *Spec, *PIDMeta, error) {
+// ReadPIDFile reads the canonical three-line PID file written by Process:
+// PID, JSON-encoded Spec, and JSON-encoded PIDMeta.
+func ReadPIDFile(path string) (int, *Spec, *PIDMeta, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	content := string(b)
-	// First line: PID
-	first, rest, _ := strings.Cut(content, "\n")
+	content := strings.ReplaceAll(string(b), "\r\n", "\n")
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) != 3 {
+		return 0, nil, nil, fmt.Errorf("invalid PID file %q: expected 3 lines, got %d", path, len(lines))
+	}
+	first := lines[0]
 	pidStr := strings.TrimSpace(first)
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
@@ -41,39 +41,18 @@ func ReadPIDFileWithMeta(path string) (int, *Spec, *PIDMeta, error) {
 	if pid > 4194304 { // Linux default max PID
 		return 0, nil, nil, fmt.Errorf("invalid PID %d: exceeds maximum", pid)
 	}
-	rest = strings.TrimSpace(rest)
-	if rest == "" {
-		return pid, nil, nil, nil
-	}
-
-	// If there is a second JSON line, it could be either Spec (legacy extended)
-	// or Meta (in newer format we append meta as a third line).
-	secondJSON := rest
-	thirdJSON := ""
-	if l2, l3, ok := strings.Cut(rest, "\n"); ok {
-		secondJSON = strings.TrimSpace(l2)
-		thirdJSON = strings.TrimSpace(l3)
-	}
-
 	var spec Spec
-	var specPtr *Spec
-	if secondJSON != "" {
-		if err := json.Unmarshal([]byte(secondJSON), &spec); err != nil {
-			return 0, nil, nil, fmt.Errorf("malformed spec in PID file %q: %w", path, err)
-		}
-		specPtr = &spec
+	if err := json.Unmarshal([]byte(strings.TrimSpace(lines[1])), &spec); err != nil {
+		return 0, nil, nil, fmt.Errorf("malformed spec in PID file %q: %w", path, err)
 	}
-
-	var metaPtr *PIDMeta
-	if thirdJSON != "" {
-		var meta PIDMeta
-		if err := json.Unmarshal([]byte(thirdJSON), &meta); err != nil {
-			return 0, nil, nil, fmt.Errorf("malformed meta in PID file %q: %w", path, err)
-		}
-		metaPtr = &meta
+	var meta PIDMeta
+	if err := json.Unmarshal([]byte(strings.TrimSpace(lines[2])), &meta); err != nil {
+		return 0, nil, nil, fmt.Errorf("malformed meta in PID file %q: %w", path, err)
 	}
-
-	return pid, specPtr, metaPtr, nil
+	if meta.StartUnix <= 0 {
+		return 0, nil, nil, fmt.Errorf("invalid meta in PID file %q: start_unix must be positive", path)
+	}
+	return pid, &spec, &meta, nil
 }
 
 // VerifyPIDFile reads the PID file at path and performs best-effort identity
@@ -91,7 +70,7 @@ func ReadPIDFileWithMeta(path string) (int, *Spec, *PIDMeta, error) {
 // and pid=0 is returned.  When getProcStartUnix returns 0 (platform limitation
 // or early boot), the check is skipped and the raw PID is returned as-is.
 func VerifyPIDFile(path string) (int, *Spec, error) {
-	rawPID, spec, meta, err := ReadPIDFileWithMeta(path)
+	rawPID, spec, meta, err := ReadPIDFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil, nil
@@ -104,7 +83,7 @@ func VerifyPIDFile(path string) (int, *Spec, error) {
 		}
 		return 0, nil, err // OS-level error (permissions, I/O)
 	}
-	// Defensive: ReadPIDFileWithMeta returns error for pid<=0, but guard anyway.
+	// Defensive: ReadPIDFile returns error for pid<=0, but guard anyway.
 	if rawPID <= 0 {
 		return 0, spec, nil
 	}

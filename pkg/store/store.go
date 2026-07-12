@@ -6,20 +6,17 @@ import (
 )
 
 type (
-	Config           = store.Config
-	Store            = store.Store
-	AuthStore        = store.AuthStore
-	User             = store.User
-	ClientCredential = store.ClientCredential
-	StoreOptions     = store.StoreOptions
-	TimeSeriesPoint  = store.TimeSeriesPoint
+	Config          = store.Config
+	Store           = store.Store
+	AuthStore       = store.AuthStore
+	User            = store.User
+	StoreOptions    = store.StoreOptions
+	TimeSeriesPoint = store.TimeSeriesPoint
 )
 
 var (
-	ErrUserNotFound        = store.ErrUserNotFound
-	ErrUserAlreadyExists   = store.ErrUserAlreadyExists
-	ErrClientNotFound      = store.ErrClientNotFound
-	ErrClientAlreadyExists = store.ErrClientAlreadyExists
+	ErrUserNotFound      = store.ErrUserNotFound
+	ErrUserAlreadyExists = store.ErrUserAlreadyExists
 )
 
 // CreateStore creates a new store from the given config.

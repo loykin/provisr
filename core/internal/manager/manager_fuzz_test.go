@@ -202,7 +202,7 @@ func FuzzPatternMatching(f *testing.F) {
 					t.Errorf("panic in StatusMatch: %v", r)
 				}
 			}()
-			_, _ = mgr.StatusMatch(pattern)
+			_, _ = mgr.StatusAll(pattern)
 		}()
 
 		func() {
@@ -211,7 +211,7 @@ func FuzzPatternMatching(f *testing.F) {
 					t.Errorf("panic in StopMatch: %v", r)
 				}
 			}()
-			_ = mgr.StopMatch(pattern, 50*time.Millisecond)
+			_ = mgr.StopAll(pattern, 50*time.Millisecond)
 		}()
 	})
 }

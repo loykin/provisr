@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func FuzzReadPIDFileWithMeta(f *testing.F) {
+func FuzzReadPIDFile(f *testing.F) {
 	f.Add("123\n{}\n{\"start_unix\":1}\n")
 	f.Add("0\n")
 	f.Add("not-a-pid\n{}\n")
@@ -14,6 +14,6 @@ func FuzzReadPIDFileWithMeta(f *testing.F) {
 		dir := t.TempDir()
 		pf := filepath.Join(dir, "fuzz.pid")
 		_ = os.WriteFile(pf, []byte(content), 0o600)
-		_, _, _, _ = ReadPIDFileWithMeta(pf) // Should never panic
+		_, _, _, _ = ReadPIDFile(pf) // Should never panic
 	})
 }

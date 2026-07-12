@@ -130,14 +130,8 @@ func (m *Manager) Update(s Spec, wait time.Duration) error {
 func (m *Manager) GetSpec(name string) (Spec, error) {
 	return m.inner.GetSpec(name)
 }
-func (m *Manager) StopMatch(pattern string, wait time.Duration) error {
-	return m.inner.StopMatch(pattern, wait)
-}
 func (m *Manager) Unregister(name string, wait time.Duration) error {
 	return m.inner.Unregister(name, wait)
-}
-func (m *Manager) UnregisterMatch(pattern string, wait time.Duration) error {
-	return m.inner.UnregisterMatch(pattern, wait)
 }
 func (m *Manager) StopAll(base string, wait time.Duration) error { return m.inner.StopAll(base, wait) }
 func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
@@ -147,8 +141,7 @@ func (m *Manager) Status(name string) (Status, error) { return m.inner.Status(na
 func (m *Manager) LogsSince(name string, since uint64, limit int) ([]LogLine, uint64, error) {
 	return m.inner.LogsSince(name, since, limit)
 }
-func (m *Manager) StatusAll(base string) ([]Status, error)      { return m.inner.StatusAll(base) }
-func (m *Manager) StatusMatch(pattern string) ([]Status, error) { return m.inner.StatusMatch(pattern) }
+func (m *Manager) StatusAll(base string) ([]Status, error) { return m.inner.StatusAll(base) }
 func (m *Manager) InstanceGroupStatus(groupName string) (map[string][]Status, error) {
 	return m.inner.InstanceGroupStatus(groupName)
 }

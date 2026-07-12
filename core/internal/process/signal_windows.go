@@ -95,7 +95,7 @@ func closeHandle(handle syscall.Handle) error {
 	return nil
 }
 
-// processExists checks if a process exists (for test compatibility)
+// processExists checks if a process exists.
 func processExists(pid int) bool {
 	return checkProcessExists(pid) == nil
 }

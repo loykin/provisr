@@ -75,28 +75,6 @@ func BenchmarkCircularBufferVsSliceCopy(b *testing.B) {
 		}
 	})
 
-	b.Run("old_slice_copy_approach", func(b *testing.B) {
-		// Simulate the old approach
-		history := &ProcessMetricsHistory{
-			ProcessName: "test",
-			Metrics:     make([]ProcessMetrics, 0, maxHistory),
-			MaxSize:     maxHistory,
-		}
-
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for j := 0; j < entries; j++ {
-				history.mu.Lock()
-				history.Metrics = append(history.Metrics, metric)
-				if len(history.Metrics) > history.MaxSize {
-					// Old inefficient approach
-					copy(history.Metrics, history.Metrics[len(history.Metrics)-history.MaxSize:])
-					history.Metrics = history.Metrics[:history.MaxSize]
-				}
-				history.mu.Unlock()
-			}
-		}
-	})
 }
 
 // BenchmarkOptimizedBatchCollection tests the batched metrics collection

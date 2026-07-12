@@ -61,7 +61,7 @@ func TestNewProcessMetricsCollector(t *testing.T) {
 			assert.Equal(t, tt.expected.Enabled, collector.enabled)
 			assert.Equal(t, tt.expected.Interval, collector.interval)
 			assert.Equal(t, tt.expected.MaxHistory, collector.maxHistory)
-			assert.NotNil(t, collector.history)
+			assert.NotNil(t, collector.instanceHistory)
 			assert.NotNil(t, collector.stopCh)
 		})
 	}
@@ -528,34 +528,18 @@ func TestProcessMetricsCollectorMaxHistoryZero(t *testing.T) {
 }
 
 func TestProcessMetricsHistoryMaxSize(t *testing.T) {
-	history := &ProcessMetricsHistory{
-		ProcessName: "test",
-		Metrics:     make([]ProcessMetrics, 0),
-		MaxSize:     2,
-	}
-
-	// Add metrics beyond max size
+	collector := NewProcessMetricsCollector(ProcessMetricsConfig{Enabled: true, MaxHistory: 2})
 	for i := 0; i < 5; i++ {
-		metrics := ProcessMetrics{
+		collector.AddToHistoryForTesting("test", ProcessMetrics{
 			PID:        int32(1000 + i),
 			Name:       "test",
 			CPUPercent: float64(i * 10),
 			Timestamp:  time.Now(),
-		}
-
-		history.mu.Lock()
-		history.Metrics = append(history.Metrics, metrics)
-		if len(history.Metrics) > history.MaxSize {
-			copy(history.Metrics, history.Metrics[len(history.Metrics)-history.MaxSize:])
-			history.Metrics = history.Metrics[:history.MaxSize]
-		}
-		history.mu.Unlock()
+		})
 	}
-
-	history.mu.RLock()
-	assert.Len(t, history.Metrics, 2)
-	// Should contain the last 2 entries (index 3 and 4)
-	assert.Equal(t, float64(30), history.Metrics[0].CPUPercent)
-	assert.Equal(t, float64(40), history.Metrics[1].CPUPercent)
-	history.mu.RUnlock()
+	history, found := collector.GetHistory("test")
+	assert.True(t, found)
+	assert.Len(t, history, 2)
+	assert.Equal(t, float64(30), history[0].CPUPercent)
+	assert.Equal(t, float64(40), history[1].CPUPercent)
 }

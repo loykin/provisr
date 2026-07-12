@@ -47,52 +47,6 @@ func BenchmarkProcessMetricsCollector(b *testing.B) {
 	}
 }
 
-// BenchmarkHistorySliceOperations tests the efficiency of history management
-func BenchmarkHistorySliceOperations(b *testing.B) {
-	tests := []struct {
-		name       string
-		maxHistory int
-		entries    int
-	}{
-		{"small_history_100_200entries", 100, 200},
-		{"medium_history_1000_2000entries", 1000, 2000},
-		{"large_history_10000_20000entries", 10000, 20000},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			history := &ProcessMetricsHistory{
-				ProcessName: "test",
-				Metrics:     make([]ProcessMetrics, 0, tt.maxHistory),
-				MaxSize:     tt.maxHistory,
-			}
-
-			metric := ProcessMetrics{
-				PID:        1234,
-				Name:       "test",
-				CPUPercent: 50.0,
-				MemoryMB:   128.0,
-				Timestamp:  time.Now(),
-			}
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				for j := 0; j < tt.entries; j++ {
-					// Simulate adding entries to history
-					history.mu.Lock()
-					history.Metrics = append(history.Metrics, metric)
-					if len(history.Metrics) > history.MaxSize {
-						// This is the current inefficient approach
-						copy(history.Metrics, history.Metrics[len(history.Metrics)-history.MaxSize:])
-						history.Metrics = history.Metrics[:history.MaxSize]
-					}
-					history.mu.Unlock()
-				}
-			}
-		})
-	}
-}
-
 // BenchmarkConcurrentAccess tests performance under concurrent load
 func BenchmarkConcurrentAccess(b *testing.B) {
 	config := ProcessMetricsConfig{

@@ -431,7 +431,7 @@ func parseConfigFile(configPath string, out interface{}) error {
 
 // loadProgramEntries loads program entries from the programs directory using the same
 // discriminated-union format as inline [[processes]] blocks: {type, spec}.
-// Supported file extensions: toml, yaml/yml, json. No legacy plain core.Spec files supported.
+// Supported file extensions: toml, yaml/yml, json. Files use the discriminated process format.
 func loadProgramEntries(programsDir string) ([]core.Spec, []core.CronJob, error) {
 	infos, err := os.ReadDir(programsDir)
 	if err != nil {

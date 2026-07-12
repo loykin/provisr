@@ -262,27 +262,24 @@ func TestManagerHelperMethods(t *testing.T) {
 	mgr := NewManager()
 	defer func() { _ = mgr.Shutdown() }()
 
-	// Test StopMatch and StatusMatch aliases
 	spec := process.Spec{
-		Name:    "alias-test",
+		Name:    "pattern-test",
 		Command: "sleep 0.05",
 	}
 	_ = mgr.Register(spec)
 
-	// Test StatusMatch
-	statuses, err := mgr.StatusMatch("alias*")
+	statuses, err := mgr.StatusAll("pattern*")
 	if err != nil {
-		t.Errorf("StatusMatch failed: %v", err)
+		t.Errorf("StatusAll failed: %v", err)
 	}
 
 	if len(statuses) == 0 {
-		t.Error("StatusMatch should find at least one process")
+		t.Error("StatusAll should find at least one process")
 	}
 
-	// Test StopMatch
-	err = mgr.StopMatch("alias*", 2*time.Second)
+	err = mgr.StopAll("pattern*", 2*time.Second)
 	if err != nil {
-		t.Logf("StopMatch result: %v", err) // May fail if already stopped
+		t.Logf("StopAll result: %v", err) // May fail if already stopped
 	}
 }
 

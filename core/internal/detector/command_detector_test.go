@@ -65,7 +65,7 @@ func TestPIDFileDetector(t *testing.T) {
 	}
 
 	// valid pid but not alive (0) -> false,nil
-	if err := os.WriteFile(pidfile, []byte("0"), 0o644); err != nil {
+	if err := os.WriteFile(pidfile, []byte("0\n{}\n{\"start_unix\":1}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	alive, err = d.Alive()
@@ -75,7 +75,7 @@ func TestPIDFileDetector(t *testing.T) {
 
 	// current process pid -> likely alive true
 	pid := os.Getpid()
-	if err := os.WriteFile(pidfile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+	if err := os.WriteFile(pidfile, []byte(strconv.Itoa(pid)+"\n{}\n{\"start_unix\":1}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err = d.Alive()

@@ -272,8 +272,6 @@ curl -X POST localhost:8080/api/auth/login \
 # Use JWT token
 curl -H "Authorization: Bearer <jwt-token>" http://localhost:8080/api/status
 
-# Basic authentication (legacy)
-curl -u admin:password http://localhost:8080/api/status
 ```
 
 ### Session Security

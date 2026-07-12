@@ -56,7 +56,7 @@ jobs:
 
           # core/internal/process has multiple fuzz functions - run each separately
           echo "Running fuzz on ./core/internal/process (FuzzReadPIDFileWithMeta)"
-          go test ./core/internal/process -run=^$ -fuzz=FuzzReadPIDFileWithMeta -fuzztime=2m
+          go test ./core/internal/process -run=^$ -fuzz=FuzzReadPIDFile -fuzztime=2m
 
           echo "Running fuzz on ./core/internal/process (FuzzBuildCommand)"
           go test ./core/internal/process -run=^$ -fuzz=FuzzBuildCommand -fuzztime=3m

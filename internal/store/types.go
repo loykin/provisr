@@ -35,16 +35,6 @@ type Store interface {
 	// Connection management
 	Close() error
 	Ping(ctx context.Context) error
-
-	// Transaction support
-	BeginTx(ctx context.Context) (Transaction, error)
-}
-
-// Transaction represents a database transaction
-type Transaction interface {
-	Store
-	Commit() error
-	Rollback() error
 }
 
 // Repository represents a generic repository pattern

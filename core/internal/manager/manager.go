@@ -355,21 +355,6 @@ func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
 	return firstErr
 }
 
-// StopMatch stops all processes matching a pattern (alias for StopAll)
-func (m *Manager) StopMatch(pattern string, wait time.Duration) error {
-	return m.StopAll(pattern, wait)
-}
-
-// UnregisterMatch stops and unregisters all processes matching a pattern (alias for UnregisterAll)
-func (m *Manager) UnregisterMatch(pattern string, wait time.Duration) error {
-	return m.UnregisterAll(pattern, wait)
-}
-
-// StatusMatch returns status for all processes matching a pattern (alias for StatusAll)
-func (m *Manager) StatusMatch(pattern string) ([]process.Status, error) {
-	return m.StatusAll(pattern)
-}
-
 // StatusAll returns status for all processes matching a pattern, sorted by
 // name. Go's map iteration order is randomized per call, so without this
 // sort the same query would return processes in a different order every

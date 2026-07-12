@@ -13,10 +13,8 @@ import (
 )
 
 var (
-	ErrUserNotFound        = errors.New("user not found")
-	ErrUserAlreadyExists   = errors.New("user already exists")
-	ErrClientNotFound      = errors.New("client not found")
-	ErrClientAlreadyExists = errors.New("client already exists")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrUserAlreadyExists = errors.New("user already exists")
 )
 
 // User represents a user in the auth system
@@ -26,19 +24,6 @@ type User struct {
 	PasswordHash string            `json:"-" db:"password_hash"`
 	Email        string            `json:"email,omitempty" db:"email"`
 	Roles        []string          `json:"roles" db:"roles"`
-	Metadata     map[string]string `json:"metadata,omitempty" db:"metadata"`
-	CreatedAt    time.Time         `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at" db:"updated_at"`
-	Active       bool              `json:"active" db:"active"`
-}
-
-// ClientCredential represents OAuth2-style client credentials
-type ClientCredential struct {
-	ID           string            `json:"id" db:"id"`
-	ClientID     string            `json:"client_id" db:"client_id"`
-	ClientSecret string            `json:"-" db:"client_secret"`
-	Name         string            `json:"name" db:"name"`
-	Scopes       []string          `json:"scopes" db:"scopes"`
 	Metadata     map[string]string `json:"metadata,omitempty" db:"metadata"`
 	CreatedAt    time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at" db:"updated_at"`
@@ -112,21 +97,10 @@ func (s *authStore) CreateFirstUser(ctx context.Context, user *User) error {
 	})
 }
 
-// ClientStore defines the interface for client credential storage operations
-type ClientStore interface {
-	CreateClient(ctx context.Context, client *ClientCredential) error
-	GetClient(ctx context.Context, id string) (*ClientCredential, error)
-	GetClientByClientID(ctx context.Context, clientID string) (*ClientCredential, error)
-	UpdateClient(ctx context.Context, client *ClientCredential) error
-	DeleteClient(ctx context.Context, id string) error
-	ListClients(ctx context.Context, offset, limit int) ([]*ClientCredential, int, error)
-}
-
-// AuthStore combines user and client storage with transaction support
+// AuthStore provides user persistence and connection lifecycle operations.
 type AuthStore interface {
 	Store
 	UserStore
-	ClientStore
 }
 
 // NewAuthStore creates a new auth store based on the configuration

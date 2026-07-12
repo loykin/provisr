@@ -101,48 +101,9 @@ func TestPIDFileDetector_WithMetaMismatch(t *testing.T) {
 	}
 }
 
-// Test legacy single-line and two-line formats are still supported
-func TestPIDFileDetector_LegacyFormats(t *testing.T) {
-	requireUnix(t)
-	cmd, err := startSleep("1")
-	if err != nil {
-		t.Fatalf("start sleep: %v", err)
-	}
-	defer func() { _ = cmd.Process.Kill() }()
-	pid := cmd.Process.Pid
-
-	dir := t.TempDir()
-	// Single-line pidfile
-	p1 := filepath.Join(dir, "one.pid")
-	if err := os.WriteFile(p1, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	alive, err := (PIDFileDetector{PIDFile: p1}).Alive()
-	if err != nil {
-		t.Fatalf("alive1 err: %v", err)
-	}
-	if !alive {
-		t.Fatalf("expected alive for single-line pidfile")
-	}
-
-	// Two-line where second is spec JSON (should be ignored by detector)
-	p2 := filepath.Join(dir, "two.pid")
-	specJSON := `{ "name": "demo", "command": "sleep 1" }`
-	if err := os.WriteFile(p2, []byte(strconv.Itoa(pid)+"\n"+specJSON+"\n"), 0o600); err != nil {
-		t.Fatalf("write2: %v", err)
-	}
-	alive2, err := (PIDFileDetector{PIDFile: p2}).Alive()
-	if err != nil {
-		t.Fatalf("alive2 err: %v", err)
-	}
-	if !alive2 {
-		t.Fatalf("expected alive for two-line pidfile")
-	}
-}
-
 // Fuzz PIDFileDetector.Alive with various malformed inputs to ensure robustness
 func FuzzPIDFileDetector_Alive(f *testing.F) {
-	f.Add("123\n", true)
+	f.Add("123\n{}\n{\"start_unix\":1}", true)
 	f.Add("not-a-number\n", false)
 	f.Add("\n\n{}\n{\"start_unix\":1}\n", false)
 	f.Fuzz(func(t *testing.T, content string, addNL bool) {
