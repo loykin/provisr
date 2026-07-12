@@ -291,7 +291,7 @@ func LoadConfig(configPath string) (*LoadedConfig, error) {
 	// 2) Programs directory - use config setting or default to "programs"
 	var programsDir string
 	if config.ProgramsDirectory != "" {
-		if filepath.IsAbs(config.ProgramsDirectory) {
+		if isConfigAbs(config.ProgramsDirectory) {
 			programsDir = config.ProgramsDirectory
 		} else {
 			programsDir = filepath.Join(filepath.Dir(configPath), config.ProgramsDirectory)
@@ -332,7 +332,7 @@ func LoadConfig(configPath string) (*LoadedConfig, error) {
 	// Apply default pid_dir to specs if configured and PIDFile is empty
 	if strings.TrimSpace(config.PIDDir) != "" {
 		pidDir := config.PIDDir
-		if !filepath.IsAbs(pidDir) {
+		if !isConfigAbs(pidDir) {
 			pidDir = filepath.Join(filepath.Dir(configPath), pidDir)
 		}
 		for i := range config.Specs {
@@ -380,7 +380,7 @@ func validateUniqueRuntimeEntries(specs []core.Spec, jobs []core.CronJob) error 
 
 func resolveConfigPaths(cfg *Config, baseDir string) {
 	resolve := func(path string) string {
-		if path == "" || filepath.IsAbs(path) {
+		if path == "" || isConfigAbs(path) {
 			return path
 		}
 		return filepath.Clean(filepath.Join(baseDir, path))
@@ -493,7 +493,7 @@ func loadProgramEntries(programsDir string) ([]core.Spec, []core.CronJob, error)
 
 func resolveSpecPaths(spec *core.Spec, baseDir string) {
 	resolve := func(path string) string {
-		if path == "" || filepath.IsAbs(path) {
+		if path == "" || isConfigAbs(path) {
 			return path
 		}
 		return filepath.Clean(filepath.Join(baseDir, path))
@@ -518,7 +518,7 @@ func resolveCronJobPaths(job *core.CronJob, baseDir string) {
 	job.JobTemplate.Log = processSpec.Log
 	job.JobTemplate.Lifecycle = processSpec.Lifecycle
 	resolve := func(path string) string {
-		if path == "" || filepath.IsAbs(path) {
+		if path == "" || isConfigAbs(path) {
 			return path
 		}
 		return filepath.Clean(filepath.Join(baseDir, path))
@@ -674,7 +674,7 @@ func applyGlobalLogDefaults(cfg *LoadedConfig) error {
 		if p == "" {
 			return ""
 		}
-		if filepath.IsAbs(p) {
+		if isConfigAbs(p) {
 			return filepath.Clean(p)
 		}
 		return filepath.Clean(filepath.Join(baseDir, p))
@@ -731,6 +731,14 @@ func applyGlobalLogDefaults(cfg *LoadedConfig) error {
 		cfg.CronJobs[i].JobTemplate.Log = jobSpec.Log
 	}
 	return nil
+}
+
+func isConfigAbs(path string) bool {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\`) {
+		return true
+	}
+	return len(path) >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+		path[1] == ':' && (path[2] == '/' || path[2] == '\\')
 }
 
 func buildGroups(groupConfigs []GroupConfig, specs []core.Spec) ([]core.ServiceGroup, error) {

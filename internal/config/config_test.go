@@ -131,6 +131,19 @@ path = ":memory:"
 	}
 }
 
+func TestIsConfigAbsIsCrossPlatform(t *testing.T) {
+	for _, path := range []string{"/app", `C:\\app`, `C:/app`, `\\server\share`} {
+		if !isConfigAbs(path) {
+			t.Errorf("isConfigAbs(%q) = false, want true", path)
+		}
+	}
+	for _, path := range []string{"app", "./app", "../app"} {
+		if isConfigAbs(path) {
+			t.Errorf("isConfigAbs(%q) = true, want false", path)
+		}
+	}
+}
+
 func TestLoadConfigHistoryStoreHierarchy(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "config.toml")
 	data := `
