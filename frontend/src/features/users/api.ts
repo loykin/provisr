@@ -5,6 +5,10 @@ export async function listUsers(): Promise<UserListResponse> {
   return apiFetch<UserListResponse>('/auth/users?limit=100')
 }
 
+export async function getUser(id: string): Promise<User> {
+  return apiFetch<User>(`/auth/users/${encodeURIComponent(id)}`)
+}
+
 export async function createUser(req: CreateUserRequest): Promise<User> {
   return apiFetch<User>('/auth/users', { method: 'POST', body: JSON.stringify(req) })
 }

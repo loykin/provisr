@@ -8,100 +8,35 @@ import (
 	"time"
 )
 
-func TestCommand_ReadAuthDBPathFromConfig(t *testing.T) {
-	tempDir := t.TempDir()
-	cmd := &command{mgr: nil}
-
-	tests := []struct {
-		name          string
-		configContent string
-		expected      string
-	}{
-		{
-			name: "config_with_auth_database_path",
-			configContent: `
-[auth]
-database_path = "custom-auth.db"
-enabled = true
-
-[server]
-listen = "127.0.0.1:8080"
-`,
-			expected: "custom-auth.db",
-		},
-		{
-			name: "config_without_auth_section",
-			configContent: `
+func TestCommand_CreateAuthStoreUsesServerAuthStoreConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	content := `
 [server]
 listen = "127.0.0.1:8080"
 
-[logs]
-level = "info"
-`,
-			expected: "",
-		},
-		{
-			name: "config_with_auth_but_no_database_path",
-			configContent: `
-[auth]
-enabled = true
-method = "basic"
-
-[server]
-listen = "127.0.0.1:8080"
-`,
-			expected: "",
-		},
-		{
-			name: "config_with_quoted_path",
-			configContent: `
-[auth]
-database_path = "path with spaces/auth.db"
-enabled = true
-`,
-			expected: "path with spaces/auth.db",
-		},
-		{
-			name: "config_with_multiple_sections",
-			configContent: `
-[server]
-listen = "127.0.0.1:8080"
-
-[auth]
-database_path = "multi-section-auth.db"
+[server.auth]
 enabled = true
 
-[logs]
-level = "debug"
-`,
-			expected: "multi-section-auth.db",
-		},
+[server.auth.store]
+type = "sqlite"
+path = ":memory:"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			configPath := filepath.Join(tempDir, tt.name+".toml")
-			if err := os.WriteFile(configPath, []byte(tt.configContent), 0o644); err != nil {
-				t.Fatalf("failed to create config file: %v", err)
-			}
-
-			result := cmd.readAuthDBPathFromConfig(configPath)
-
-			if result != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, result)
-			}
-		})
+	authStore, err := (&command{}).createAuthStore(configPath)
+	if err != nil {
+		t.Fatalf("createAuthStore() error: %v", err)
 	}
+	t.Cleanup(func() { _ = authStore.Close() })
+}
 
-	// Test with nonexistent file
-	t.Run("nonexistent_file", func(t *testing.T) {
-		nonexistentPath := filepath.Join(tempDir, "nonexistent.toml")
-		result := cmd.readAuthDBPathFromConfig(nonexistentPath)
-
-		if result != "" {
-			t.Errorf("expected empty string for nonexistent file, got '%s'", result)
-		}
-	})
+func TestCommand_CreateAuthStoreRejectsMissingConfig(t *testing.T) {
+	_, err := (&command{}).createAuthStore(filepath.Join(t.TempDir(), "missing.toml"))
+	if err == nil {
+		t.Fatal("expected missing config error")
+	}
 }
 
 func TestCommand_CreateAuthStore(t *testing.T) {

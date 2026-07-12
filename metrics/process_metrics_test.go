@@ -42,18 +42,6 @@ func TestNewProcessMetricsCollector(t *testing.T) {
 			},
 		},
 		{
-			name: "history_size alias",
-			config: ProcessMetricsConfig{
-				Enabled:     true,
-				HistorySize: 200,
-			},
-			expected: ProcessMetricsConfig{
-				Enabled:    true,
-				Interval:   5 * time.Second,
-				MaxHistory: 200,
-			},
-		},
-		{
 			name: "disabled collector",
 			config: ProcessMetricsConfig{
 				Enabled: false,
@@ -532,7 +520,7 @@ func TestProcessMetricsCollectorEdgeCases(t *testing.T) {
 func TestProcessMetricsCollectorMaxHistoryZero(t *testing.T) {
 	config := ProcessMetricsConfig{
 		Enabled:    true,
-		MaxHistory: 0, // Should default to HistorySize or 100
+		MaxHistory: 0, // Should default to 100
 	}
 	collector := NewProcessMetricsCollector(config)
 

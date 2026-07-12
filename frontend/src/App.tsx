@@ -40,6 +40,7 @@ const CronJobsPage = lazy(() => import('@/pages/CronJobsPage'))
 const CronJobRegisterPage = lazy(() => import('@/pages/CronJobRegisterPage'))
 const UsersPage = lazy(() => import('@/pages/UsersPage'))
 const UserRegisterPage = lazy(() => import('@/pages/UserRegisterPage'))
+const UserEditPage = lazy(() => import('@/pages/UserEditPage'))
 
 const navItems = [
   { id: 'workloads', label: 'Workloads', icon: Boxes, to: '/processes', match: ['/processes', '/jobs', '/cronjobs'] },
@@ -222,6 +223,12 @@ const userRegisterRoute = createRoute({
   component: UserRegisterPage,
 })
 
+const userEditRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'users/$id/edit',
+  component: UserEditPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -235,6 +242,7 @@ const routeTree = rootRoute.addChildren([
   cronJobsRegisterRoute,
   usersRoute,
   userRegisterRoute,
+  userEditRoute,
 ])
 
 export const router = createRouter({ routeTree, basepath: '/ui' })

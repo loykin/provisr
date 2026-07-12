@@ -57,6 +57,16 @@ func TestFactoryDSNTypes(t *testing.T) {
 	}
 }
 
+func TestFactoryCanDisableSQLiteMigration(t *testing.T) {
+	dsn := "sqlite://" + filepath.Join(t.TempDir(), "history.db")
+	sink, err := NewSinkFromDSNWithOptions(dsn, Options{Migrate: false})
+	if err != nil {
+		t.Fatalf("NewSinkFromDSNWithOptions() error: %v", err)
+	}
+	if closer, ok := sink.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
+}
 
 func TestParseOpenSearchDSN(t *testing.T) {
 	tests := []struct {

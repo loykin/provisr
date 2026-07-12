@@ -79,10 +79,9 @@ type ProcessMetricsCollector struct {
 
 // ProcessMetricsConfig holds configuration for process metrics collection
 type ProcessMetricsConfig struct {
-	Enabled     bool          `mapstructure:"enabled"`
-	Interval    time.Duration `mapstructure:"interval"`
-	MaxHistory  int           `mapstructure:"max_history"`
-	HistorySize int           `mapstructure:"history_size"` // alias for MaxHistory
+	Enabled    bool          `mapstructure:"enabled"`
+	Interval   time.Duration `mapstructure:"interval"`
+	MaxHistory int           `mapstructure:"max_history"`
 }
 
 // parseProcessName extracts process name and instance ID from full name
@@ -104,9 +103,6 @@ func parseProcessName(fullName string) (processName, instanceID string) {
 // NewProcessMetricsCollector creates a new process metrics collector
 func NewProcessMetricsCollector(config ProcessMetricsConfig) *ProcessMetricsCollector {
 	maxHistory := config.MaxHistory
-	if maxHistory == 0 {
-		maxHistory = config.HistorySize
-	}
 	if maxHistory == 0 {
 		maxHistory = 100 // default
 	}

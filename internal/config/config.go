@@ -16,25 +16,29 @@ import (
 )
 
 type Config struct {
-	UseOSEnv          bool           `mapstructure:"use_os_env"`
-	EnvFiles          []string       `mapstructure:"env_files"`
-	Env               []string       `mapstructure:"env"`
-	ProgramsDirectory string         `mapstructure:"programs_directory"`
-	PIDDir            string         `mapstructure:"pid_dir"`
-	Groups            []GroupConfig  `mapstructure:"groups"`
-	History           *HistoryConfig `mapstructure:"history"`
-	Metrics           *MetricsConfig `mapstructure:"metrics"`
-	Log               *LogConfig     `mapstructure:"log"`
-	Server            *ServerConfig  `mapstructure:"server"`
+	UseOSEnv          bool            `mapstructure:"use_os_env"`
+	EnvFiles          []string        `mapstructure:"env_files"`
+	Env               []string        `mapstructure:"env"`
+	ProgramsDirectory string          `mapstructure:"programs_directory"`
+	PIDDir            string          `mapstructure:"pid_dir"`
+	Groups            []GroupConfig   `mapstructure:"groups"`
+	History           *HistoryConfig  `mapstructure:"history"`
+	Metrics           *MetricsConfig  `mapstructure:"metrics"`
+	Log               *core.LogConfig `mapstructure:"log"`
+	Daemon            *DaemonConfig   `mapstructure:"daemon"`
+	Server            *ServerConfig   `mapstructure:"server"`
 
 	// Inline processes parsed as discriminated union entries
 	Processes []ProcessConfig `mapstructure:"processes"`
+}
 
-	// Computed/aggregated fields
-	GlobalEnv  []string
-	Specs      []core.Spec
-	GroupSpecs []core.ServiceGroup
-	CronJobs   []core.CronJob
+type LoadedConfig struct {
+	Config
+	GlobalEnv                 []string
+	Specs                     []core.Spec
+	GroupSpecs                []core.ServiceGroup
+	CronJobs                  []core.CronJob
+	ResolvedProgramsDirectory string
 
 	configPath string
 }
@@ -45,13 +49,46 @@ type GroupConfig struct {
 }
 
 type HistoryConfig struct {
-	Enabled         bool   `mapstructure:"enabled"`
-	InStore         *bool  `mapstructure:"in_store"`
-	StoreDSN        string `mapstructure:"store_dsn"`
-	OpenSearchURL   string `mapstructure:"opensearch_url"`
-	OpenSearchIndex string `mapstructure:"opensearch_index"`
-	ClickHouseURL   string `mapstructure:"clickhouse_url"`
-	ClickHouseTable string `mapstructure:"clickhouse_table"`
+	Enabled bool                `mapstructure:"enabled"`
+	Primary string              `mapstructure:"primary"`
+	Stores  HistoryStoresConfig `mapstructure:"stores"`
+}
+
+type HistoryStoresConfig struct {
+	SQLite     *SQLiteHistoryStoreConfig     `mapstructure:"sqlite"`
+	Postgres   *PostgresHistoryStoreConfig   `mapstructure:"postgres"`
+	ClickHouse *ClickHouseHistoryStoreConfig `mapstructure:"clickhouse"`
+	OpenSearch *OpenSearchHistoryStoreConfig `mapstructure:"opensearch"`
+}
+
+type SQLHistoryStoreConfig struct {
+	Enabled         bool          `mapstructure:"enabled"`
+	DSN             string        `mapstructure:"dsn"`
+	Migrate         *bool         `mapstructure:"migrate"`
+	Retention       time.Duration `mapstructure:"retention"`
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
+}
+
+type SQLiteHistoryStoreConfig struct {
+	SQLHistoryStoreConfig `mapstructure:",squash"`
+}
+
+type PostgresHistoryStoreConfig struct {
+	SQLHistoryStoreConfig `mapstructure:",squash"`
+}
+
+type ClickHouseHistoryStoreConfig struct {
+	SQLHistoryStoreConfig `mapstructure:",squash"`
+	Table                 string `mapstructure:"table"`
+}
+
+type OpenSearchHistoryStoreConfig struct {
+	Enabled         bool          `mapstructure:"enabled"`
+	URL             string        `mapstructure:"url"`
+	Index           string        `mapstructure:"index"`
+	Migrate         *bool         `mapstructure:"migrate"`
+	Retention       time.Duration `mapstructure:"retention"`
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
 }
 
 type MetricsConfig struct {
@@ -61,44 +98,27 @@ type MetricsConfig struct {
 }
 
 type ProcessMetricsConfig struct {
-	Enabled     bool          `mapstructure:"enabled"`
-	Interval    time.Duration `mapstructure:"interval"`
-	MaxHistory  int           `mapstructure:"max_history"`
-	HistorySize int           `mapstructure:"history_size"` // alias for MaxHistory
+	Enabled    bool          `mapstructure:"enabled"`
+	Interval   time.Duration `mapstructure:"interval"`
+	MaxHistory int           `mapstructure:"max_history"`
 }
 
-type LogConfig struct {
-	Dir        string `mapstructure:"dir"`
-	Stdout     string `mapstructure:"stdout"`
-	Stderr     string `mapstructure:"stderr"`
-	MaxSizeMB  int    `mapstructure:"max_size_mb"`
-	MaxBackups int    `mapstructure:"max_backups"`
-	MaxAgeDays int    `mapstructure:"max_age_days"`
-	Compress   bool   `mapstructure:"compress"`
+type DaemonConfig struct {
+	PIDFile string `mapstructure:"pid_file"`
+	LogFile string `mapstructure:"log_file"`
 }
 
 type ServerConfig struct {
-	Listen        string      `mapstructure:"listen"`
-	BasePath      string      `mapstructure:"base_path"`
-	PidFile       string      `mapstructure:"pidfile"`
-	LogFile       string      `mapstructure:"logfile"`
-	TLS           *TLSConfig  `mapstructure:"tls"`
-	TLSMinVersion string      `mapstructure:"tls_min_version"`
-	TLSMaxVersion string      `mapstructure:"tls_max_version"`
-	Auth          *AuthConfig `mapstructure:"auth"`
-	// History is populated from the top-level [history] section during
-	// LoadConfig so the HTTP server can expose it via the /history endpoint
-	// without requiring a duplicate [server.history] section.
-	History *HistoryConfig `mapstructure:"-"`
-	// ProgramsDirectory is populated from the top-level programs_directory
-	// setting during LoadConfig (resolved to an absolute path) so the HTTP
-	// server can persist processes registered/updated via the API as program
-	// files, the same way `provisr register` does for the CLI.
-	ProgramsDirectory string `mapstructure:"-"`
+	Listen   string      `mapstructure:"listen"`
+	BasePath string      `mapstructure:"base_path"`
+	TLS      *TLSConfig  `mapstructure:"tls"`
+	Auth     *AuthConfig `mapstructure:"auth"`
 }
 
 type TLSConfig struct {
 	Enabled      bool        `mapstructure:"enabled"`
+	MinVersion   string      `mapstructure:"min_version"`
+	MaxVersion   string      `mapstructure:"max_version"`
 	CertFile     string      `mapstructure:"cert_file"`
 	KeyFile      string      `mapstructure:"key_file"`
 	Dir          string      `mapstructure:"dir"`
@@ -124,6 +144,7 @@ type AuthConfig struct {
 
 type AuthStoreConfig struct {
 	Type         string `mapstructure:"type"` // "sqlite" or "postgresql"
+	Migrate      *bool  `mapstructure:"migrate"`
 	Path         string `mapstructure:"path,omitempty"`
 	Host         string `mapstructure:"host,omitempty"`
 	Port         int    `mapstructure:"port,omitempty"`
@@ -226,16 +247,17 @@ func decodeProcessEntry(pc ProcessConfig, ctx string) (core.Spec, *core.CronJob,
 	}
 }
 
-func LoadConfig(configPath string) (*Config, error) {
-	config := &Config{configPath: configPath}
+func LoadConfig(configPath string) (*LoadedConfig, error) {
+	var raw Config
 
-	if err := parseConfigFile(configPath, config); err != nil {
+	if err := parseConfigFile(configPath, &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-
-	if config.Server != nil {
-		config.Server.History = config.History
+	if err := validateConfig(&raw); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+	config := &LoadedConfig{Config: raw, configPath: configPath}
+	resolveConfigPaths(&config.Config, filepath.Dir(configPath))
 
 	// Initialize aggregated fields
 	config.Specs = make([]core.Spec, 0)
@@ -273,9 +295,7 @@ func LoadConfig(configPath string) (*Config, error) {
 		programsDir = filepath.Join(filepath.Dir(configPath), "programs")
 	}
 
-	if config.Server != nil {
-		config.Server.ProgramsDirectory = programsDir
-	}
+	config.ResolvedProgramsDirectory = programsDir
 
 	if specs, jobs, err := loadProgramEntries(programsDir); err != nil {
 		return nil, fmt.Errorf("failed to load programs from %s: %w", programsDir, err)
@@ -331,6 +351,40 @@ func LoadConfig(configPath string) (*Config, error) {
 	return config, nil
 }
 
+func resolveConfigPaths(cfg *Config, baseDir string) {
+	resolve := func(path string) string {
+		if path == "" || filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Clean(filepath.Join(baseDir, path))
+	}
+
+	for i := range cfg.EnvFiles {
+		cfg.EnvFiles[i] = resolve(cfg.EnvFiles[i])
+	}
+	cfg.PIDDir = resolve(cfg.PIDDir)
+	if cfg.Daemon != nil {
+		cfg.Daemon.PIDFile = resolve(cfg.Daemon.PIDFile)
+		cfg.Daemon.LogFile = resolve(cfg.Daemon.LogFile)
+	}
+	if cfg.Server != nil {
+		if cfg.Server.TLS != nil {
+			cfg.Server.TLS.CertFile = resolve(cfg.Server.TLS.CertFile)
+			cfg.Server.TLS.KeyFile = resolve(cfg.Server.TLS.KeyFile)
+			cfg.Server.TLS.Dir = resolve(cfg.Server.TLS.Dir)
+		}
+		if cfg.Server.Auth != nil && strings.EqualFold(cfg.Server.Auth.Store.Type, "sqlite") {
+			cfg.Server.Auth.Store.Path = resolve(cfg.Server.Auth.Store.Path)
+		}
+	}
+	if cfg.History != nil && cfg.History.Stores.SQLite != nil {
+		dsn := cfg.History.Stores.SQLite.DSN
+		if dsn != "" && dsn != ":memory:" && !strings.Contains(dsn, "://") {
+			cfg.History.Stores.SQLite.DSN = resolve(dsn)
+		}
+	}
+}
+
 func parseConfigFile(configPath string, out interface{}) error {
 	v := viper.New()
 	v.SetConfigFile(configPath)
@@ -339,7 +393,7 @@ func parseConfigFile(configPath string, out interface{}) error {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	if err := v.Unmarshal(out); err != nil {
+	if err := v.UnmarshalExact(out); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
@@ -388,7 +442,7 @@ func loadProgramEntries(programsDir string) ([]core.Spec, []core.CronJob, error)
 		}
 
 		var pc ProcessConfig
-		if err := v.Unmarshal(&pc); err != nil {
+		if err := v.UnmarshalExact(&pc); err != nil {
 			return nil, nil, fmt.Errorf("unmarshal %s: %w", full, err)
 		}
 
@@ -402,6 +456,99 @@ func loadProgramEntries(programsDir string) ([]core.Spec, []core.CronJob, error)
 		}
 	}
 	return specs, jobs, nil
+}
+
+func validateConfig(cfg *Config) error {
+	if cfg.Server != nil {
+		if cfg.Server.TLS != nil {
+			validTLSVersion := func(value string) bool {
+				switch value {
+				case "", "default", "1.2", "1.3", "TLS1.2", "TLS1.3", "tls1.2", "tls1.3":
+					return true
+				default:
+					return false
+				}
+			}
+			if !validTLSVersion(cfg.Server.TLS.MinVersion) || !validTLSVersion(cfg.Server.TLS.MaxVersion) {
+				return fmt.Errorf("server.tls min_version and max_version must be 1.2 or 1.3")
+			}
+			if cfg.Server.TLS.MinVersion == "1.3" && cfg.Server.TLS.MaxVersion == "1.2" {
+				return fmt.Errorf("server.tls.max_version must not be lower than min_version")
+			}
+		}
+		if auth := cfg.Server.Auth; auth != nil && auth.Enabled {
+			switch strings.ToLower(auth.Store.Type) {
+			case "sqlite":
+				if strings.TrimSpace(auth.Store.Path) == "" {
+					return fmt.Errorf("server.auth.store.path is required for sqlite")
+				}
+			case "postgres", "postgresql":
+				if strings.TrimSpace(auth.Store.Database) == "" {
+					return fmt.Errorf("server.auth.store.database is required for postgresql")
+				}
+			default:
+				return fmt.Errorf("server.auth.store.type must be sqlite or postgresql")
+			}
+			if auth.Store.MaxOpenConns > 0 && auth.Store.MaxIdleConns > auth.Store.MaxOpenConns {
+				return fmt.Errorf("server.auth.store.max_idle_conns must not exceed max_open_conns")
+			}
+		}
+	}
+	if cfg.Metrics != nil && cfg.Metrics.ProcessMetrics != nil {
+		process := cfg.Metrics.ProcessMetrics
+		if process.Interval < 0 || process.MaxHistory < 0 {
+			return fmt.Errorf("metrics.process_metrics interval and max_history must not be negative")
+		}
+	}
+
+	if cfg.History == nil || !cfg.History.Enabled {
+		return nil
+	}
+
+	enabled := map[string]bool{}
+	if store := cfg.History.Stores.SQLite; store != nil && store.Enabled {
+		enabled["sqlite"] = true
+		if store.Retention < 0 || store.CleanupInterval < 0 {
+			return fmt.Errorf("history.stores.sqlite retention durations must not be negative")
+		}
+	}
+	if store := cfg.History.Stores.Postgres; store != nil && store.Enabled {
+		enabled["postgres"] = true
+		if strings.TrimSpace(store.DSN) == "" {
+			return fmt.Errorf("history.stores.postgres.dsn is required")
+		}
+		if store.Retention < 0 || store.CleanupInterval < 0 {
+			return fmt.Errorf("history.stores.postgres retention durations must not be negative")
+		}
+	}
+	if store := cfg.History.Stores.ClickHouse; store != nil && store.Enabled {
+		enabled["clickhouse"] = true
+		if strings.TrimSpace(store.DSN) == "" {
+			return fmt.Errorf("history.stores.clickhouse.dsn is required")
+		}
+		if store.Retention < 0 || store.CleanupInterval < 0 {
+			return fmt.Errorf("history.stores.clickhouse retention durations must not be negative")
+		}
+	}
+	if store := cfg.History.Stores.OpenSearch; store != nil && store.Enabled {
+		enabled["opensearch"] = true
+		if strings.TrimSpace(store.URL) == "" || strings.TrimSpace(store.Index) == "" {
+			return fmt.Errorf("history.stores.opensearch.url and index are required")
+		}
+		if store.Retention < 0 || store.CleanupInterval < 0 {
+			return fmt.Errorf("history.stores.opensearch retention durations must not be negative")
+		}
+	}
+	if len(enabled) == 0 {
+		return fmt.Errorf("history.enabled requires at least one enabled store")
+	}
+	if strings.TrimSpace(cfg.History.Primary) == "" {
+		return fmt.Errorf("history.primary is required")
+	}
+	if !enabled[cfg.History.Primary] {
+		return fmt.Errorf("history.primary %q must name an enabled store", cfg.History.Primary)
+	}
+	return nil
 }
 
 func computeGlobalEnv(useOSEnv bool, envFiles []string, env []string) ([]string, error) {
@@ -440,7 +587,7 @@ func computeGlobalEnv(useOSEnv bool, envFiles []string, env []string) ([]string,
 	return result, nil
 }
 
-func applyGlobalLogDefaults(cfg *Config) error {
+func applyGlobalLogDefaults(cfg *LoadedConfig) error {
 	if cfg.Log == nil {
 		return nil
 	}
@@ -456,9 +603,9 @@ func applyGlobalLogDefaults(cfg *Config) error {
 		return filepath.Clean(filepath.Join(baseDir, p))
 	}
 
-	globalDir := makeAbs(cfg.Log.Dir)
-	globalStdout := makeAbs(cfg.Log.Stdout)
-	globalStderr := makeAbs(cfg.Log.Stderr)
+	globalDir := makeAbs(cfg.Log.File.Dir)
+	globalStdout := makeAbs(cfg.Log.File.StdoutPath)
+	globalStderr := makeAbs(cfg.Log.File.StderrPath)
 
 	apply := func(sp *core.Spec) {
 		// Only set path fields when the spec hasn't set any of them
@@ -476,19 +623,19 @@ func applyGlobalLogDefaults(cfg *Config) error {
 			}
 		}
 		// Apply rotation defaults if zero
-		if sp.Log.File.MaxSizeMB == 0 && cfg.Log.MaxSizeMB > 0 {
-			sp.Log.File.MaxSizeMB = cfg.Log.MaxSizeMB
+		if sp.Log.File.MaxSizeMB == 0 && cfg.Log.File.MaxSizeMB > 0 {
+			sp.Log.File.MaxSizeMB = cfg.Log.File.MaxSizeMB
 		}
-		if sp.Log.File.MaxBackups == 0 && cfg.Log.MaxBackups > 0 {
-			sp.Log.File.MaxBackups = cfg.Log.MaxBackups
+		if sp.Log.File.MaxBackups == 0 && cfg.Log.File.MaxBackups > 0 {
+			sp.Log.File.MaxBackups = cfg.Log.File.MaxBackups
 		}
-		if sp.Log.File.MaxAgeDays == 0 && cfg.Log.MaxAgeDays > 0 {
-			sp.Log.File.MaxAgeDays = cfg.Log.MaxAgeDays
+		if sp.Log.File.MaxAgeDays == 0 && cfg.Log.File.MaxAgeDays > 0 {
+			sp.Log.File.MaxAgeDays = cfg.Log.File.MaxAgeDays
 		}
 		// Compress default copies boolean as-is only when any path configured
 		if noPathsSet {
 			// If we just set paths above, respect global Compress
-			sp.Log.File.Compress = cfg.Log.Compress
+			sp.Log.File.Compress = cfg.Log.File.Compress
 		}
 	}
 
@@ -504,6 +651,7 @@ func applyGlobalLogDefaults(cfg *Config) error {
 		cfg.CronJobs[i].JobTemplate.Command = jobSpec.Command
 		cfg.CronJobs[i].JobTemplate.WorkDir = jobSpec.WorkDir
 		cfg.CronJobs[i].JobTemplate.Env = jobSpec.Env
+		cfg.CronJobs[i].JobTemplate.Log = jobSpec.Log
 	}
 	return nil
 }

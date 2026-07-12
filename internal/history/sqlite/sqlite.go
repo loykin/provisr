@@ -29,6 +29,10 @@ type Sink struct {
 	adapter *sqlxadapter.Adapter
 }
 
+type Options struct {
+	Migrate bool
+}
+
 // New creates a new SQLite-backed history sink.
 // DSN format:
 //   - "sqlite:///path/to/file.db"
@@ -36,6 +40,10 @@ type Sink struct {
 //   - "/path/to/file.db" (without prefix)
 //   - ":memory:" (in-memory database)
 func New(dsn string) (*Sink, error) {
+	return NewWithOptions(dsn, Options{Migrate: true})
+}
+
+func NewWithOptions(dsn string, options Options) (*Sink, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		return nil, errors.New("empty SQLite DSN")
@@ -62,11 +70,13 @@ func New(dsn string) (*Sink, error) {
 	}
 
 	src := sqlxadapter.NewSource(source, adapter.Executor())
-	if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
-		return migrate(ctx, db)
-	}); err != nil {
-		adapter.Close()
-		return nil, err
+	if options.Migrate {
+		if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
+			return migrate(ctx, db)
+		}); err != nil {
+			adapter.Close()
+			return nil, err
+		}
 	}
 
 	return &Sink{Source: src, adapter: adapter}, nil
@@ -152,9 +162,23 @@ func (s *Sink) Count(ctx context.Context, name string) (int, error) {
 	return total, err
 }
 
+func (s *Sink) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	var deleted int64
+	err := s.Run(ctx, func(ctx context.Context, db *sqlx.DB) error {
+		result, err := db.ExecContext(ctx, `DELETE FROM process_history WHERE timestamp < ?`, cutoff.UTC())
+		if err != nil {
+			return err
+		}
+		deleted, err = result.RowsAffected()
+		return err
+	})
+	return deleted, err
+}
+
 func (s *Sink) Close() error {
 	s.adapter.Close()
 	return nil
 }
 
 var _ corehistory.Reader = (*Sink)(nil)
+var _ corehistory.Pruner = (*Sink)(nil)

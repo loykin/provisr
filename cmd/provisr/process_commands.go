@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/loykin/provisr"
@@ -476,51 +475,11 @@ func (c *command) getProgramsDirectory(configPath string) (string, error) {
 		return filepath.Join(cwd, "programs"), nil
 	}
 
-	// Read programs_directory from config.toml if it exists
-	programsDir, err := c.readProgramsDirectoryFromConfig(configPath)
+	cfg, err := provisr.LoadConfig(configPath)
 	if err != nil {
-		// If config reading fails, use default
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(cwd, "programs"), nil
+		return "", fmt.Errorf("load config: %w", err)
 	}
-
-	// Convert relative path to absolute
-	if !filepath.IsAbs(programsDir) {
-		configDir := filepath.Dir(configPath)
-		programsDir = filepath.Join(configDir, programsDir)
-	}
-
-	return programsDir, nil
-}
-
-// readProgramsDirectoryFromConfig reads the programs_directory setting from config.toml
-func (c *command) readProgramsDirectoryFromConfig(configPath string) (string, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return "", err
-	}
-
-	// Simple TOML parsing to find programs_directory
-	// This is a basic implementation - in a full version, you'd use a TOML library
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "programs_directory") {
-			// Extract value: programs_directory = "value"
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				value := strings.TrimSpace(parts[1])
-				value = strings.Trim(value, `"`)
-				return value, nil
-			}
-		}
-	}
-
-	// Default programs directory if not specified
-	return "programs", nil
+	return cfg.ResolvedProgramsDirectory, nil
 }
 
 // isProcessInConfigFile checks if a process is defined in the main config.toml file.
@@ -534,43 +493,13 @@ func (c *command) isProcessInConfigFile(processName, configPath string) bool {
 		return false
 	}
 
-	data, err := os.ReadFile(configPath)
+	cfg, err := provisr.LoadConfig(configPath)
 	if err != nil {
 		return false
 	}
-
-	// Simple check for process definitions in config.toml
-	content := string(data)
-
-	// Check for [[processes]] sections with the given name
-	lines := strings.Split(content, "\n")
-	inProcessSection := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Start of a processes section
-		if strings.Contains(line, "[[processes]]") {
-			inProcessSection = true
-			continue
-		}
-
-		// Start of another section
-		if strings.HasPrefix(line, "[[") && !strings.Contains(line, "[[processes]]") {
-			inProcessSection = false
-			continue
-		}
-
-		// Check for name field in processes section
-		if inProcessSection && strings.HasPrefix(line, "name") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				name := strings.TrimSpace(parts[1])
-				name = strings.Trim(name, `"`)
-				if name == processName {
-					return true
-				}
-			}
+	for _, process := range cfg.Processes {
+		if name, ok := process.Spec["name"].(string); ok && name == processName {
+			return true
 		}
 	}
 

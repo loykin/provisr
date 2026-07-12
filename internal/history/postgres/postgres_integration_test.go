@@ -62,12 +62,12 @@ func TestSinkSendAndList(t *testing.T) {
 		require.NoError(t, sink.Send(ctx, e))
 	}
 
-	all, err := sink.List(ctx, "", 0)
+	all, err := sink.List(ctx, "", 0, 0)
 	require.NoError(t, err)
 	require.Len(t, all, 3)
 	require.Equal(t, "svc-b", all[0].Name, "expected newest row first")
 
-	filtered, err := sink.List(ctx, "svc-a", 0)
+	filtered, err := sink.List(ctx, "svc-a", 0, 0)
 	require.NoError(t, err)
 	require.Len(t, filtered, 2)
 	require.Equal(t, "stopped", filtered[0].Status)

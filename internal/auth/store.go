@@ -29,6 +29,7 @@ var (
 // StoreConfig represents configuration for the auth store
 type StoreConfig struct {
 	Type         string `toml:"type" yaml:"type" json:"type"` // "sqlite" or "postgresql"
+	Migrate      *bool  `toml:"migrate,omitempty" yaml:"migrate,omitempty" json:"migrate,omitempty"`
 	Path         string `toml:"path,omitempty" yaml:"path,omitempty" json:"path,omitempty"`
 	Host         string `toml:"host,omitempty" yaml:"host,omitempty" json:"host,omitempty"`
 	Port         int    `toml:"port,omitempty" yaml:"port,omitempty" json:"port,omitempty"`
@@ -44,6 +45,7 @@ type StoreConfig struct {
 func NewStore(config StoreConfig) (Store, error) {
 	storeConfig := store.Config{
 		Type:         config.Type,
+		Migrate:      config.Migrate,
 		Path:         config.Path,
 		Host:         config.Host,
 		Port:         config.Port,

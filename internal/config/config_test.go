@@ -106,6 +106,67 @@ base_path = "/api"
 	}
 }
 
+func TestLoadConfigHistoryStoreHierarchy(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[history]
+enabled = true
+primary = "sqlite"
+
+[history.stores.sqlite]
+enabled = true
+dsn = "history.db"
+migrate = false
+retention = "24h"
+cleanup_interval = "1h"
+`
+	if err := os.WriteFile(file, []byte(data), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := LoadConfig(file)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	store := cfg.History.Stores.SQLite
+	if store == nil || store.DSN != filepath.Join(filepath.Dir(file), "history.db") || store.Retention != 24*time.Hour {
+		t.Fatalf("unexpected sqlite history config: %+v", store)
+	}
+	if store.Migrate == nil || *store.Migrate {
+		t.Fatalf("migrate = %v, want false", store.Migrate)
+	}
+}
+
+func TestLoadConfigRejectsFlatHistoryConfig(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[history]
+enabled = true
+primary = "sqlite"
+store_dsn = "history.db"
+`
+	if err := os.WriteFile(file, []byte(data), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(file); err == nil {
+		t.Fatal("expected obsolete flat history field to be rejected")
+	}
+}
+
+func TestRepositorySampleConfigs(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "..", "config", "config.toml"),
+		filepath.Join("..", "..", "config", "process_metrics_demo.toml"),
+		filepath.Join("..", "..", "examples", "embedded_client", "daemon-config.toml"),
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			if _, err := LoadConfig(path); err != nil {
+				t.Fatalf("LoadConfig(%s) error: %v", path, err)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_InvalidFile(t *testing.T) {
 	_, err := LoadConfig("/nonexistent/file.toml")
 	if err == nil {
@@ -517,15 +578,11 @@ func TestApplyGlobalLogDefaults_Coverage(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 
-	cfg := &Config{
+	cfg := &LoadedConfig{
 		configPath: configPath,
-		Log: &LogConfig{
-			Dir:        "logs",
-			MaxSizeMB:  100,
-			MaxBackups: 5,
-			MaxAgeDays: 30,
-			Compress:   true,
-		},
+		Config: Config{Log: &core.LogConfig{File: core.LogFileConfig{
+			Dir: "logs", MaxSizeMB: 100, MaxBackups: 5, MaxAgeDays: 30, Compress: true,
+		}}},
 		Specs: []core.Spec{
 			{Name: "test1", Command: "echo test1"},
 			{Name: "test2", Command: "echo test2"},

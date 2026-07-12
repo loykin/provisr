@@ -183,11 +183,12 @@ curl -X POST 'localhost:8080/api/stop?wildcard=demo-*'
 
 ```toml
 [server]
-enabled = true
 listen = ":8080"
 base_path = "/api"
-pidfile = "/var/run/provisr.pid"  # For daemonization
-logfile = "/var/log/provisr.log"  # Optional
+
+[daemon]
+pid_file = "/var/run/provisr.pid"
+log_file = "/var/log/provisr.log"
 ```
 
 ```shell
@@ -213,21 +214,19 @@ Provisr supports multiple authentication methods for securing both HTTP API and 
 Enable authentication in your `config.toml`:
 
 ```toml
-[auth]
+[server.auth]
 enabled = true
-database_path = "auth.db"
-database_type = "sqlite"
+jwt_secret = "your-secret-key-change-this-in-production"
+token_ttl = "24h"
 
-[auth.jwt]
-secret = "your-secret-key-change-this-in-production"
-expires_in = "24h"
-
-[auth.admin]
-auto_create = true
-username = "admin"
-password = "admin"  # Change this immediately!
-email = "admin@localhost"
+[server.auth.store]
+type = "sqlite"
+path = "auth.db"
+migrate = true
 ```
+
+Create the first administrator through `POST /api/auth/bootstrap`; credentials
+are not stored in the config file.
 
 ### CLI Session Management
 

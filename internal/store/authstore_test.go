@@ -16,6 +16,18 @@ func newTestSQLiteAuthStore(t *testing.T) *SQLiteAuthStore {
 	return s
 }
 
+func TestSQLiteAuthStoreCanSkipMigrations(t *testing.T) {
+	migrate := false
+	s, err := NewSQLiteAuthStore(Config{Type: "sqlite", Path: ":memory:", Migrate: &migrate})
+	if err != nil {
+		t.Fatalf("NewSQLiteAuthStore() error: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, _, err := s.ListUsers(context.Background(), 0, 10); err == nil {
+		t.Fatal("ListUsers() succeeded without a pre-migrated schema")
+	}
+}
+
 func TestSQLiteAuthStore_UserCRUD(t *testing.T) {
 	ctx := context.Background()
 	s := newTestSQLiteAuthStore(t)

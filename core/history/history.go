@@ -56,3 +56,9 @@ type Reader interface {
 	List(ctx context.Context, name string, limit, offset int) ([]Entry, error)
 	Count(ctx context.Context, name string) (int, error)
 }
+
+// Pruner deletes history entries older than a cutoff. Persistent history
+// adapters implement this contract so retention remains storage-agnostic.
+type Pruner interface {
+	PruneBefore(ctx context.Context, cutoff time.Time) (int64, error)
+}

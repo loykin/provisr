@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/loykin/provisr/internal/auth"
+	"github.com/loykin/provisr/internal/config"
 	"github.com/loykin/provisr/internal/store"
 )
 
@@ -45,12 +44,17 @@ func (c *command) createAuthStore(configPath string) (store.AuthStore, error) {
 		Path: "auth.db",
 	}
 
-	// Try to read auth config from config file if it exists
 	if configPath != "" {
-		if _, err := os.Stat(configPath); err == nil {
-			// Simple TOML parsing to get auth database configuration
-			if dbPath := c.readAuthDBPathFromConfig(configPath); dbPath != "" {
-				authConfig.Path = dbPath
+		cfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("load config: %w", err)
+		}
+		if cfg.Server != nil && cfg.Server.Auth != nil {
+			s := cfg.Server.Auth.Store
+			authConfig = store.Config{
+				Type: s.Type, Migrate: s.Migrate, Path: s.Path, Host: s.Host, Port: s.Port,
+				Database: s.Database, Username: s.Username, Password: s.Password,
+				SSLMode: s.SSLMode, MaxOpenConns: s.MaxOpenConns, MaxIdleConns: s.MaxIdleConns,
 			}
 		}
 	}
@@ -58,49 +62,18 @@ func (c *command) createAuthStore(configPath string) (store.AuthStore, error) {
 	return store.NewAuthStore(authConfig)
 }
 
-// readAuthDBPathFromConfig reads auth database path from config.toml
-func (c *command) readAuthDBPathFromConfig(configPath string) string {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return ""
-	}
-
-	// Simple TOML parsing to find auth.database_path
-	lines := strings.Split(string(data), "\n")
-	inAuthSection := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Start of auth section
-		if strings.Contains(line, "[auth]") {
-			inAuthSection = true
-			continue
-		}
-
-		// Start of another section
-		if strings.HasPrefix(line, "[") && !strings.Contains(line, "[auth]") {
-			inAuthSection = false
-			continue
-		}
-
-		// Check for database_path in auth section
-		if inAuthSection && strings.HasPrefix(line, "database_path") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				value := strings.TrimSpace(parts[1])
-				value = strings.Trim(value, `"`)
-				return value
-			}
-		}
-	}
-
-	return ""
-}
-
 // AuthUserCreate creates a new user
 func (c *command) AuthUserCreate(f AuthUserCreateFlags, configPath string) error {
 	ctx := context.Background()
+	validRoles := map[string]bool{"admin": true, "operator": true, "viewer": true}
+	if len(f.Roles) == 0 {
+		return fmt.Errorf("at least one role is required")
+	}
+	for _, role := range f.Roles {
+		if !validRoles[role] {
+			return fmt.Errorf("invalid role %q (allowed: admin, operator, viewer)", role)
+		}
+	}
 
 	authStore, err := c.createAuthStore(configPath)
 	if err != nil {

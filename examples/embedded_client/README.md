@@ -19,7 +19,6 @@ The `pkg/client` package provides a clean, context-aware HTTP client for communi
    # Create a simple config file
    cat > daemon-config.toml << EOF
    [server]
-   enabled = true
    listen = "127.0.0.1:8080"
    base_path = "/api"
    EOF

@@ -21,7 +21,15 @@ import (
 //   - "postgresql://user:pass@host:port/db?sslmode=disable"
 //   - "sqlite:///path/to/file.db" or "sqlite://:memory:"
 //   - "/path/to/file.db" (defaults to SQLite)
+type Options struct {
+	Migrate bool
+}
+
 func NewSinkFromDSN(dsn string) (corehistory.Sink, error) {
+	return NewSinkFromDSNWithOptions(dsn, Options{Migrate: true})
+}
+
+func NewSinkFromDSNWithOptions(dsn string, options Options) (corehistory.Sink, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		return nil, errors.New("empty DSN")
@@ -38,11 +46,11 @@ func NewSinkFromDSN(dsn string) (corehistory.Sink, error) {
 	}
 
 	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
-		return postgres.New(dsn)
+		return postgres.NewWithOptions(dsn, postgres.Options{Migrate: options.Migrate})
 	}
 
 	if strings.HasPrefix(lower, "sqlite://") || !strings.Contains(dsn, "://") {
-		return sqlite.New(dsn)
+		return sqlite.NewWithOptions(dsn, sqlite.Options{Migrate: options.Migrate})
 	}
 
 	return nil, errors.New("unsupported DSN format: " + dsn)

@@ -31,25 +31,55 @@ members = ["api-server", "long-sleeper"]
 
 # Persistent store has been removed. State is managed in-memory with PID-file based recovery.
 
+# Optional daemon process configuration
+[daemon]
+pid_file = "./provisr.pid"
+log_file = "./provisr.log"
+
 # Optional HTTP API server configuration
 # When enabled, `provisr serve --config config/config.toml` will start an HTTP server.
 # You can override these with CLI flags: --api-listen and --api-base.
-# Optional History configuration (separate from store state)
-# Controls whether to record append-only history rows inside the store and/or
-# export lifecycle events to external systems like OpenSearch or ClickHouse.
-# When omitted, defaults are: in_store=true and no external exports.
+# Optional lifecycle history. The entire feature is disabled when this table
+# is omitted or enabled=false. Events are written to every enabled store;
+# primary selects the store used by the history read API.
 [history]
-# Master enable for external exports (sinks) defined below
-enabled = false
-# Toggle recording history rows in the configured store (if any)
-# Set to false to keep state only without history rows
-in_store = true
-# Optional OpenSearch sink
-# opensearch_url = "http://localhost:9200"
-# opensearch_index = "provisr-history"
-# Optional ClickHouse sink (HTTP interface)
-# clickhouse_url = "http://localhost:8123"
-# clickhouse_table = "default.provisr_history"
+# Master switch for all history stores.
+enabled = true
+primary = "sqlite"
+
+[history.stores.sqlite]
+enabled = true
+dsn = "provisr-history.db"
+# Run pending schema migrations when the store opens.
+# Disable when migrations are managed separately by deployment tooling or a DBA.
+migrate = true
+# Delete history older than this duration. Omit or set to 0 to retain
+# indefinitely. Cleanup runs once at startup and then at cleanup_interval.
+retention = "720h"
+cleanup_interval = "1h"
+
+# [history.stores.postgres]
+# enabled = true
+# dsn = "postgres://user:password@localhost/provisr?sslmode=disable"
+# migrate = true
+# retention = "720h"
+# cleanup_interval = "1h"
+
+# [history.stores.clickhouse]
+# enabled = true
+# dsn = "clickhouse://default:@localhost:9000/default"
+# table = "process_history"
+# migrate = true
+# retention = "720h"
+# cleanup_interval = "1h"
+
+# [history.stores.opensearch]
+# enabled = true
+# url = "http://localhost:9200"
+# index = "provisr-history"
+# migrate = true
+# retention = "720h"
+# cleanup_interval = "1h"
 
 [server]
 # There is no [server] "enabled" key — internal/config.ServerConfig has no
@@ -61,25 +91,14 @@ in_store = true
 listen = ":8080"
 # Base path for endpoints: {base}/start, {base}/stop, {base}/status
 base_path = "/api"
-# Optional: PID file for the provisr daemon itself (used when --daemonize is set)
-# When set, the daemon will write its PID to this path.
-pidfile = "./provisr.pid"
-# Optional: Daemon log file path (when running with --daemonize)
-# If not set here, you can still pass --logfile via CLI.
-logfile = "./provisr.log"
-# TLS version constraints (optional). These two keys belong directly under
-# [server], NOT under [server.tls] below — ServerConfig.TLSMinVersion/
-# TLSMaxVersion are sibling fields to `listen`/`base_path`, not part of the
-# nested TLSConfig struct. Uncommenting them inside [server.tls] instead
-# would silently do nothing.
-# tls_min_version = "1.2"  # or "1.3"
-# tls_max_version = "1.3"
-
 # TLS configuration for HTTPS server (optional)
 # When enabled, the server will use HTTPS instead of HTTP
 [server.tls]
 # Enable TLS (set to true to use HTTPS)
 enabled = false
+# TLS version constraints
+min_version = "1.2"
+max_version = "1.3"
 # Option 1: Use specific certificate files
 # cert_file = "/path/to/server.crt"
 # key_file = "/path/to/server.key"
@@ -136,6 +155,7 @@ enabled = true
 [server.auth.store]
 # Database type: "sqlite" or "postgresql"
 type = "sqlite"
+migrate = true
 # SQLite database path
 path = "auth.db"
 # PostgreSQL connection fields (only used when type = "postgresql")
@@ -148,12 +168,10 @@ path = "auth.db"
 
 # There is no [auth.jwt]/[auth.admin] section — credentials are never
 # read from config. When [server.auth] is enabled above and the store has
-# no users yet, `provisr serve` creates an "admin" user with a random
-# password and prints it once to stdout on that first boot only; nothing
-# happens on later restarts once any user exists. To create additional
-# users (or a specific username/password instead), use:
+# no users yet, create the first admin through POST /api/auth/bootstrap.
+# The bootstrap endpoint is disabled after the first user is created.
+# To create additional users, use:
 #   provisr auth user create --username <name> --password <password> \
 #     --roles admin --config config/config.toml
-# Without --roles admin the user gets the "user" role, which has zero
-# permissions once auth is enabled (see internal/auth/service.go's
-# HasPermission role table: only admin/operator/viewer are defined).
+# --roles is required. Valid roles are admin, operator, and viewer; there is
+# no implicit default role.

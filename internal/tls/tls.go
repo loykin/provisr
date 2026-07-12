@@ -33,14 +33,14 @@ func parseTLSVersion(ver string) (uint16, bool) {
 }
 
 // resolveTLSVersions resolves minimum and maximum TLS versions from server config
-func resolveTLSVersions(cfg config.ServerConfig) (min uint16, max uint16) {
+func resolveTLSVersions(cfg config.TLSConfig) (min uint16, max uint16) {
 	// Defaults: 1.3
 	min = tls.VersionTLS13
 	max = tls.VersionTLS13
-	if v, ok := parseTLSVersion(cfg.TLSMinVersion); ok {
+	if v, ok := parseTLSVersion(cfg.MinVersion); ok {
 		min = v
 	}
-	if v, ok := parseTLSVersion(cfg.TLSMaxVersion); ok {
+	if v, ok := parseTLSVersion(cfg.MaxVersion); ok {
 		max = v
 	}
 	return
@@ -80,7 +80,7 @@ func SetupTLS(server config.ServerConfig) (*tls.Config, error) {
 		return nil, nil
 	}
 
-	minVer, maxVer := resolveTLSVersions(server)
+	minVer, maxVer := resolveTLSVersions(*server.TLS)
 
 	// Priority 1: Use specific cert/key files if provided
 	if server.TLS.CertFile != "" && server.TLS.KeyFile != "" {

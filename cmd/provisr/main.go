@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/loykin/provisr"
+	historyruntime "github.com/loykin/provisr/internal/history"
 	"github.com/loykin/provisr/internal/history/clickhouse"
 	"github.com/loykin/provisr/internal/history/opensearch"
 	"github.com/spf13/cobra"
@@ -504,7 +506,7 @@ All configuration is loaded from config.toml file.
 Examples:
   provisr serve                     # Start daemon (uses --config)
   provisr serve config.toml         # Start with specific config file
-  provisr serve --daemonize         # Run as daemon in background (daemon pidfile configured via [server].pidfile)`,
+  provisr serve --daemonize         # Run as daemon in background (configured via [daemon])`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSimpleServeCommand(serveFlags, args)
 		},
@@ -545,14 +547,14 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		return fmt.Errorf("failed to create pid_dir %s: %w", pidDir, err)
 	}
 
-	// If daemonize is requested, now that we have cfg.Server, use its pidfile/logfile
+	// Daemon process settings are separate from the HTTP server settings.
 	if flags.Daemonize {
 		pidfile := ""
 		logfile := flags.LogFile
-		if cfg.Server != nil {
-			pidfile = cfg.Server.PidFile
+		if cfg.Daemon != nil {
+			pidfile = cfg.Daemon.PIDFile
 			if logfile == "" {
-				logfile = cfg.Server.LogFile
+				logfile = cfg.Daemon.LogFile
 			}
 		}
 		return daemonize(pidfile, logfile)
@@ -574,67 +576,94 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	}
 	mgr.SetInstanceGroups(managerGroups)
 	var historyReader provisr.HistoryReader
+	retentionCtx, stopRetention := context.WithCancel(context.Background())
+	defer stopRetention()
 
-	// Setup history sinks from config. `enabled` is the master switch for
-	// *external* exports (OpenSearch/ClickHouse) only — `in_store` (default
-	// true) independently controls local sqlite/postgres recording, so
-	// `enabled=false, in_store=true` (the shipped example config.toml) means
-	// "keep local history, don't export externally", matching the comments
-	// in config.toml. Previously `enabled=false` disabled in-store recording
-	// too, silently ignoring `in_store` entirely and leaving GET /history
-	// with nothing to show even though the config said otherwise.
-	if cfg.History != nil {
+	// Every configured history backend is a store. Events fan out to all
+	// enabled stores; primary selects the store used by the HTTP read API.
+	if cfg.History != nil && cfg.History.Enabled {
 		var sinks []provisr.HistorySink
-
-		inStore := cfg.History.InStore == nil || *cfg.History.InStore
-		if inStore {
-			dsn := cfg.History.StoreDSN
-			if dsn == "" {
-				// Two slashes, not three: sqlite.New only trims the
-				// "sqlite://" prefix, so a third slash here would leave a
-				// leading "/" and resolve to the absolute path
-				// "/provisr-history.db" at the filesystem root instead of a
-				// file relative to the working directory.
-				dsn = "sqlite://provisr-history.db"
-			}
-			sink, err := provisr.NewSinkFromDSN(dsn)
-			if err != nil {
-				fmt.Printf("Warning: failed to setup history store: %v\n", err)
-			} else {
-				sinks = append(sinks, sink)
-				if reader, ok := sink.(provisr.HistoryReader); ok {
-					historyReader = reader
+		register := func(name string, sink provisr.HistorySink, retention, interval time.Duration) error {
+			sinks = append(sinks, sink)
+			if name == cfg.History.Primary {
+				reader, ok := sink.(provisr.HistoryReader)
+				if !ok {
+					return fmt.Errorf("history primary store %q does not support reading", name)
 				}
+				historyReader = reader
 			}
+			if retention > 0 {
+				pruner, ok := sink.(provisr.HistoryPruner)
+				if !ok {
+					return fmt.Errorf("history store %q does not support retention", name)
+				}
+				go historyruntime.StartRetention(retentionCtx, pruner, retention, interval, nil,
+					func(deleted int64, err error) {
+						if err != nil {
+							fmt.Printf("Warning: failed to clean %s history: %v\n", name, err)
+						} else if deleted > 0 {
+							fmt.Printf("Cleaned %d expired %s history row(s)\n", deleted, name)
+						}
+					})
+			}
+			return nil
 		}
 
-		if cfg.History.Enabled {
-			if cfg.History.OpenSearchURL != "" {
-				sink, err := opensearch.New(cfg.History.OpenSearchURL, cfg.History.OpenSearchIndex)
-				if err != nil {
-					fmt.Printf("Warning: failed to setup OpenSearch history sink: %v\n", err)
-				} else {
-					sinks = append(sinks, sink)
-				}
+		if store := cfg.History.Stores.SQLite; store != nil && store.Enabled {
+			migrate := store.Migrate == nil || *store.Migrate
+			dsn := store.DSN
+			if dsn == "" {
+				dsn = "provisr-history.db"
 			}
-
-			if cfg.History.ClickHouseURL != "" {
-				table := cfg.History.ClickHouseTable
-				if table == "" {
-					table = "process_history"
-				}
-				sink, err := clickhouse.New(cfg.History.ClickHouseURL, table)
-				if err != nil {
-					fmt.Printf("Warning: failed to setup ClickHouse history sink: %v\n", err)
-				} else {
-					sinks = append(sinks, sink)
-				}
+			sink, err := provisr.NewSinkFromDSNWithOptions(dsn, provisr.HistorySinkOptions{Migrate: migrate})
+			if err != nil {
+				return fmt.Errorf("setup sqlite history store: %w", err)
+			}
+			if err := register("sqlite", sink, store.Retention, store.CleanupInterval); err != nil {
+				return err
+			}
+		}
+		if store := cfg.History.Stores.Postgres; store != nil && store.Enabled {
+			migrate := store.Migrate == nil || *store.Migrate
+			sink, err := provisr.NewSinkFromDSNWithOptions(store.DSN, provisr.HistorySinkOptions{Migrate: migrate})
+			if err != nil {
+				return fmt.Errorf("setup postgres history store: %w", err)
+			}
+			if err := register("postgres", sink, store.Retention, store.CleanupInterval); err != nil {
+				return err
+			}
+		}
+		if store := cfg.History.Stores.ClickHouse; store != nil && store.Enabled {
+			migrate := store.Migrate == nil || *store.Migrate
+			table := store.Table
+			if table == "" {
+				table = "process_history"
+			}
+			sink, err := clickhouse.NewWithOptions(store.DSN, table, clickhouse.Options{Migrate: migrate})
+			if err != nil {
+				return fmt.Errorf("setup clickhouse history store: %w", err)
+			}
+			if err := register("clickhouse", sink, store.Retention, store.CleanupInterval); err != nil {
+				return err
+			}
+		}
+		if store := cfg.History.Stores.OpenSearch; store != nil && store.Enabled {
+			migrate := store.Migrate == nil || *store.Migrate
+			sink, err := opensearch.NewWithOptions(store.URL, store.Index, opensearch.Options{Migrate: migrate})
+			if err != nil {
+				return fmt.Errorf("setup opensearch history store: %w", err)
+			}
+			if err := register("opensearch", sink, store.Retention, store.CleanupInterval); err != nil {
+				return err
 			}
 		}
 
 		if len(sinks) > 0 {
 			mgr.SetHistorySinks(sinks...)
-			fmt.Printf("History tracking enabled (%d sink(s))\n", len(sinks))
+			fmt.Printf("History tracking enabled (%d store(s))\n", len(sinks))
+		}
+		if cfg.History.Primary != "" && historyReader == nil {
+			return fmt.Errorf("history primary store %q is not enabled", cfg.History.Primary)
 		}
 	}
 
@@ -644,10 +673,9 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 		// Configure process metrics if enabled
 		if cfg.Metrics.ProcessMetrics != nil && cfg.Metrics.ProcessMetrics.Enabled {
 			processMetricsConfig := provisr.ProcessMetricsConfig{
-				Enabled:     cfg.Metrics.ProcessMetrics.Enabled,
-				Interval:    cfg.Metrics.ProcessMetrics.Interval,
-				MaxHistory:  cfg.Metrics.ProcessMetrics.MaxHistory,
-				HistorySize: cfg.Metrics.ProcessMetrics.HistorySize,
+				Enabled:    cfg.Metrics.ProcessMetrics.Enabled,
+				Interval:   cfg.Metrics.ProcessMetrics.Interval,
+				MaxHistory: cfg.Metrics.ProcessMetrics.MaxHistory,
 			}
 
 			// Register metrics with process metrics support
@@ -712,12 +740,12 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 
 	if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled {
 		protocol = "HTTPS"
-		server, err = provisr.NewTLSServerWithHistoryReader(*cfg.Server, mgr, cronScheduler, historyReader)
+		server, err = provisr.NewTLSServerWithHistoryReader(*cfg.Server, mgr, cronScheduler, historyReader, cfg.ResolvedProgramsDirectory)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTPS server: %w", err)
 		}
 	} else {
-		server, err = provisr.NewHTTPServerWithHistoryReader(*cfg.Server, mgr, cronScheduler, historyReader)
+		server, err = provisr.NewHTTPServerWithHistoryReader(*cfg.Server, mgr, cronScheduler, historyReader, cfg.ResolvedProgramsDirectory)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP server: %w", err)
 		}
@@ -731,6 +759,7 @@ func runSimpleServeCommand(flags *ServeFlags, args []string) error {
 	<-sigCh
 
 	fmt.Println("Shutting down...")
+	stopRetention()
 	if cronScheduler != nil {
 		_ = cronScheduler.Stop()
 	}
@@ -797,10 +826,11 @@ Examples:
 	cmd.Flags().StringVar(&flags.Username, "username", "", "username (required)")
 	cmd.Flags().StringVar(&flags.Password, "password", "", "password (required)")
 	cmd.Flags().StringVar(&flags.Email, "email", "", "email address")
-	cmd.Flags().StringSliceVar(&flags.Roles, "roles", []string{"user"}, "user roles (comma-separated)")
+	cmd.Flags().StringSliceVar(&flags.Roles, "roles", nil, "user roles: admin, operator, or viewer (required, comma-separated)")
 
 	_ = cmd.MarkFlagRequired("username")
 	_ = cmd.MarkFlagRequired("password")
+	_ = cmd.MarkFlagRequired("roles")
 
 	return cmd
 }

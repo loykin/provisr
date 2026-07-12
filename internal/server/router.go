@@ -78,6 +78,7 @@ func newRouterFromConfig(mgr *core.Manager, basePath string, authCfg *config.Aut
 	authService, err := auth.NewAuthService(auth.AuthConfig{
 		Store: auth.StoreConfig{
 			Type:         authCfg.Store.Type,
+			Migrate:      authCfg.Store.Migrate,
 			Path:         authCfg.Store.Path,
 			Host:         authCfg.Store.Host,
 			Port:         authCfg.Store.Port,
@@ -215,13 +216,13 @@ func (r *Router) Handler() http.Handler {
 // The returned function can be called to shutdown the server immediately
 // by closing the listener via http.Server's Close.
 func NewServer(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler) (*http.Server, error) {
-	return NewServerWithHistoryReader(serverConfig, mgr, cronScheduler, nil)
+	return NewServerWithHistoryReader(serverConfig, mgr, cronScheduler, nil, "")
 }
 
 // NewServerWithHistoryReader starts an HTTP server with a history reader
 // supplied by the composition root.
-func NewServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader) (*http.Server, error) {
-	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.ProgramsDirectory, cronScheduler, historyReader)
+func NewServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader, programsDirectory string) (*http.Server, error) {
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, programsDirectory, cronScheduler, historyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -258,8 +259,8 @@ func NewServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Mana
 
 // NewTLSServerWithHistoryReader is the TLS equivalent of
 // NewServerWithHistoryReader.
-func NewTLSServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader) (*http.Server, error) {
-	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, serverConfig.ProgramsDirectory, cronScheduler, historyReader)
+func NewTLSServerWithHistoryReader(serverConfig config.ServerConfig, mgr *core.Manager, cronScheduler *core.CronScheduler, historyReader corehistory.Reader, programsDirectory string) (*http.Server, error) {
+	r, err := newRouterFromConfig(mgr, serverConfig.BasePath, serverConfig.Auth, programsDirectory, cronScheduler, historyReader)
 	if err != nil {
 		return nil, err
 	}

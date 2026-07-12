@@ -5,18 +5,18 @@ env = ["DAEMON_MODE=embedded_example"]
 pid_dir = "./run"
 
 [log]
-level = "info"
-format = "text"
-color = true
-timestamps = true
-source = false
+dir = "./logs"
+max_size_mb = 10
+max_backups = 3
+max_age_days = 7
+compress = false
+
+[daemon]
+pid_file = "./provisr-daemon.pid"
 
 [server]
-enabled = true
 listen = "127.0.0.1:8080"
 base_path = "/api"
-# Daemon PID will be written here when running with --daemonize
-pidfile = "./provisr-daemon.pid"
 
 [metrics]
 enabled = false

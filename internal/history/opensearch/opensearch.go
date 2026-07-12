@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 
@@ -29,9 +30,17 @@ type Sink struct {
 	index   string
 }
 
+type Options struct {
+	Migrate bool
+}
+
 // New opens a connection to OpenSearch at baseURL and returns a Sink that
 // writes events to index.
 func New(baseURL, index string) (*Sink, error) {
+	return NewWithOptions(baseURL, index, Options{})
+}
+
+func NewWithOptions(baseURL, index string, options Options) (*Sink, error) {
 	adapter := opensearchadapter.New()
 	adapter.RegisterDriver("opensearch", opensearchadapter.Driver{})
 	adapter.SetObserver(prometheusadapter.New("provisr_history_opensearch", nil))
@@ -42,7 +51,23 @@ func New(baseURL, index string) (*Sink, error) {
 		return nil, fmt.Errorf("opensearch: register pool: %w", err)
 	}
 
-	return &Sink{Source: opensearchadapter.NewSource(source, adapter.Executor()), adapter: adapter, index: index}, nil
+	sink := &Sink{Source: opensearchadapter.NewSource(source, adapter.Executor()), adapter: adapter, index: index}
+	if options.Migrate {
+		err := sink.Run(context.Background(), func(ctx context.Context, c *opensearchapi.Client) error {
+			resp, err := c.Indices.Exists(ctx, opensearchapi.IndicesExistsReq{Indices: []string{index}})
+			if err == nil && resp.StatusCode == 200 {
+				return nil
+			}
+			body := strings.NewReader(`{"mappings":{"properties":{"occurred_at":{"type":"date"},"record":{"properties":{"name":{"type":"keyword"},"pid":{"type":"integer"},"last_status":{"type":"keyword"}}}}}}`)
+			_, err = c.Indices.Create(ctx, opensearchapi.IndicesCreateReq{Index: index, Body: body})
+			return err
+		})
+		if err != nil {
+			adapter.Close()
+			return nil, fmt.Errorf("opensearch: migrate index: %w", err)
+		}
+	}
+	return sink, nil
 }
 
 func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
@@ -65,20 +90,22 @@ func (s *Sink) Send(ctx context.Context, e corehistory.Event) error {
 // events for all processes are returned. limit is capped at 500 (defaults
 // to 100). Requires the index to have refreshed since the last write —
 // OpenSearch search results are near-real-time, not immediately consistent.
-func (s *Sink) List(ctx context.Context, name string, limit int) ([]corehistory.Event, error) {
+func (s *Sink) List(ctx context.Context, name string, limit, offset int) ([]corehistory.Entry, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	query := map[string]any{"match_all": map[string]any{}}
 	if name != "" {
-		// term (not match) against the auto-generated .keyword sub-field:
-		// "match" analyzes both sides, and since the standard analyzer
-		// splits on "-", "svc-a" and "svc-b" both tokenize to ["svc", ...]
-		// and a match query would OR across tokens, matching either name.
-		query = map[string]any{"term": map[string]any{"record.name.keyword": name}}
+		query = map[string]any{"wildcard": map[string]any{"record.name": map[string]any{
+			"value": "*" + escapeWildcard(name) + "*", "case_insensitive": true,
+		}}}
 	}
 	body, err := json.Marshal(map[string]any{
+		"from":  offset,
 		"size":  limit,
 		"sort":  []any{map[string]any{"occurred_at": map[string]any{"order": "desc"}}},
 		"query": query,
@@ -87,7 +114,7 @@ func (s *Sink) List(ctx context.Context, name string, limit int) ([]corehistory.
 		return nil, err
 	}
 
-	var events []corehistory.Event
+	var entries []corehistory.Entry
 	err = s.Run(ctx, func(ctx context.Context, c *opensearchapi.Client) error {
 		resp, err := c.Search(ctx, &opensearchapi.SearchReq{
 			Indices: []string{s.index},
@@ -96,17 +123,66 @@ func (s *Sink) List(ctx context.Context, name string, limit int) ([]corehistory.
 		if err != nil {
 			return err
 		}
-		events = make([]corehistory.Event, 0, len(resp.Hits.Hits))
+		entries = make([]corehistory.Entry, 0, len(resp.Hits.Hits))
 		for _, hit := range resp.Hits.Hits {
 			var e corehistory.Event
 			if err := json.Unmarshal(hit.Source, &e); err != nil {
 				return err
 			}
-			events = append(events, e)
+			entries = append(entries, corehistory.Entry{
+				Timestamp: e.OccurredAt,
+				PID:       e.Record.PID,
+				Name:      e.Record.Name,
+				Status:    e.Record.LastStatus,
+			})
 		}
 		return nil
 	})
-	return events, err
+	return entries, err
+}
+
+func (s *Sink) Count(ctx context.Context, name string) (int, error) {
+	query := map[string]any{"match_all": map[string]any{}}
+	if name != "" {
+		query = map[string]any{"wildcard": map[string]any{"record.name": map[string]any{"value": "*" + escapeWildcard(name) + "*", "case_insensitive": true}}}
+	}
+	body, err := json.Marshal(map[string]any{"size": 0, "query": query})
+	if err != nil {
+		return 0, err
+	}
+	var total int
+	err = s.Run(ctx, func(ctx context.Context, c *opensearchapi.Client) error {
+		resp, err := c.Search(ctx, &opensearchapi.SearchReq{Indices: []string{s.index}, Body: bytes.NewReader(body)})
+		if err == nil {
+			total = resp.Hits.Total.Value
+		}
+		return err
+	})
+	return total, err
+}
+
+func escapeWildcard(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `*`, `\*`)
+	return strings.ReplaceAll(value, `?`, `\?`)
+}
+
+func (s *Sink) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	body, err := json.Marshal(map[string]any{"query": map[string]any{"range": map[string]any{"occurred_at": map[string]any{"lt": cutoff.UTC().Format(time.RFC3339Nano)}}}})
+	if err != nil {
+		return 0, err
+	}
+	var deleted int64
+	err = s.Run(ctx, func(ctx context.Context, c *opensearchapi.Client) error {
+		resp, err := c.Document.DeleteByQuery(ctx, opensearchapi.DocumentDeleteByQueryReq{
+			Indices: []string{s.index}, Body: bytes.NewReader(body),
+		})
+		if err == nil {
+			deleted = int64(resp.Deleted)
+		}
+		return err
+	})
+	return deleted, err
 }
 
 func (s *Sink) Close() error {
@@ -116,3 +192,5 @@ func (s *Sink) Close() error {
 
 // compile-time check that Sink satisfies corehistory.Sink
 var _ corehistory.Sink = (*Sink)(nil)
+var _ corehistory.Reader = (*Sink)(nil)
+var _ corehistory.Pruner = (*Sink)(nil)

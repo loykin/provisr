@@ -1,8 +1,7 @@
 import { Pencil, Trash2 } from 'lucide-react'
-import { useSidePanel } from '@loykin/side-panel'
+import { useNavigate } from '@tanstack/react-router'
 import { IconAction } from '@/components/icon-action'
 import { useAuth } from '@/features/auth/context'
-import { UserEditPanel } from './UserFormPanel'
 import { useDeleteUser } from './queries'
 import type { User } from './types'
 
@@ -11,7 +10,7 @@ import type { User } from './types'
 // internal/auth/service.go HasPermission), so this is a UI-only guard.
 export function UserActions({ user: target }: { user: User }) {
   const { user } = useAuth()
-  const { open } = useSidePanel()
+  const navigate = useNavigate()
   const del = useDeleteUser()
 
   if (!user?.roles.includes('admin')) return null
@@ -24,7 +23,7 @@ export function UserActions({ user: target }: { user: User }) {
 
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <IconAction label="Edit user" onClick={() => open(<UserEditPanel user={target} />, { size: 480 })}>
+      <IconAction label="Edit user" onClick={() => void navigate({ to: '/users/$id/edit', params: { id: target.id } })}>
         <Pencil className="h-3.5 w-3.5" />
       </IconAction>
       <IconAction label="Delete user" disabled={del.isPending} onClick={handleDelete}>

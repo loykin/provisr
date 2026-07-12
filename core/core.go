@@ -93,6 +93,7 @@ const (
 type HistorySink = history.Sink
 type HistoryReader = history.Reader
 type HistoryEntry = history.Entry
+type HistoryPruner = history.Pruner
 
 // --- Manager facade ---
 

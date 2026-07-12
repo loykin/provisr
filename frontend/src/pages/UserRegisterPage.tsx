@@ -3,7 +3,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { DataBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/api'
-import { UserFormFields, initialUserForm, type UserFormState } from '@/features/users/UserFormPanel'
+import { UserFormFields } from '@/features/users/UserForm'
+import { initialUserForm, type UserFormState } from '@/features/users/user-form-state'
 import { useCreateUser } from '@/features/users/queries'
 
 export default function UserRegisterPage() {

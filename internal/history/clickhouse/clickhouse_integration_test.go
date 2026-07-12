@@ -33,7 +33,7 @@ func TestSink_Integration_SendAndList(t *testing.T) {
 
 	dsn := fmt.Sprintf("clickhouse://%s:%s@%s/%s", ctr.User, ctr.Password, host, ctr.DbName)
 
-	sink, err := New(dsn, "process_history")
+	sink, err := NewWithOptions(dsn, "process_history", Options{Migrate: false})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sink.Close() })
 
@@ -44,7 +44,8 @@ func TestSink_Integration_SendAndList(t *testing.T) {
 				type String,
 				occurred_at DateTime,
 				record_name String,
-				record_pid Int32
+				record_pid Int32,
+				record_status String
 			) ENGINE = MergeTree() ORDER BY occurred_at`)
 		return err
 	}))
@@ -62,14 +63,14 @@ func TestSink_Integration_SendAndList(t *testing.T) {
 		Record:     corehistory.Record{Name: "svc-b", PID: 456, LastStatus: "stopped"},
 	}))
 
-	all, err := sink.List(ctx, "", 10)
+	all, err := sink.List(ctx, "", 10, 0)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 
-	filtered, err := sink.List(ctx, "svc-a", 10)
+	filtered, err := sink.List(ctx, "svc-a", 10, 0)
 	require.NoError(t, err)
 	require.Len(t, filtered, 1)
 	require.Equal(t, "svc-a", filtered[0].Name)
 	require.Equal(t, 123, filtered[0].PID)
-	require.Equal(t, "start", filtered[0].Type)
+	require.Equal(t, "running", filtered[0].Status)
 }

@@ -7,7 +7,8 @@ import (
 
 // Config represents configuration for different store types
 type Config struct {
-	Type string `toml:"type" yaml:"type" json:"type"` // "sqlite", "postgresql", "memory", etc.
+	Type    string `toml:"type" yaml:"type" json:"type"` // "sqlite", "postgresql", "memory", etc.
+	Migrate *bool  `toml:"migrate,omitempty" yaml:"migrate,omitempty" json:"migrate,omitempty"`
 
 	// SQLite specific
 	Path string `toml:"path,omitempty" yaml:"path,omitempty" json:"path,omitempty"`

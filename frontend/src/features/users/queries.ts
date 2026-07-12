@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createUser, deleteUser, listUsers, updateUser } from './api'
+import { createUser, deleteUser, getUser, listUsers, updateUser } from './api'
 import type { CreateUserRequest, UpdateUserRequest } from './types'
 
 export function useUsers() {
   return useQuery({ queryKey: ['users'], queryFn: listUsers })
+}
+
+export function useUser(id: string) {
+  return useQuery({ queryKey: ['users', id], queryFn: () => getUser(id), enabled: Boolean(id) })
 }
 
 export function useCreateUser() {

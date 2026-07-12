@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/loykin/provisr/core/internal/logger"
 	"github.com/loykin/provisr/core/internal/process"
 )
 
@@ -15,6 +16,7 @@ type Spec struct {
 	Args                    []string               `json:"args" mapstructure:"args"`       // argv slice; when set, Command is ignored and no shell is invoked
 	WorkDir                 string                 `json:"work_dir" mapstructure:"work_dir"`
 	Env                     []string               `json:"env" mapstructure:"env"`
+	Log                     logger.Config          `json:"log" mapstructure:"log"`
 	TTLSecondsAfterFinished *int32                 `json:"ttl_seconds_after_finished" mapstructure:"ttl_seconds_after_finished"` // Delete job after completion
 	ActiveDeadlineSeconds   *int64                 `json:"active_deadline_seconds" mapstructure:"active_deadline_seconds"`       // Job timeout
 	BackoffLimit            *int32                 `json:"backoff_limit" mapstructure:"backoff_limit"`                           // Retry attempts (default 6)
@@ -157,6 +159,7 @@ func (j *Spec) ToProcessSpec() *process.Spec {
 		Args:        append([]string(nil), j.Args...),
 		WorkDir:     j.WorkDir,
 		Env:         append([]string(nil), j.Env...),
+		Log:         j.Log,
 		AutoRestart: false,
 		Lifecycle:   j.Lifecycle.DeepCopy(),
 	}

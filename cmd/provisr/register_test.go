@@ -669,7 +669,7 @@ func TestCommand_ValidateProcessSpec(t *testing.T) {
 	}
 }
 
-func TestCommand_ReadProgramsDirectoryFromConfig(t *testing.T) {
+func TestCommand_GetProgramsDirectoryFromConfig(t *testing.T) {
 	// Create temporary config file
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.toml")
@@ -687,14 +687,15 @@ listen = "127.0.0.1:8080"
 	}
 
 	cmd := &command{mgr: nil}
-	result, err := cmd.readProgramsDirectoryFromConfig(configPath)
+	result, err := cmd.getProgramsDirectory(configPath)
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if result != "my-programs" {
-		t.Errorf("expected 'my-programs', got %q", result)
+	want := filepath.Join(tempDir, "my-programs")
+	if result != want {
+		t.Errorf("expected %q, got %q", want, result)
 	}
 }
 

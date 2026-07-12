@@ -1,15 +1,13 @@
 import { Navigate, useNavigate } from '@tanstack/react-router'
 import { DataGrid } from '@loykin/gridkit'
 import { DataPage, PageBreadcrumb } from '@loykin/designkit'
-import { SidePanelProvider, useSidePanel } from '@loykin/side-panel'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/context'
 import { useUsers } from '@/features/users/queries'
 import { userColumns } from '@/features/users/columns'
-import { UserEditPanel } from '@/features/users/UserFormPanel'
 
 function UsersGrid() {
-  const { open } = useSidePanel()
+  const navigate = useNavigate()
   const { data } = useUsers()
   const rows = data?.users ?? []
 
@@ -19,7 +17,7 @@ function UsersGrid() {
       columns={userColumns}
       getRowId={(row) => row.id}
       initialSorting={[{ id: 'username', desc: false }]}
-      onRowClick={(row) => open(<UserEditPanel user={row} />, { size: 480 })}
+      onRowClick={(row) => void navigate({ to: '/users/$id/edit', params: { id: row.id } })}
       classNames={{ root: 'shrink-0' }}
     />
   )
@@ -66,9 +64,5 @@ export default function UsersPage() {
     return <Navigate to="/processes" replace />
   }
 
-  return (
-    <SidePanelProvider className="h-full" defaultSize={480} defaultMinSize={360} defaultMaxSize={800}>
-      <UsersPageBody />
-    </SidePanelProvider>
-  )
+  return <UsersPageBody />
 }

@@ -63,6 +63,7 @@ type ManagerInstanceGroup = core.ManagerInstanceGroup
 type HistorySink = core.HistorySink
 type HistoryReader = core.HistoryReader
 type HistoryEntry = core.HistoryEntry
+type HistoryPruner = core.HistoryPruner
 
 // Process metrics types
 type ProcessMetrics = core.ProcessMetrics
@@ -101,6 +102,7 @@ func NewProcessMetricsCollector(cfg ProcessMetricsConfig) *ProcessMetricsCollect
 // --- Config types (specific to the orchestrator) ---
 
 type Config = cfg.Config
+type LoadedConfig = cfg.LoadedConfig
 type ServerConfig = cfg.ServerConfig
 type TLSConfig = cfg.TLSConfig
 type AutoGenTLS = cfg.AutoGenTLS
@@ -108,25 +110,26 @@ type ServerAuthConfig = cfg.AuthConfig
 type HistoryConfig = cfg.HistoryConfig
 
 // LoadConfig parses a provisr configuration file.
-func LoadConfig(path string) (*cfg.Config, error) { return cfg.LoadConfig(path) }
+func LoadConfig(path string) (*cfg.LoadedConfig, error) { return cfg.LoadConfig(path) }
 
-// NewSinkFromDSN creates a HistorySink from a DSN string.
-// Supported schemes: opensearch://, elasticsearch://, postgres://, postgresql://, sqlite://.
-// For ClickHouse, import github.com/loykin/provisr/history/clickhouse instead.
-func NewSinkFromDSN(dsn string) (HistorySink, error) {
-	return factory.NewSinkFromDSN(dsn)
+type HistorySinkOptions struct {
+	Migrate bool
+}
+
+func NewSinkFromDSNWithOptions(dsn string, options HistorySinkOptions) (HistorySink, error) {
+	return factory.NewSinkFromDSNWithOptions(dsn, factory.Options{Migrate: options.Migrate})
 }
 
 // --- HTTP server / router facades ---
 
 // NewHTTPServerWithHistoryReader starts the HTTP server with a reader created
 // by the application's composition root.
-func NewHTTPServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader) (*http.Server, error) {
-	return iapi.NewServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
+func NewHTTPServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader, programsDirectory string) (*http.Server, error) {
+	return iapi.NewServerWithHistoryReader(serverConfig, m, cronScheduler, reader, programsDirectory)
 }
 
-func NewTLSServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader) (*http.Server, error) {
-	return iapi.NewTLSServerWithHistoryReader(serverConfig, m, cronScheduler, reader)
+func NewTLSServerWithHistoryReader(serverConfig ServerConfig, m *Manager, cronScheduler *CronScheduler, reader HistoryReader, programsDirectory string) (*http.Server, error) {
+	return iapi.NewTLSServerWithHistoryReader(serverConfig, m, cronScheduler, reader, programsDirectory)
 }
 
 // Router is a thin facade over the internal HTTP router for embedding into

@@ -106,3 +106,47 @@ func TestNewRejectsEmptyDSN(t *testing.T) {
 		t.Fatal("expected error for empty DSN")
 	}
 }
+
+func TestNewWithOptionsCanSkipMigrations(t *testing.T) {
+	sink, err := NewWithOptions(filepath.Join(t.TempDir(), "history.db"), Options{Migrate: false})
+	if err != nil {
+		t.Fatalf("NewWithOptions() error: %v", err)
+	}
+	t.Cleanup(func() { _ = sink.Close() })
+
+	err = sink.Send(context.Background(), corehistory.Event{
+		OccurredAt: time.Now(),
+		Record:     corehistory.Record{Name: "svc"},
+	})
+	if err == nil {
+		t.Fatal("Send() succeeded without a pre-migrated schema")
+	}
+}
+
+func TestSinkPruneBefore(t *testing.T) {
+	sink, err := New(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	t.Cleanup(func() { _ = sink.Close() })
+
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, occurredAt := range []time.Time{base, base.Add(24 * time.Hour)} {
+		if err := sink.Send(ctx, corehistory.Event{OccurredAt: occurredAt, Record: corehistory.Record{Name: "svc"}}); err != nil {
+			t.Fatalf("Send() error: %v", err)
+		}
+	}
+
+	deleted, err := sink.PruneBefore(ctx, base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("PruneBefore() error: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	total, err := sink.Count(ctx, "")
+	if err != nil || total != 1 {
+		t.Fatalf("Count() = %d, %v; want 1, nil", total, err)
+	}
+}

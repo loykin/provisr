@@ -40,7 +40,7 @@ type SQLiteAuthStore struct{ *authStore }
 // PostgreSQLAuthStore implements AuthStore backed by PostgreSQL.
 type PostgreSQLAuthStore struct{ *authStore }
 
-func newAuthStore(driverName, dsn string, poolCfg dbstore.PoolConfig, migrationsFS embed.FS, dialect goose.Dialect) (*authStore, error) {
+func newAuthStore(driverName, dsn string, poolCfg dbstore.PoolConfig, migrationsFS embed.FS, dialect goose.Dialect, migrate bool) (*authStore, error) {
 	adapter := sqlxadapter.New()
 	adapter.RegisterDriver(driverName, sqlxadapter.NewDriver(driverName))
 	adapter.SetObserver(prometheusadapter.New("provisr_auth_store", nil))
@@ -52,22 +52,24 @@ func newAuthStore(driverName, dsn string, poolCfg dbstore.PoolConfig, migrations
 		return nil, fmt.Errorf("register auth store pool: %w", err)
 	}
 
-	goose.SetBaseFS(migrationsFS)
-	goose.SetLogger(goose.NopLogger())
-	if err := goose.SetDialect(string(dialect)); err != nil {
-		adapter.Close()
-		return nil, fmt.Errorf("goose set dialect: %w", err)
-	}
-	dir := "migrations/sqlite"
-	if dialect == goose.DialectPostgres {
-		dir = "migrations/postgres"
-	}
 	src := sqlxadapter.NewSource(authSource, adapter.Executor())
-	if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
-		return goose.RunContext(ctx, "up", db.DB, dir)
-	}); err != nil {
-		adapter.Close()
-		return nil, fmt.Errorf("goose up: %w", err)
+	if migrate {
+		goose.SetBaseFS(migrationsFS)
+		goose.SetLogger(goose.NopLogger())
+		if err := goose.SetDialect(string(dialect)); err != nil {
+			adapter.Close()
+			return nil, fmt.Errorf("goose set dialect: %w", err)
+		}
+		dir := "migrations/sqlite"
+		if dialect == goose.DialectPostgres {
+			dir = "migrations/postgres"
+		}
+		if err := src.Run(context.Background(), func(ctx context.Context, db *sqlx.DB) error {
+			return goose.RunContext(ctx, "up", db.DB, dir)
+		}); err != nil {
+			adapter.Close()
+			return nil, fmt.Errorf("goose up: %w", err)
+		}
 	}
 
 	return &authStore{
@@ -92,7 +94,8 @@ func NewSQLiteAuthStore(config Config) (*SQLiteAuthStore, error) {
 		poolCfg.MaxIdleConns = config.MaxIdleConns
 	}
 
-	s, err := newAuthStore("sqlite", dsn, poolCfg, sqliteAuthMigrationsFS, goose.DialectSQLite3)
+	migrate := config.Migrate == nil || *config.Migrate
+	s, err := newAuthStore("sqlite", dsn, poolCfg, sqliteAuthMigrationsFS, goose.DialectSQLite3, migrate)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +130,8 @@ func NewPostgreSQLAuthStore(config Config) (*PostgreSQLAuthStore, error) {
 		poolCfg.MaxLifetime = config.ConnMaxAge
 	}
 
-	s, err := newAuthStore("pgx", dsn, poolCfg, postgresAuthMigrationsFS, goose.DialectPostgres)
+	migrate := config.Migrate == nil || *config.Migrate
+	s, err := newAuthStore("pgx", dsn, poolCfg, postgresAuthMigrationsFS, goose.DialectPostgres, migrate)
 	if err != nil {
 		return nil, err
 	}
