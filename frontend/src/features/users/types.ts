@@ -18,6 +18,7 @@ export interface CreateUserRequest {
 
 export interface UpdateUserRequest {
   username?: string
+  password?: string
   email?: string
   roles?: string[]
   active?: boolean

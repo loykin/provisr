@@ -116,6 +116,9 @@ func (m *Manager) SetGlobalEnv(kvs []string)            { m.inner.SetGlobalEnv(k
 func (m *Manager) SetInstanceGroups(groups []ManagerInstanceGroup) {
 	m.inner.SetInstanceGroups(groups)
 }
+func (m *Manager) ListInstanceGroups() []ManagerInstanceGroup {
+	return m.inner.ListInstanceGroups()
+}
 func (m *Manager) Register(s Spec) error          { return m.inner.Register(s) }
 func (m *Manager) RegisterN(s Spec) error         { return m.inner.RegisterN(s) }
 func (m *Manager) Start(name string) error        { return m.inner.Start(name) }
@@ -127,12 +130,20 @@ func (m *Manager) Stop(name string, wait time.Duration) error {
 func (m *Manager) Update(s Spec, wait time.Duration) error {
 	return m.inner.Update(s, wait)
 }
+func (m *Manager) UpdateInstances(currentName string, s Spec, wait time.Duration) (string, error) {
+	return m.inner.UpdateInstances(currentName, s, wait)
+}
+func (m *Manager) UnregisterInstances(currentName string, wait time.Duration) (string, error) {
+	return m.inner.UnregisterInstances(currentName, wait)
+}
 func (m *Manager) GetSpec(name string) (Spec, error) {
 	return m.inner.GetSpec(name)
 }
+func (m *Manager) ProcessBase(name string) (string, error) { return m.inner.ProcessBase(name) }
 func (m *Manager) Unregister(name string, wait time.Duration) error {
 	return m.inner.Unregister(name, wait)
 }
+func (m *Manager) StartAll(base string) error                    { return m.inner.StartAll(base) }
 func (m *Manager) StopAll(base string, wait time.Duration) error { return m.inner.StopAll(base, wait) }
 func (m *Manager) UnregisterAll(base string, wait time.Duration) error {
 	return m.inner.UnregisterAll(base, wait)

@@ -80,6 +80,23 @@ func TestManagerSetGlobalEnv(t *testing.T) {
 	_ = mgr.Stop("test-env-process", 2*time.Second)
 }
 
+func TestListInstanceGroupsReturnsSortedCopy(t *testing.T) {
+	mgr := NewManager()
+	mgr.SetInstanceGroups([]InstanceGroup{
+		{Name: "zeta", Members: []process.Spec{{Name: "z"}}},
+		{Name: "alpha", Members: []process.Spec{{Name: "a", Instances: 2}}},
+	})
+	groups := mgr.ListInstanceGroups()
+	if len(groups) != 2 || groups[0].Name != "alpha" || groups[1].Name != "zeta" {
+		t.Fatalf("unexpected groups: %+v", groups)
+	}
+	groups[0].Members[0].Name = "mutated"
+	group, err := mgr.GetInstanceGroup("alpha")
+	if err != nil || group.Members[0].Name != "a" {
+		t.Fatalf("manager state was mutated through list result: %+v, %v", group, err)
+	}
+}
+
 func TestManagerSetHistorySinks(t *testing.T) {
 	mgr := NewManager()
 	sink1 := NewMockHistorySink()
@@ -175,6 +192,117 @@ func TestManagerStartN(t *testing.T) {
 	err = mgr.RegisterN(singleSpec)
 	if err != nil {
 		t.Errorf("StartN with single instance failed: %v", err)
+	}
+}
+
+func TestRegisterNFailureRollsBackOnlyReservedProcesses(t *testing.T) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	if err := mgr.Register(process.Spec{Name: "batch-canary", Command: "sleep 5"}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.RegisterN(process.Spec{Name: "batch", Command: "true", WorkDir: "/path/that/does/not/exist", Instances: 2})
+	if err == nil {
+		t.Fatal("expected registration failure")
+	}
+	for _, name := range []string{"batch-1", "batch-2"} {
+		if _, err := mgr.Status(name); err == nil {
+			t.Fatalf("failed registration left %s behind", name)
+		}
+	}
+	if _, err := mgr.Status("batch-canary"); err != nil {
+		t.Fatalf("rollback removed unrelated process: %v", err)
+	}
+}
+
+func TestRegisterNRejectsSetCollisionBeforeCreatingProcesses(t *testing.T) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	if err := mgr.Register(process.Spec{Name: "api-1", Command: "sleep 5"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RegisterN(process.Spec{Name: "api", Command: "sleep 5", Instances: 2}); err == nil {
+		t.Fatal("expected process-set collision")
+	}
+	if _, err := mgr.Status("api-1"); err != nil {
+		t.Fatalf("existing process was removed: %v", err)
+	}
+	if _, err := mgr.Status("api-2"); err == nil {
+		t.Fatal("registration created part of a colliding process set")
+	}
+}
+
+func TestUpdateInstancesReconcilesProcessSet(t *testing.T) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	if err := mgr.Register(process.Spec{Name: "scale-test", Command: "sleep 5", Instances: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Register(process.Spec{Name: "scale-test-canary", Command: "sleep 5", Instances: 1}); err != nil {
+		t.Fatal(err)
+	}
+	base, err := mgr.UpdateInstances("scale-test", process.Spec{Name: "scale-test", Command: "sleep 5", Instances: 2}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != "scale-test" {
+		t.Fatalf("expected base scale-test, got %q", base)
+	}
+	if _, err := mgr.Status("scale-test"); err == nil {
+		t.Fatal("single process should have been replaced")
+	}
+	for _, name := range []string{"scale-test-1", "scale-test-2"} {
+		if _, err := mgr.Status(name); err != nil {
+			t.Fatalf("expected %s after scale up: %v", name, err)
+		}
+	}
+	if _, err := mgr.Status("scale-test-canary"); err != nil {
+		t.Fatalf("scaling the numbered process set removed an unrelated prefixed process: %v", err)
+	}
+
+	base, err = mgr.UpdateInstances("scale-test-1", process.Spec{Name: "scale-test-1", Command: "sleep 5", Instances: 1}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != "scale-test" {
+		t.Fatalf("expected derived base scale-test, got %q", base)
+	}
+	if _, err := mgr.Status("scale-test"); err != nil {
+		t.Fatalf("expected single base process after scale down: %v", err)
+	}
+	if _, err := mgr.Status("scale-test-1"); err == nil {
+		t.Fatal("numbered process should have been removed")
+	}
+	if _, err := mgr.Status("scale-test-canary"); err != nil {
+		t.Fatalf("scaling back down removed an unrelated prefixed process: %v", err)
+	}
+}
+
+func TestInstanceGroupStartDefaultsInstancesToOne(t *testing.T) {
+	mgr := NewManager()
+	defer func() { _ = mgr.Shutdown() }()
+
+	spec := process.Spec{Name: "default-instance", Command: "sleep 5"}
+	if err := mgr.Register(spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Stop(spec.Name, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	mgr.SetInstanceGroups([]InstanceGroup{{Name: "defaults", Members: []process.Spec{spec}}})
+
+	if err := mgr.InstanceGroupStart("defaults"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := mgr.Status(spec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Running {
+		t.Fatal("group start should start a member whose instances value is omitted")
 	}
 }
 
@@ -300,6 +428,9 @@ func TestManagerInternalHelpers(t *testing.T) {
 		{"web-server-1", "*", true},
 		{"web-server-1", "web-server-1", true},
 		{"web-server-1", "web-server-2", false},
+		{"web-server-1", "web-server", true},
+		{"web-server-canary", "web-server", true},
+		{"web-server-1-extra", "web-server", true},
 	}
 
 	for _, tc := range testCases {

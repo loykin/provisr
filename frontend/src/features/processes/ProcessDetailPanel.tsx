@@ -34,7 +34,7 @@ export function ProcessDetailPanel({ name }: { name: string }) {
       status={<ProcessStateBadge state={status.state} />}
       actions={
         <div className="flex items-center gap-2">
-          <ProcessActions status={status} />
+          <ProcessActions status={status} onUnregistered={() => void close()} />
           {closeBtn}
         </div>
       }

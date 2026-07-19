@@ -67,7 +67,10 @@ func NewAuthService(config AuthConfig) (*AuthService, error) {
 		// Generate a random secret if not provided
 		jwtSecret = make([]byte, 32)
 		if _, err := rand.Read(jwtSecret); err != nil {
-			return nil, fmt.Errorf("failed to generate JWT secret: %w", err)
+			return nil, errors.Join(
+				fmt.Errorf("failed to generate JWT secret: %w", err),
+				store.Close(),
+			)
 		}
 	}
 
@@ -311,42 +314,36 @@ func (s *AuthService) UpdateUserPassword(ctx context.Context, userID, newPasswor
 	return nil
 }
 
+// rolePermissions defines the permissions for each role.
+var rolePermissions = map[string][]Permission{
+	"admin": {
+		{Resource: "*", Action: "*"}, // Admin has all permissions
+	},
+	"operator": {
+		{Resource: "process", Action: "read"},
+		{Resource: "process", Action: "write"},
+		{Resource: "job", Action: "read"},
+		{Resource: "job", Action: "write"},
+		{Resource: "cronjob", Action: "read"},
+		{Resource: "cronjob", Action: "write"},
+	},
+	"viewer": {
+		{Resource: "process", Action: "read"},
+		{Resource: "job", Action: "read"},
+		{Resource: "cronjob", Action: "read"},
+	},
+}
+
 // HasPermission checks if a user has a specific permission
 func (s *AuthService) HasPermission(userRoles []string, resource, action string) bool {
-	// Define role permissions
-	rolePermissions := map[string][]Permission{
-		"admin": {
-			{Resource: "*", Action: "*"}, // Admin has all permissions
-		},
-		"operator": {
-			{Resource: "process", Action: "read"},
-			{Resource: "process", Action: "write"},
-			{Resource: "job", Action: "read"},
-			{Resource: "job", Action: "write"},
-			{Resource: "cronjob", Action: "read"},
-			{Resource: "cronjob", Action: "write"},
-		},
-		"viewer": {
-			{Resource: "process", Action: "read"},
-			{Resource: "job", Action: "read"},
-			{Resource: "cronjob", Action: "read"},
-		},
-	}
-
 	for _, role := range userRoles {
-		permissions, exists := rolePermissions[role]
-		if !exists {
-			continue
-		}
-
-		for _, perm := range permissions {
+		for _, perm := range rolePermissions[role] {
 			if (perm.Resource == "*" || perm.Resource == resource) &&
 				(perm.Action == "*" || perm.Action == action) {
 				return true
 			}
 		}
 	}
-
 	return false
 }
 
@@ -357,6 +354,14 @@ func (s *AuthService) GetUser(ctx context.Context, id string) (*User, error) {
 
 // UpdateUser updates a user
 func (s *AuthService) UpdateUser(ctx context.Context, user *User) error {
+	return s.UpdateUserWithPassword(ctx, user, "")
+}
+
+// UpdateUserWithPassword updates profile fields and, when supplied, the
+// password hash in the same store write. This prevents the UI's combined
+// "Save" action from partially applying profile changes before a separate
+// password request fails.
+func (s *AuthService) UpdateUserWithPassword(ctx context.Context, user *User, newPassword string) error {
 	s.userMu.Lock()
 	defer s.userMu.Unlock()
 	current, err := s.store.GetUser(ctx, user.ID)
@@ -371,6 +376,14 @@ func (s *AuthService) UpdateUser(ctx context.Context, user *User) error {
 		if last {
 			return ErrLastActiveAdmin
 		}
+	}
+	user.PasswordHash = current.PasswordHash
+	if newPassword != "" {
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), s.bcryptCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+		user.PasswordHash = string(passwordHash)
 	}
 	return s.store.UpdateUser(ctx, user)
 }

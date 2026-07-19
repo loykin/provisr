@@ -4,10 +4,15 @@ import {
   getProcess,
   getProcessLogsSince,
   getProcessSpec,
+  getProcessDiagnostics,
+  getProcessMetrics,
+  getProcessMetricsHistory,
   listProcesses,
   registerProcess,
+  runProcessBaseAction,
   startProcess,
   stopProcess,
+  unregisterProcess,
   updateProcess,
 } from './api'
 import type { LogLine, ProcessSpec } from './types'
@@ -86,6 +91,59 @@ export function useUpdateProcess() {
       void queryClient.invalidateQueries({ queryKey: ['processes'] })
       void queryClient.invalidateQueries({ queryKey: ['process', spec.name] })
       void queryClient.invalidateQueries({ queryKey: ['processSpec', spec.name] })
+    },
+  })
+}
+
+export function useUnregisterProcess() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => unregisterProcess(name),
+    onSuccess: (_data, name) => {
+      queryClient.removeQueries({ queryKey: ['process', name] })
+      queryClient.removeQueries({ queryKey: ['processSpec', name] })
+      void queryClient.invalidateQueries({ queryKey: ['processes'] })
+      void queryClient.invalidateQueries({ queryKey: ['groups'] })
+    },
+  })
+}
+
+export function useProcessMetrics(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['processMetrics', name],
+    queryFn: () => getProcessMetrics(name),
+    enabled,
+    refetchInterval: 5000,
+    retry: false,
+  })
+}
+
+export function useProcessMetricsHistory(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['processMetricsHistory', name],
+    queryFn: () => getProcessMetricsHistory(name),
+    enabled,
+    refetchInterval: 10000,
+    retry: false,
+  })
+}
+
+export function useProcessDiagnostics(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['processDiagnostics', name],
+    queryFn: () => getProcessDiagnostics(name),
+    enabled,
+    refetchInterval: STATUS_POLL_MS,
+  })
+}
+
+export function useProcessBaseAction() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ base, action }: { base: string; action: 'start' | 'stop' | 'unregister' }) => runProcessBaseAction(base, action),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['processes'] })
+      void queryClient.invalidateQueries({ queryKey: ['groups'] })
     },
   })
 }

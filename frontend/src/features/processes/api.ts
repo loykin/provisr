@@ -1,5 +1,5 @@
 import { apiFetch } from '@/lib/api'
-import type { LogsSinceResponse, ProcessSpec, ProcessStatus } from './types'
+import type { DebugProcessInfo, LogsSinceResponse, ProcessMetrics, ProcessMetricsHistory, ProcessSpec, ProcessStatus } from './types'
 
 export async function listProcesses(): Promise<ProcessStatus[]> {
   return apiFetch<ProcessStatus[]>('/status?base=*')
@@ -33,4 +33,25 @@ export async function registerProcess(spec: ProcessSpec): Promise<void> {
 
 export async function updateProcess(spec: ProcessSpec): Promise<void> {
   await apiFetch<void>('/update', { method: 'POST', body: JSON.stringify(spec) })
+}
+
+export async function unregisterProcess(name: string): Promise<void> {
+  await apiFetch<void>(`/unregister?name=${encodeURIComponent(name)}`, { method: 'POST' })
+}
+
+export async function runProcessBaseAction(base: string, action: 'start' | 'stop' | 'unregister'): Promise<void> {
+  await apiFetch<void>(`/${action}?base=${encodeURIComponent(base)}`, { method: 'POST' })
+}
+
+export async function getProcessMetrics(name: string): Promise<ProcessMetrics> {
+  return apiFetch<ProcessMetrics>(`/metrics?name=${encodeURIComponent(name)}`)
+}
+
+export async function getProcessMetricsHistory(name: string): Promise<ProcessMetricsHistory> {
+  return apiFetch<ProcessMetricsHistory>(`/metrics/history?name=${encodeURIComponent(name)}`)
+}
+
+export async function getProcessDiagnostics(name: string): Promise<DebugProcessInfo | undefined> {
+  const rows = await apiFetch<DebugProcessInfo[]>(`/debug/processes?pattern=${encodeURIComponent(name)}`)
+  return rows.find((row) => row.status.name === name)
 }

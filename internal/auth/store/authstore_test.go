@@ -74,6 +74,7 @@ func TestSQLiteAuthStore_UserCRUD(t *testing.T) {
 
 	got.Email = "alice@newdomain.com"
 	got.Roles = []string{"user"}
+	got.PasswordHash = "hash-updated"
 	if err := s.UpdateUser(ctx, got); err != nil {
 		t.Fatalf("UpdateUser() error: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestSQLiteAuthStore_UserCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUser() after update error: %v", err)
 	}
-	if updated.Email != "alice@newdomain.com" || len(updated.Roles) != 1 {
+	if updated.Email != "alice@newdomain.com" || len(updated.Roles) != 1 || updated.PasswordHash != "hash-updated" {
 		t.Errorf("update did not persist: %+v", updated)
 	}
 

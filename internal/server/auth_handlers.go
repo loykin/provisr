@@ -234,6 +234,7 @@ func (api *AuthAPI) updateUser(c *gin.Context) {
 
 	var req struct {
 		Username string            `json:"username"`
+		Password string            `json:"password"`
 		Email    string            `json:"email"`
 		Roles    []string          `json:"roles"`
 		Metadata map[string]string `json:"metadata"`
@@ -268,7 +269,7 @@ func (api *AuthAPI) updateUser(c *gin.Context) {
 		user.Active = *req.Active
 	}
 
-	if err := api.authService.UpdateUser(c.Request.Context(), user); err != nil {
+	if err := api.authService.UpdateUserWithPassword(c.Request.Context(), user, req.Password); err != nil {
 		if errors.Is(err, auth.ErrLastActiveAdmin) {
 			respondError(c, http.StatusConflict, "last_active_admin", err.Error())
 		} else {

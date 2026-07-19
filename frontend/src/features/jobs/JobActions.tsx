@@ -2,6 +2,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 import { useSidePanel } from '@loykin/side-panel'
 import { IconAction } from '@/components/icon-action'
 import { useAuth } from '@/features/auth/context'
+import { canWriteWorkloads } from '@/features/auth/permissions'
 import { JobEditPanel } from './JobFormPanel'
 import { useDeleteJob } from './queries'
 import type { JobInfo } from './types'
@@ -11,7 +12,7 @@ export function JobActions({ job }: { job: JobInfo }) {
   const { open } = useSidePanel()
   const del = useDeleteJob()
 
-  if (!user?.roles.includes('admin')) return null
+  if (!canWriteWorkloads(user)) return null
 
   function handleDelete() {
     if (window.confirm(`Delete job "${job.name}"? This will stop active processes.`)) {

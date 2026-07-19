@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@loykin/designkit/styles";
+@import "@loykin/filter-input/styles";
 @import "@loykin/gridkit/styles";
 @import "@loykin/side-panel/styles";
 @import "shadcn/tailwind.css";
@@ -23,10 +24,14 @@
   background: var(--card);
 }
 
+.workload-search .fi-control {
+  padding-left: 2rem;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

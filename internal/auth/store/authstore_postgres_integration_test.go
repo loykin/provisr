@@ -86,10 +86,14 @@ func TestPostgreSQLAuthStore_UserAndClientCRUD(t *testing.T) {
 	require.Equal(t, "u1", byName.ID)
 
 	got.Email = "alice@newdomain.com"
+	got.Roles = []string{"user"}
+	got.PasswordHash = "hash-updated"
 	require.NoError(t, s.UpdateUser(ctx, got))
 	updated, err := s.GetUser(ctx, "u1")
 	require.NoError(t, err)
 	require.Equal(t, "alice@newdomain.com", updated.Email)
+	require.Equal(t, []string{"user"}, updated.Roles)
+	require.Equal(t, "hash-updated", updated.PasswordHash)
 
 	list, total, err := s.ListUsers(ctx, 0, 10)
 	require.NoError(t, err)

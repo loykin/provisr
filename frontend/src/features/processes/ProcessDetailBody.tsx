@@ -4,6 +4,7 @@ import { DetailList, DetailRow, DetailSection, MonoValue } from '@/components/pa
 import { useProcessLogs, useProcessSpec } from './queries'
 import { renderAnsiLine } from '@/lib/ansi'
 import type { ProcessStatus } from './types'
+import { ProcessObservability } from './ProcessObservability'
 
 function LogTail({ name }: { name: string }) {
   const { data: lines, error } = useProcessLogs(name, true)
@@ -76,6 +77,8 @@ export function ProcessDetailBody({ name, status }: { name: string; status: Proc
           <LifecycleHookList lifecycle={spec.lifecycle} />
         </DetailSection>
       )}
+
+      <ProcessObservability name={name} running={status.running} />
 
       <LogTail name={name} />
     </>

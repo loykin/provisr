@@ -2,12 +2,13 @@ import type { ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { DataPage, PageBreadcrumb } from '@loykin/designkit'
 
-type WorkloadTabId = 'processes' | 'jobs' | 'cronjobs'
+type WorkloadTabId = 'processes' | 'jobs' | 'cronjobs' | 'groups'
 
-const tabs: Array<{ id: WorkloadTabId; label: string; to: '/processes' | '/jobs' | '/cronjobs' }> = [
+const tabs: Array<{ id: WorkloadTabId; label: string; to: '/processes' | '/jobs' | '/cronjobs' | '/groups' }> = [
   { id: 'processes', label: 'Processes', to: '/processes' },
   { id: 'jobs', label: 'Jobs', to: '/jobs' },
   { id: 'cronjobs', label: 'CronJobs', to: '/cronjobs' },
+  { id: 'groups', label: 'Groups', to: '/groups' },
 ]
 
 export function WorkloadHeader({

@@ -9,6 +9,7 @@ export interface ProcessStatus {
   detected_by: string
   restarts: number
   state: string
+  groups?: string[]
 }
 
 export interface LogLine {
@@ -38,6 +39,47 @@ export interface ProcessSpec {
   instances?: number
   detached?: boolean
   detectors?: Array<Record<string, unknown>>
-  log?: Record<string, unknown>
+  log?: {
+    slog?: {
+      level?: 'debug' | 'info' | 'warn' | 'error'
+      format?: 'text' | 'json'
+      color?: boolean
+      timestamps?: boolean
+      source?: boolean
+    }
+    file?: {
+      dir?: string
+      stdoutPath?: string
+      stderrPath?: string
+      maxSizeMB?: number
+      maxBackups?: number
+      maxAgeDays?: number
+      compress?: boolean
+    }
+  }
   lifecycle?: LifecycleHooks
+}
+
+export interface ProcessMetrics {
+  pid: number
+  name: string
+  cpu_percent: number
+  memory_mb: number
+  memory_rss: number
+  memory_vms: number
+  memory_swap?: number
+  timestamp: string
+  num_threads: number
+  num_fds?: number
+}
+
+export interface ProcessMetricsHistory {
+  process: string
+  history: ProcessMetrics[]
+}
+
+export interface DebugProcessInfo {
+  status: ProcessStatus
+  internal_state: string
+  health_check: string
 }

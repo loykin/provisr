@@ -97,3 +97,29 @@ func TestAdminCanBeRemovedWhenAnotherActiveAdminExists(t *testing.T) {
 		t.Fatalf("delete former admin: %v", err)
 	}
 }
+
+func TestUpdateUserWithPasswordCommitsProfileAndPasswordTogether(t *testing.T) {
+	service := newTestAuthService(t)
+	ctx := context.Background()
+	user, err := service.CreateUser(ctx, "operator", "password123", "old@example.com", []string{"viewer"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Email = "new@example.com"
+	user.Roles = []string{"operator"}
+	if err := service.UpdateUserWithPassword(ctx, user, "new-password123"); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := service.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Email != "new@example.com" || len(updated.Roles) != 1 || updated.Roles[0] != "operator" {
+		t.Fatalf("profile was not updated with password: %+v", updated)
+	}
+	result, err := service.Authenticate(ctx, LoginRequest{Method: AuthMethodBasic, Username: "operator", Password: "new-password123"})
+	if err != nil || !result.Success {
+		t.Fatalf("new password did not authenticate: result=%+v err=%v", result, err)
+	}
+}

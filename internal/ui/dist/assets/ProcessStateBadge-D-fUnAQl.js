@@ -1,1 +1,0 @@
-import{jn as e}from"./useFloatingRootContext-C1gKMUE0.js";import{t}from"./status-badge-DCgZz6JJ.js";var n=e();function r({state:e}){return(0,n.jsx)(t,{status:e})}export{r as t};

@@ -154,6 +154,7 @@ func NewAPIEndpoints(m *Manager, basePath string) *APIEndpoints {
 }
 
 func (e *APIEndpoints) RegisterHandler() gin.HandlerFunc    { return e.inner.RegisterHandler() }
+func (e *APIEndpoints) UpdateHandler() gin.HandlerFunc      { return e.inner.UpdateHandler() }
 func (e *APIEndpoints) StartHandler() gin.HandlerFunc       { return e.inner.StartHandler() }
 func (e *APIEndpoints) StopHandler() gin.HandlerFunc        { return e.inner.StopHandler() }
 func (e *APIEndpoints) StatusHandler() gin.HandlerFunc      { return e.inner.StatusHandler() }
@@ -161,6 +162,15 @@ func (e *APIEndpoints) UnregisterHandler() gin.HandlerFunc  { return e.inner.Unr
 func (e *APIEndpoints) GroupStartHandler() gin.HandlerFunc  { return e.inner.GroupStartHandler() }
 func (e *APIEndpoints) GroupStopHandler() gin.HandlerFunc   { return e.inner.GroupStopHandler() }
 func (e *APIEndpoints) GroupStatusHandler() gin.HandlerFunc { return e.inner.GroupStatusHandler() }
+func (e *APIEndpoints) GroupsHandler() gin.HandlerFunc      { return e.inner.GroupsHandler() }
+func (e *APIEndpoints) ProcessLogsHandler() gin.HandlerFunc { return e.inner.ProcessLogsHandler() }
+func (e *APIEndpoints) ProcessSpecHandler() gin.HandlerFunc { return e.inner.ProcessSpecHandler() }
+func (e *APIEndpoints) TemplateTypesHandler() gin.HandlerFunc {
+	return e.inner.TemplateTypesHandler()
+}
+func (e *APIEndpoints) TemplatePreviewHandler() gin.HandlerFunc {
+	return e.inner.TemplatePreviewHandler()
+}
 func (e *APIEndpoints) DebugProcessesHandler() gin.HandlerFunc {
 	return e.inner.DebugProcessesHandler()
 }

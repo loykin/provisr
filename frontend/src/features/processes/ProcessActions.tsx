@@ -1,24 +1,30 @@
-import { Pencil, Play, Square } from 'lucide-react'
+import { Pencil, Play, Square, Trash2 } from 'lucide-react'
 import { useSidePanel } from '@loykin/side-panel'
 import { IconAction } from '@/components/icon-action'
 import { useAuth } from '@/features/auth/context'
+import { canWriteWorkloads } from '@/features/auth/permissions'
 import { ProcessEditPanel } from './ProcessFormPanel'
-import { useStartProcess, useStopProcess } from './queries'
+import { useStartProcess, useStopProcess, useUnregisterProcess } from './queries'
 import type { ProcessStatus } from './types'
 
-// Start/Stop/Edit are write actions, gated to the admin role. `HasPermission`
-// on the server enforces this regardless (operator/viewer get 403), but
-// hiding the buttons for roles that can't use them avoids a confusing error
-// click.
-export function ProcessActions({ status }: { status: ProcessStatus }) {
+// The UI mirrors the server's process:write role policy. The API remains the
+// enforcement boundary; this gate only avoids controls that would return 403.
+export function ProcessActions({ status, onUnregistered }: { status: ProcessStatus; onUnregistered?: () => void }) {
   const { user } = useAuth()
   const { open } = useSidePanel()
   const start = useStartProcess()
   const stop = useStopProcess()
+  const unregister = useUnregisterProcess()
 
-  if (!user?.roles.includes('admin')) return null
+  if (!canWriteWorkloads(user)) return null
 
-  const pending = start.isPending || stop.isPending
+  const pending = start.isPending || stop.isPending || unregister.isPending
+
+  function handleUnregister() {
+    if (window.confirm(`Unregister process "${status.name}" and its instance set? Its persisted program file will also be removed.`)) {
+      unregister.mutate(status.name, { onSuccess: onUnregistered })
+    }
+  }
 
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -36,6 +42,9 @@ export function ProcessActions({ status }: { status: ProcessStatus }) {
         onClick={() => open(<ProcessEditPanel name={status.name} />, { size: 480 })}
       >
         <Pencil className="h-3.5 w-3.5" />
+      </IconAction>
+      <IconAction label="Unregister process" disabled={pending} onClick={handleUnregister}>
+        <Trash2 className="h-3.5 w-3.5" />
       </IconAction>
     </div>
   )

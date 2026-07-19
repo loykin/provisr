@@ -123,22 +123,57 @@ func (m *Manager) Register(spec process.Spec) error {
 
 // RegisterN registers and starts N instances of a process
 func (m *Manager) RegisterN(spec process.Spec) error {
-	if spec.Instances <= 1 {
-		return m.Register(spec)
+	instances := spec.Instances
+	if instances < 1 {
+		instances = 1
 	}
 
-	// Register multiple instances with numbered names
-	var firstErr error
-	for i := 1; i <= spec.Instances; i++ {
+	specs := make([]process.Spec, 0, instances)
+	for i := 1; i <= instances; i++ {
 		instanceSpec := spec
-		instanceSpec.Name = fmt.Sprintf("%s-%d", spec.Name, i)
+		instanceSpec.Instances = instances
+		if instances > 1 {
+			instanceSpec.Name = fmt.Sprintf("%s-%d", spec.Name, i)
+		}
+		specs = append(specs, instanceSpec)
+	}
 
-		if err := m.Register(instanceSpec); err != nil && firstErr == nil {
-			firstErr = err
+	// Reserve the complete name set under one lock. This prevents concurrent
+	// registrations from partially taking ownership of the same process set.
+	m.mu.Lock()
+	for _, instanceSpec := range specs {
+		if _, exists := m.processes[instanceSpec.Name]; exists {
+			m.mu.Unlock()
+			return fmt.Errorf("process %q is already registered", instanceSpec.Name)
 		}
 	}
+	created := make([]*ManagedProcess, 0, len(specs))
+	for _, instanceSpec := range specs {
+		up := NewManagedProcess(instanceSpec, m.mergeEnv, m.emitter)
+		if len(m.histSinks) > 0 {
+			up.SetHistory(m.histSinks...)
+		}
+		m.processes[instanceSpec.Name] = up
+		created = append(created, up)
+	}
+	m.mu.Unlock()
 
-	return firstErr
+	for i, up := range created {
+		if err := up.Start(specs[i]); err != nil {
+			m.mu.Lock()
+			for j, createdProcess := range created {
+				if m.processes[specs[j].Name] == createdProcess {
+					delete(m.processes, specs[j].Name)
+				}
+			}
+			m.mu.Unlock()
+			for _, createdProcess := range created {
+				_ = createdProcess.Shutdown()
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // Start starts an already registered process without creating a new one
@@ -241,6 +276,159 @@ func (m *Manager) Update(spec process.Spec, wait time.Duration) error {
 	return up.Start(spec)
 }
 
+func processBaseName(currentName string, instances int) string {
+	if instances <= 1 {
+		return currentName
+	}
+	for i := 1; i <= instances; i++ {
+		suffix := fmt.Sprintf("-%d", i)
+		if strings.HasSuffix(currentName, suffix) {
+			return strings.TrimSuffix(currentName, suffix)
+		}
+	}
+	return currentName
+}
+
+func processInstanceNames(base string, instances int) []string {
+	if instances <= 1 {
+		return []string{base}
+	}
+
+	names := make([]string, 0, instances)
+	for i := 1; i <= instances; i++ {
+		names = append(names, fmt.Sprintf("%s-%d", base, i))
+	}
+	return names
+}
+
+// unregisterExact removes only the explicitly named processes. Process-set
+// reconciliation uses this instead of the public prefix-based bulk operation
+// so separately registered names such as "demo-canary" keep their historical
+// behavior without being treated as numbered instances during scaling.
+func (m *Manager) unregisterExact(names []string, wait time.Duration) error {
+	processes := make([]*ManagedProcess, 0, len(names))
+
+	m.mu.Lock()
+	for _, name := range names {
+		if up := m.processes[name]; up != nil {
+			processes = append(processes, up)
+			delete(m.processes, name)
+		}
+	}
+	m.mu.Unlock()
+
+	var firstErr error
+	for _, up := range processes {
+		if err := up.Stop(wait); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// ProcessBase returns the persisted/base identity for a registered instance.
+func (m *Manager) ProcessBase(name string) (string, error) {
+	spec, err := m.GetSpec(name)
+	if err != nil {
+		return "", err
+	}
+	instances := spec.Instances
+	if instances < 1 {
+		instances = 1
+	}
+	return processBaseName(name, instances), nil
+}
+
+// UpdateInstances replaces the process set containing currentName. A single
+// process is updated in place; a multi-instance process is reconciled as one
+// base-name set so command changes and instance-count changes apply to every
+// member consistently. It returns the base name used for persistence.
+func (m *Manager) UpdateInstances(currentName string, spec process.Spec, wait time.Duration) (string, error) {
+	current, err := m.GetSpec(currentName)
+	if err != nil {
+		return "", err
+	}
+
+	currentInstances := current.Instances
+	if currentInstances < 1 {
+		currentInstances = 1
+	}
+	desiredInstances := spec.Instances
+	if desiredInstances < 1 {
+		desiredInstances = 1
+	}
+
+	base := processBaseName(currentName, currentInstances)
+
+	if currentInstances == 1 && desiredInstances == 1 {
+		spec.Name = currentName
+		spec.Instances = 1
+		if err := m.Update(spec, wait); err != nil {
+			current.Name = currentName
+			current.Instances = 1
+			if rollbackErr := m.Update(current, wait); rollbackErr != nil {
+				return "", fmt.Errorf("update process %q failed: %v (rollback failed: %w)", currentName, err, rollbackErr)
+			}
+			return "", fmt.Errorf("update process %q failed: %w", currentName, err)
+		}
+		return currentName, nil
+	}
+
+	oldSpec := current
+	oldSpec.Name = base
+	oldSpec.Instances = currentInstances
+	spec.Name = base
+	spec.Instances = desiredInstances
+	oldNames := processInstanceNames(base, currentInstances)
+	oldNameSet := make(map[string]struct{}, len(oldNames))
+	for _, name := range oldNames {
+		oldNameSet[name] = struct{}{}
+	}
+	m.mu.RLock()
+	for _, name := range processInstanceNames(base, desiredInstances) {
+		if _, belongsToCurrentSet := oldNameSet[name]; belongsToCurrentSet {
+			continue
+		}
+		if _, exists := m.processes[name]; exists {
+			m.mu.RUnlock()
+			return "", fmt.Errorf("update process set %q: process %q is already registered", base, name)
+		}
+	}
+	m.mu.RUnlock()
+
+	if err := m.unregisterExact(oldNames, wait); err != nil {
+		return "", fmt.Errorf("update process set %q: stop failed: %w", base, err)
+	}
+	if err := m.RegisterN(spec); err != nil {
+		if rollbackErr := m.RegisterN(oldSpec); rollbackErr != nil {
+			return "", fmt.Errorf("update process set %q failed: %v (rollback failed: %w)", base, err, rollbackErr)
+		}
+		return "", fmt.Errorf("update process set %q failed: %w", base, err)
+	}
+
+	return base, nil
+}
+
+// UnregisterInstances removes the complete persisted process set containing
+// currentName. Single-instance processes remove only currentName; numbered
+// instances remove the exact base-1..base-N set without touching unrelated
+// prefixed processes such as base-canary.
+func (m *Manager) UnregisterInstances(currentName string, wait time.Duration) (string, error) {
+	current, err := m.GetSpec(currentName)
+	if err != nil {
+		return "", err
+	}
+	instances := current.Instances
+	if instances < 1 {
+		instances = 1
+	}
+	base := processBaseName(currentName, instances)
+	if err := m.unregisterExact(processInstanceNames(base, instances), wait); err != nil {
+		return "", err
+	}
+	return base, nil
+}
+
 // Stop stops a process without unregistering it
 func (m *Manager) Stop(name string, wait time.Duration) error {
 	m.mu.RLock()
@@ -301,6 +489,31 @@ func (m *Manager) LogsSince(name string, since uint64, limit int) ([]process.Log
 
 	lines, next := up.LogsSince(since, limit)
 	return lines, next, nil
+}
+
+// StartAll starts all registered processes matching a base name pattern.
+func (m *Manager) StartAll(base string) error {
+	var names []string
+
+	m.mu.RLock()
+	for name := range m.processes {
+		if m.matchesPattern(name, base) {
+			names = append(names, name)
+		}
+	}
+	m.mu.RUnlock()
+	sort.Strings(names)
+
+	var firstErr error
+	for _, name := range names {
+		if status, err := m.Status(name); err == nil && status.Running {
+			continue
+		}
+		if err := m.Start(name); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // StopAll stops all processes matching a base name pattern
@@ -485,8 +698,8 @@ func (m *Manager) matchesPattern(name, pattern string) bool {
 		return strings.HasSuffix(name, suffix)
 	}
 
-	// Base name matching: "batch" matches "batch-1", "batch-2", etc.
-	// This is for supporting instances created by StartN
+	// Base name matching historically includes all prefixed names. Public
+	// bulk operations retain this behavior for backward compatibility.
 	if strings.HasPrefix(name, pattern+"-") {
 		return true
 	}
@@ -613,6 +826,23 @@ func (m *Manager) GetInstanceGroup(name string) (InstanceGroup, error) {
 	return group, nil
 }
 
+// ListInstanceGroups returns a sorted snapshot that callers can safely inspect.
+func (m *Manager) ListInstanceGroups() []InstanceGroup {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	groups := make([]InstanceGroup, 0, len(m.groups))
+	for _, group := range m.groups {
+		copyGroup := InstanceGroup{Name: group.Name, Members: make([]process.Spec, len(group.Members))}
+		for i := range group.Members {
+			copyGroup.Members[i] = *group.Members[i].DeepCopy()
+		}
+		groups = append(groups, copyGroup)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
+	return groups
+}
+
 // InstanceGroupStatus returns status of all processes in an instance group
 func (m *Manager) InstanceGroupStatus(groupName string) (map[string][]process.Status, error) {
 	group, err := m.GetInstanceGroup(groupName)
@@ -645,10 +875,14 @@ func (m *Manager) InstanceGroupStart(groupName string) error {
 
 	var firstError error
 	for _, member := range group.Members {
+		instances := member.Instances
+		if instances < 1 {
+			instances = 1
+		}
 		// Start all instances of this member
-		for i := 1; i <= member.Instances; i++ {
+		for i := 1; i <= instances; i++ {
 			instanceName := member.Name
-			if member.Instances > 1 {
+			if instances > 1 {
 				instanceName = fmt.Sprintf("%s-%d", member.Name, i)
 			}
 			if err := m.Start(instanceName); err != nil {

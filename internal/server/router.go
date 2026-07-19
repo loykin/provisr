@@ -20,6 +20,7 @@ import (
 	tlsutil "github.com/loykin/provisr/internal/tls"
 	"github.com/loykin/provisr/internal/ui"
 	apiwire "github.com/loykin/provisr/pkg/api"
+	templatepkg "github.com/loykin/provisr/pkg/template"
 )
 
 // Router provides embeddable HTTP handlers for managing processes.
@@ -109,11 +110,13 @@ func (r *Router) Handler() http.Handler {
 	authGin := gin.HandlerFunc(noopMiddleware)
 	readPerm := gin.HandlerFunc(noopMiddleware)
 	writePerm := gin.HandlerFunc(noopMiddleware)
+	settingsReadPerm := gin.HandlerFunc(noopMiddleware)
 	if r.authService != nil {
 		mw := auth.NewMiddleware(r.authService, true)
 		authGin = mw.GinAuth()
 		readPerm = mw.GinRequirePermission("process", "read")
 		writePerm = mw.GinRequirePermission("process", "write")
+		settingsReadPerm = mw.GinRequirePermission("settings", "read")
 	}
 
 	group.POST("/register", authGin, writePerm, r.handleRegister)
@@ -122,6 +125,7 @@ func (r *Router) Handler() http.Handler {
 	group.POST("/stop", authGin, writePerm, r.handleStop)
 	group.POST("/unregister", authGin, writePerm, r.handleUnregister)
 	group.GET("/status", authGin, readPerm, r.handleStatus)
+	group.GET("/groups", authGin, readPerm, r.handleGroups)
 	group.GET("/group/status", authGin, readPerm, r.handleGroupStatus)
 	group.POST("/group/start", authGin, writePerm, r.handleGroupStart)
 	group.POST("/group/stop", authGin, writePerm, r.handleGroupStop)
@@ -131,6 +135,9 @@ func (r *Router) Handler() http.Handler {
 	group.GET("/metrics/group", authGin, readPerm, r.handleProcessMetricsGroup)
 	group.GET("/processes/:name/logs", authGin, readPerm, r.handleProcessLogs)
 	group.GET("/processes/:name/spec", authGin, readPerm, r.handleGetSpec)
+	group.GET("/settings/status", authGin, settingsReadPerm, r.handleRuntimeStatus)
+	group.GET("/templates", authGin, readPerm, r.handleTemplateTypes)
+	group.GET("/templates/:kind", authGin, readPerm, r.handleTemplatePreview)
 
 	// Add history endpoint if a history reader is available
 	if r.historyReader != nil {
@@ -314,6 +321,12 @@ func (e *APIEndpoints) RegisterHandler() gin.HandlerFunc {
 	return r.handleRegister
 }
 
+// UpdateHandler returns the gin.HandlerFunc for updating a registered process.
+func (e *APIEndpoints) UpdateHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleUpdate
+}
+
 // StartHandler returns the gin.HandlerFunc for starting processes
 func (e *APIEndpoints) StartHandler() gin.HandlerFunc {
 	r := &Router{mgr: e.mgr, basePath: e.basePath}
@@ -356,6 +369,36 @@ func (e *APIEndpoints) GroupStatusHandler() gin.HandlerFunc {
 	return r.handleGroupStatus
 }
 
+// GroupsHandler returns the gin.HandlerFunc for listing configured groups.
+func (e *APIEndpoints) GroupsHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleGroups
+}
+
+// ProcessLogsHandler returns the gin.HandlerFunc for reading captured process logs.
+func (e *APIEndpoints) ProcessLogsHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleProcessLogs
+}
+
+// ProcessSpecHandler returns the gin.HandlerFunc for reading a process spec.
+func (e *APIEndpoints) ProcessSpecHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleGetSpec
+}
+
+// TemplateTypesHandler returns the gin.HandlerFunc for listing process templates.
+func (e *APIEndpoints) TemplateTypesHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleTemplateTypes
+}
+
+// TemplatePreviewHandler returns the gin.HandlerFunc for previewing a process template.
+func (e *APIEndpoints) TemplatePreviewHandler() gin.HandlerFunc {
+	r := &Router{mgr: e.mgr, basePath: e.basePath}
+	return r.handleTemplatePreview
+}
+
 // DebugProcessesHandler returns the gin.HandlerFunc for debug information
 func (e *APIEndpoints) DebugProcessesHandler() gin.HandlerFunc {
 	r := &Router{mgr: e.mgr, basePath: e.basePath}
@@ -380,17 +423,25 @@ func (e *APIEndpoints) ProcessMetricsGroupHandler() gin.HandlerFunc {
 	return r.handleProcessMetricsGroup
 }
 
-// RegisterAll registers all API endpoints to the provided gin router group
-// This is equivalent to using the Router.Handler() but allows for custom middleware
+// RegisterAll registers the manager-backed process API surface exposed by
+// APIEndpoints. It intentionally does not install the standalone Router's
+// composition-root features (auth, history, settings, jobs, cronjobs, or UI),
+// because those require dependencies that NewAPIEndpoints does not own.
 func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) {
 	group.POST("/register", e.RegisterHandler())
+	group.POST("/update", e.UpdateHandler())
 	group.POST("/start", e.StartHandler())
 	group.POST("/stop", e.StopHandler())
 	group.POST("/unregister", e.UnregisterHandler())
 	group.GET("/status", e.StatusHandler())
+	group.GET("/groups", e.GroupsHandler())
 	group.GET("/group/status", e.GroupStatusHandler())
 	group.POST("/group/start", e.GroupStartHandler())
 	group.POST("/group/stop", e.GroupStopHandler())
+	group.GET("/processes/:name/logs", e.ProcessLogsHandler())
+	group.GET("/processes/:name/spec", e.ProcessSpecHandler())
+	group.GET("/templates", e.TemplateTypesHandler())
+	group.GET("/templates/:kind", e.TemplatePreviewHandler())
 	group.GET("/debug/processes", e.DebugProcessesHandler())
 	group.GET("/metrics", e.ProcessMetricsHandler())
 	group.GET("/metrics/history", e.ProcessMetricsHistoryHandler())
@@ -402,6 +453,79 @@ func (e *APIEndpoints) RegisterAll(group *gin.RouterGroup) {
 type errorResp = apiwire.ErrorResponse
 
 type okResp = apiwire.OKResponse
+
+func (r *Router) handleGroups(c *gin.Context) {
+	groups := r.mgr.ListInstanceGroups()
+	response := make([]apiwire.GroupInfo, 0, len(groups))
+	for _, group := range groups {
+		members := make([]apiwire.GroupMember, 0, len(group.Members))
+		total := 0
+		for _, member := range group.Members {
+			instances := member.Instances
+			if instances < 1 {
+				instances = 1
+			}
+			members = append(members, apiwire.GroupMember{Name: member.Name, Instances: instances})
+			total += instances
+		}
+		running := 0
+		if statuses, err := r.mgr.InstanceGroupStatus(group.Name); err == nil {
+			for _, instances := range statuses {
+				for _, status := range instances {
+					if status.Running {
+						running++
+					}
+				}
+			}
+		}
+		state := "stopped"
+		if total > 0 && running == total {
+			state = "running"
+		} else if running > 0 {
+			state = "degraded"
+		}
+		response = append(response, apiwire.GroupInfo{
+			Name: group.Name, Members: members, State: state, Running: running, Total: total,
+		})
+	}
+	writeJSON(c, http.StatusOK, response)
+}
+
+func (r *Router) handleRuntimeStatus(c *gin.Context) {
+	writeJSON(c, http.StatusOK, apiwire.RuntimeStatus{
+		AuthEnabled:          r.authService != nil,
+		MetricsEnabled:       r.mgr.IsProcessMetricsEnabled(),
+		HistoryEnabled:       r.historyReader != nil,
+		CronSchedulerEnabled: r.cronScheduler != nil,
+		ProgramPersistence:   r.programsDir != "",
+		ConfiguredGroupCount: len(r.mgr.ListInstanceGroups()),
+	})
+}
+
+func (r *Router) handleTemplateTypes(c *gin.Context) {
+	types := templatepkg.NewGenerator().GetSupportedTypes()
+	writeJSON(c, http.StatusOK, types)
+}
+
+func (r *Router) handleTemplatePreview(c *gin.Context) {
+	kind := templatepkg.TemplateType(c.Param("kind"))
+	name := c.DefaultQuery("name", string(kind)+"-sample")
+	if !isSafeName(name) {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid template process name"})
+		return
+	}
+	data, err := templatepkg.NewGenerator().GenerateJSON(kind, name)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(data, &spec); err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: "failed to encode template"})
+		return
+	}
+	writeJSON(c, http.StatusOK, spec)
+}
 
 // processSelector holds the parsed query parameters for process selection
 type processSelector struct {
@@ -532,9 +656,59 @@ func (r *Router) persistCronJobFile(spec core.CronJob) error {
 	return r.writeProgramFile(spec.Name, "cronjob", spec)
 }
 
+type programFileBackup struct {
+	data   []byte
+	exists bool
+}
+
+func (r *Router) backupProgramFile(name string) (programFileBackup, error) {
+	if r.programsDir == "" {
+		return programFileBackup{}, nil
+	}
+	data, err := os.ReadFile(filepath.Join(r.programsDir, name+".json"))
+	if err == nil {
+		return programFileBackup{data: data, exists: true}, nil
+	}
+	if os.IsNotExist(err) {
+		return programFileBackup{}, nil
+	}
+	return programFileBackup{}, fmt.Errorf("failed to back up program file: %w", err)
+}
+
+func (r *Router) restoreProgramFile(name string, backup programFileBackup) error {
+	if r.programsDir == "" {
+		return nil
+	}
+	if !backup.exists {
+		return r.removeProgramFile(name)
+	}
+	if err := os.WriteFile(filepath.Join(r.programsDir, name+".json"), backup.data, 0o644); err != nil {
+		return fmt.Errorf("failed to restore program file: %w", err)
+	}
+	return nil
+}
+
 func (r *Router) handleRegister(c *gin.Context) {
 	spec, ok := bindAndValidateSpec(c)
 	if !ok {
+		return
+	}
+	registrationNames := []string{spec.Name}
+	if spec.Instances > 1 {
+		registrationNames = make([]string, 0, spec.Instances)
+		for i := 1; i <= spec.Instances; i++ {
+			registrationNames = append(registrationNames, fmt.Sprintf("%s-%d", spec.Name, i))
+		}
+	}
+	for _, name := range registrationNames {
+		if _, err := r.mgr.GetSpec(name); err == nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: fmt.Sprintf("process %q is already registered", name)})
+			return
+		}
+	}
+	backup, err := r.backupProgramFile(spec.Name)
+	if err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
 		return
 	}
 	// Persist before registering: a filesystem error here should not leave a
@@ -544,6 +718,13 @@ func (r *Router) handleRegister(c *gin.Context) {
 		return
 	}
 	if err := r.mgr.RegisterN(spec); err != nil {
+		for _, name := range registrationNames {
+			_ = r.mgr.Unregister(name, 5*time.Second)
+		}
+		if restoreErr := r.restoreProgramFile(spec.Name, backup); restoreErr != nil {
+			writeJSON(c, http.StatusInternalServerError, errorResp{Error: fmt.Sprintf("%v; rollback failed: %v", err, restoreErr)})
+			return
+		}
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
@@ -566,13 +747,32 @@ func (r *Router) handleUpdate(c *gin.Context) {
 		}
 		wait = d
 	}
-	if err := r.mgr.Update(spec, wait); err != nil {
+	currentName := spec.Name
+	base, err := r.mgr.ProcessBase(currentName)
+	if err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	spec.Name = base
+	backup, err := r.backupProgramFile(base)
+	if err != nil {
+		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
 		return
 	}
 	if err := r.persistProgramFile(spec); err != nil {
 		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
 		return
+	}
+	if _, err := r.mgr.UpdateInstances(currentName, spec, wait); err != nil {
+		if restoreErr := r.restoreProgramFile(base, backup); restoreErr != nil {
+			writeJSON(c, http.StatusInternalServerError, errorResp{Error: fmt.Sprintf("%v; persistence rollback failed: %v", err, restoreErr)})
+			return
+		}
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+		return
+	}
+	if currentName != base {
+		_ = r.removeProgramFile(currentName)
 	}
 	writeJSON(c, http.StatusOK, okResp{OK: true})
 }
@@ -1064,20 +1264,19 @@ func getHealthStatus(status core.Status) string {
 }
 
 func (r *Router) handleStart(c *gin.Context) {
-	name := c.Query("name")
-	if name == "" {
-		writeJSON(c, http.StatusBadRequest, errorResp{Error: "name parameter required"})
+	selector, err := parseProcessSelector(c)
+	if err != nil {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
-
-	// Validate process name to avoid path traversal
-	if !isSafeName(name) {
-		writeJSON(c, http.StatusBadRequest, errorResp{Error: "invalid name: allowed [A-Za-z0-9._-] and no '..' or path separators"})
-		return
+	if selector.name != "" {
+		err = r.mgr.Start(selector.name)
+	} else if selector.base != "" {
+		err = r.mgr.StartAll(selector.base)
+	} else {
+		err = r.mgr.StartAll(selector.wild)
 	}
-
-	// Start only existing registered process
-	if err := r.mgr.Start(name); err != nil {
+	if err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
@@ -1091,9 +1290,29 @@ func (r *Router) handleUnregister(c *gin.Context) {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
 	}
+	persistedName := selector.base
+	if selector.name != "" {
+		persistedName, err = r.mgr.ProcessBase(selector.name)
+		if err != nil {
+			writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
+			return
+		}
+	}
+	var backup programFileBackup
+	if persistedName != "" {
+		backup, err = r.backupProgramFile(persistedName)
+		if err != nil {
+			writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+			return
+		}
+		if err = r.removeProgramFile(persistedName); err != nil {
+			writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
+			return
+		}
+	}
 
 	if selector.name != "" {
-		err = r.mgr.Unregister(selector.name, selector.wait)
+		_, err = r.mgr.UnregisterInstances(selector.name, selector.wait)
 	} else if selector.base != "" {
 		err = r.mgr.UnregisterAll(selector.base, selector.wait)
 	} else {
@@ -1101,17 +1320,14 @@ func (r *Router) handleUnregister(c *gin.Context) {
 	}
 
 	if err != nil {
+		if persistedName != "" {
+			if restoreErr := r.restoreProgramFile(persistedName, backup); restoreErr != nil {
+				writeJSON(c, http.StatusInternalServerError, errorResp{Error: fmt.Sprintf("%v; persistence rollback failed: %v", err, restoreErr)})
+				return
+			}
+		}
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
-	}
-
-	// Best-effort: remove a program file persisted by /register or /update
-	// for this exact name, so an unregistered process doesn't silently come
-	// back on the next daemon restart. Only handled for the single-name
-	// selector; base/wildcard unregisters don't know which program files (if
-	// any) correspond to the matched processes.
-	if selector.name != "" {
-		_ = r.removeProgramFile(selector.name)
 	}
 
 	writeJSON(c, http.StatusOK, okResp{OK: true})

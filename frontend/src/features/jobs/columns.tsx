@@ -18,6 +18,7 @@ export const columns: DataGridColumnDef<JobInfo>[] = [
   },
   {
     id: 'phase',
+    accessorFn: (row) => row.status.phase,
     header: 'Status',
     cell: ({ row }) => <JobStateBadge phase={row.original.status.phase} />,
     size: 120,

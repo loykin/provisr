@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { DataBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'
-import { ApiError } from '@/lib/api'
 import { ProcessFormFields, formToSpec, type ProcessFormState } from '@/features/processes/ProcessFormPanel'
 import { validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
 import { useRegisterProcess } from '@/features/processes/queries'
@@ -14,6 +13,21 @@ const initialForm: ProcessFormState = {
   env: '',
   autoRestart: false,
   instances: '',
+  pidFile: '',
+  priority: '',
+  retryCount: '',
+  retryInterval: '',
+  startDuration: '',
+  restartInterval: '',
+  detached: false,
+  detectors: '',
+  logDir: '',
+  stdoutPath: '',
+  stderrPath: '',
+  logMaxSize: '',
+  logMaxBackups: '',
+  logMaxAge: '',
+  logCompress: false,
   lifecycle: {},
 }
 
@@ -39,7 +53,7 @@ export default function ProcessRegisterPage() {
       await register.mutateAsync(formToSpec(form))
       await navigate({ to: '/processes' })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to register process.')
+      setError(err instanceof Error ? err.message : 'Failed to register process.')
     }
   }
 

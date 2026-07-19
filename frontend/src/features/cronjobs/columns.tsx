@@ -19,6 +19,7 @@ export const columns: DataGridColumnDef<CronJobInfo>[] = [
   { accessorKey: 'schedule', header: 'Schedule', size: 140 },
   {
     id: 'status',
+    accessorFn: (row) => (row.suspend ? 'suspended' : 'active'),
     header: 'Status',
     cell: ({ row }) => <StatusBadge status={row.original.suspend ? 'suspended' : 'active'} />,
     // Badge has rounded corners that the grid's default cell clipping cuts
