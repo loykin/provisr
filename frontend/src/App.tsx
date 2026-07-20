@@ -38,11 +38,15 @@ const JobsPage = lazy(() => import('@/pages/JobsPage'))
 const JobRegisterPage = lazy(() => import('@/pages/JobRegisterPage'))
 const CronJobsPage = lazy(() => import('@/pages/CronJobsPage'))
 const CronJobRegisterPage = lazy(() => import('@/pages/CronJobRegisterPage'))
+const CronJobRegisterPageRK = lazy(() => import('@/pages/CronJobRegisterPageRK'))
 const GroupsPage = lazy(() => import('@/pages/GroupsPage'))
 const UsersPage = lazy(() => import('@/pages/UsersPage'))
 const UserRegisterPage = lazy(() => import('@/pages/UserRegisterPage'))
+const UserRegisterPageRK = lazy(() => import('@/pages/UserRegisterPageRK'))
+const UserEditPageRK = lazy(() => import('@/pages/UserEditPageRK'))
 const UserEditPage = lazy(() => import('@/pages/UserEditPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const RJSFDemoPageRK = lazy(() => import('@/pages/RJSFDemoPageRK'))
 
 const navItems = [
   { id: 'workloads', label: 'Workloads', icon: Boxes, to: '/processes', match: ['/processes', '/jobs', '/cronjobs', '/groups'] },
@@ -214,6 +218,12 @@ const cronJobsRegisterRoute = createRoute({
   component: CronJobRegisterPage,
 })
 
+const cronJobsRegisterRKRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'cronjobs/new-rk',
+  component: CronJobRegisterPageRK,
+})
+
 const groupsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'groups',
@@ -232,6 +242,18 @@ const userRegisterRoute = createRoute({
   component: UserRegisterPage,
 })
 
+const userRegisterRKRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'users/new-rk',
+  component: UserRegisterPageRK,
+})
+
+const userEditRKRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'users/$id/edit-rk',
+  component: UserEditPageRK,
+})
+
 const userEditRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'users/$id/edit',
@@ -242,6 +264,12 @@ const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'settings',
   component: SettingsPage,
+})
+
+const rjsfDemoRKRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'rjsf-demo-rk',
+  component: RJSFDemoPageRK,
 })
 
 const routeTree = rootRoute.addChildren([
@@ -255,11 +283,15 @@ const routeTree = rootRoute.addChildren([
   jobsRegisterRoute,
   cronJobsRoute,
   cronJobsRegisterRoute,
+  cronJobsRegisterRKRoute,
   groupsRoute,
   usersRoute,
   userRegisterRoute,
+  userRegisterRKRoute,
   userEditRoute,
+  userEditRKRoute,
   settingsRoute,
+  rjsfDemoRKRoute,
 ])
 
 const router = createRouter({ routeTree, basepath: '/ui' })
