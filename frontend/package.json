@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@base-ui/react": "^1.4.1",
     "@loykin/designkit": "^0.0.1-dev.6",
     "@loykin/filter-input": "^0.0.1-dev.0",
     "@loykin/gridkit": "^0.2.0",
