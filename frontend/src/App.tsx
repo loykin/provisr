@@ -47,6 +47,7 @@ const UserEditPageRK = lazy(() => import('@/pages/UserEditPageRK'))
 const UserEditPage = lazy(() => import('@/pages/UserEditPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const RJSFDemoPageRK = lazy(() => import('@/pages/RJSFDemoPageRK'))
+const PermissionsDemoPageRK = lazy(() => import('@/pages/PermissionsDemoPageRK'))
 
 const navItems = [
   { id: 'workloads', label: 'Workloads', icon: Boxes, to: '/processes', match: ['/processes', '/jobs', '/cronjobs', '/groups'] },
@@ -272,6 +273,12 @@ const rjsfDemoRKRoute = createRoute({
   component: RJSFDemoPageRK,
 })
 
+const permissionsDemoRKRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'permissions-demo-rk',
+  component: PermissionsDemoPageRK,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -292,6 +299,7 @@ const routeTree = rootRoute.addChildren([
   userEditRKRoute,
   settingsRoute,
   rjsfDemoRKRoute,
+  permissionsDemoRKRoute,
 ])
 
 const router = createRouter({ routeTree, basepath: '/ui' })
