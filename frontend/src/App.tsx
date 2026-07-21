@@ -48,6 +48,7 @@ const UserEditPage = lazy(() => import('@/pages/UserEditPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const RJSFDemoPageRK = lazy(() => import('@/pages/RJSFDemoPageRK'))
 const PermissionsDemoPageRK = lazy(() => import('@/pages/PermissionsDemoPageRK'))
+const PatchVerificationPageRK = lazy(() => import('@/pages/PatchVerificationPageRK'))
 
 const navItems = [
   { id: 'workloads', label: 'Workloads', icon: Boxes, to: '/processes', match: ['/processes', '/jobs', '/cronjobs', '/groups'] },
@@ -279,6 +280,12 @@ const permissionsDemoRKRoute = createRoute({
   component: PermissionsDemoPageRK,
 })
 
+const patchVerificationRKRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'patch-verification-rk',
+  component: PatchVerificationPageRK,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -300,6 +307,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   rjsfDemoRKRoute,
   permissionsDemoRKRoute,
+  patchVerificationRKRoute,
 ])
 
 const router = createRouter({ routeTree, basepath: '/ui' })

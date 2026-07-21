@@ -14,7 +14,7 @@
     "@loykin/designkit": "^0.0.1-dev.6",
     "@loykin/filter-input": "^0.0.1-dev.0",
     "@loykin/gridkit": "^0.2.0",
-    "@loykin/resourcekit": "^0.0.0-dev.0",
+    "@loykin/resourcekit": "file:../../resourcekit",
     "@loykin/side-panel": "^0.0.1-dev.2",
     "@rjsf/core": "^6.7.0",
     "@rjsf/utils": "^6.7.0",
