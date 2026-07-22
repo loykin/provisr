@@ -206,6 +206,48 @@ jobs:
           fi
           echo "internal/ui/dist matches a fresh frontend build."
 
+  test-e2e:
+    name: Frontend E2E (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        # global-setup.ts builds the frontend, embeds it into
+        # internal/ui/dist, builds the provisr binary, and boots a real
+        # daemon against a throwaway config before any spec runs.
+        run: npm run test:e2e
+
+      - name: Upload Playwright traces (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+
   publish-coverage:
     name: Publish Coverage (Shields)
     runs-on: ubuntu-latest

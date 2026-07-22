@@ -622,6 +622,65 @@ func bindAndValidateSpec(c *gin.Context) (spec core.Spec, ok bool) {
 	return spec, true
 }
 
+// programFileExtensions lists every extension loadProgramEntries accepts
+// when scanning the programs directory at boot. Program-file lookups below
+// must check all of them — a process or cronjob may have been hand-authored
+// as .toml/.yaml/.yml rather than registered through the API (which always
+// writes .json), and treating ".json" as the only possible name would leave
+// those files behind on unregister/update instead of touching them.
+var programFileExtensions = []string{".json", ".toml", ".yaml", ".yml"}
+
+// existingProgramFilePath returns the path of the on-disk program file for
+// name, checking every extension loadProgramEntries supports. ok is false if
+// no programs directory is configured or no such file exists under any
+// supported extension.
+func (r *Router) existingProgramFilePath(name string) (string, bool) {
+	if r.programsDir == "" {
+		return "", false
+	}
+	for _, ext := range programFileExtensions {
+		path := filepath.Join(r.programsDir, name+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// isInlineConfiguredProcess reports whether name was declared directly in
+// the main config file's `[[processes]]` array, matching the rule the CLI's
+// local `provisr unregister` already enforces (see
+// cmd/provisr/process_commands.go's isProcessInConfigFile): these have no
+// program file the API could safely rewrite or delete — only the main
+// config file, which the running daemon has no business editing. Processes
+// loaded from a programs-directory file (any extension, hand-authored or
+// not) or registered at runtime through this API are unaffected.
+func (r *Router) isInlineConfiguredProcess(name string) bool {
+	spec, err := r.mgr.GetSpec(name)
+	if err != nil {
+		return false
+	}
+	return spec.InlineConfig
+}
+
+// isInlineConfiguredCronJob is isInlineConfiguredProcess for cronjobs.
+func (r *Router) isInlineConfiguredCronJob(name string) bool {
+	spec, ok := r.cronScheduler.Get(name)
+	if !ok {
+		return false
+	}
+	return spec.InlineConfig
+}
+
+// errInlineConfigured builds the standard refusal used by every mutating
+// handler below when acting on a `[[processes]]`-declared resource.
+func errInlineConfigured(kind, name string) errorResp {
+	return errorResp{Error: fmt.Sprintf(
+		"%s %q is defined in the main config file's [[processes]] section and cannot be modified here; edit the config file and restart the daemon instead",
+		kind, name,
+	)}
+}
+
 // writeProgramFile writes spec as a program file (the same discriminated-
 // union {type, spec} shape `loadProgramEntries` reads at boot) so a process
 // or cronjob registered/updated via the HTTP API survives a daemon restart,
@@ -643,6 +702,13 @@ func (r *Router) writeProgramFile(name, kind string, spec any) error {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write program file: %w", err)
 	}
+	// If name previously lived in a hand-authored non-JSON program file
+	// (.toml/.yaml/.yml), remove it now that the canonical .json copy is in
+	// place — otherwise both files would load at next startup and collide
+	// on the same name.
+	if existing, ok := r.existingProgramFilePath(name); ok && existing != path {
+		_ = os.Remove(existing)
+	}
 	return nil
 }
 
@@ -657,17 +723,19 @@ func (r *Router) persistCronJobFile(spec core.CronJob) error {
 }
 
 type programFileBackup struct {
+	path   string
 	data   []byte
 	exists bool
 }
 
 func (r *Router) backupProgramFile(name string) (programFileBackup, error) {
-	if r.programsDir == "" {
+	path, ok := r.existingProgramFilePath(name)
+	if !ok {
 		return programFileBackup{}, nil
 	}
-	data, err := os.ReadFile(filepath.Join(r.programsDir, name+".json"))
+	data, err := os.ReadFile(path)
 	if err == nil {
-		return programFileBackup{data: data, exists: true}, nil
+		return programFileBackup{path: path, data: data, exists: true}, nil
 	}
 	if os.IsNotExist(err) {
 		return programFileBackup{}, nil
@@ -682,7 +750,13 @@ func (r *Router) restoreProgramFile(name string, backup programFileBackup) error
 	if !backup.exists {
 		return r.removeProgramFile(name)
 	}
-	if err := os.WriteFile(filepath.Join(r.programsDir, name+".json"), backup.data, 0o644); err != nil {
+	// Clear out any other program file for name first (e.g. a .json written
+	// by a failed update whose original was .toml) so restoring doesn't
+	// leave two files behind for the same process/cronjob.
+	if existing, ok := r.existingProgramFilePath(name); ok && existing != backup.path {
+		_ = os.Remove(existing)
+	}
+	if err := os.WriteFile(backup.path, backup.data, 0o644); err != nil {
 		return fmt.Errorf("failed to restore program file: %w", err)
 	}
 	return nil
@@ -754,6 +828,10 @@ func (r *Router) handleUpdate(c *gin.Context) {
 		return
 	}
 	spec.Name = base
+	if r.isInlineConfiguredProcess(base) {
+		writeJSON(c, http.StatusConflict, errInlineConfigured("process", base))
+		return
+	}
 	backup, err := r.backupProgramFile(base)
 	if err != nil {
 		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
@@ -968,6 +1046,15 @@ func (r *Router) handleProcessLogs(c *gin.Context) {
 
 // handleGetSpec returns the currently-registered spec for a process, e.g. so
 // a UI can prefill an edit form before calling POST /update.
+// specResp wraps a process spec with a "provisioned" flag: Spec.InlineConfig
+// itself is excluded from JSON (see its doc comment) so a register/update
+// request body can never set it, but read-only responses like this one may
+// safely report it — the UI uses it to grey out edit/unregister.
+type specResp struct {
+	core.Spec
+	Provisioned bool `json:"provisioned"`
+}
+
 func (r *Router) handleGetSpec(c *gin.Context) {
 	name := c.Param("name")
 
@@ -977,7 +1064,7 @@ func (r *Router) handleGetSpec(c *gin.Context) {
 		return
 	}
 
-	writeJSON(c, http.StatusOK, spec)
+	writeJSON(c, http.StatusOK, specResp{Spec: spec, Provisioned: spec.InlineConfig})
 }
 
 type jobResp struct {
@@ -1074,10 +1161,14 @@ func (r *Router) handleDeleteJob(c *gin.Context) {
 
 // cronJobResp is the wire shape for a single cronjob: the spec fields
 // flattened (via anonymous embedding) plus its live status and next run time.
+// Provisioned reports the same "declared in the main config file" status as
+// specResp.Provisioned, above, for the same reason: CronJob.InlineConfig is
+// excluded from JSON so a create/update request body can never set it.
 type cronJobResp struct {
 	core.CronJob
 	Status       core.CronJobStatus `json:"status"`
 	NextSchedule *time.Time         `json:"next_schedule,omitempty"`
+	Provisioned  bool               `json:"provisioned"`
 }
 
 func (r *Router) cronJobResponse(name string) (cronJobResp, bool) {
@@ -1086,7 +1177,7 @@ func (r *Router) cronJobResponse(name string) (cronJobResp, bool) {
 		return cronJobResp{}, false
 	}
 	status, _ := r.cronScheduler.Status(name)
-	resp := cronJobResp{CronJob: spec, Status: status}
+	resp := cronJobResp{CronJob: spec, Status: status, Provisioned: spec.InlineConfig}
 	if next, ok := r.cronScheduler.NextSchedule(name); ok && !next.IsZero() {
 		resp.NextSchedule = &next
 	}
@@ -1167,6 +1258,10 @@ func (r *Router) handleCreateCronJob(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if _, exists := r.cronScheduler.Get(spec.Name); exists {
+		writeJSON(c, http.StatusBadRequest, errorResp{Error: fmt.Sprintf("cronjob %q is already registered", spec.Name)})
+		return
+	}
 	// Persist before scheduling, same rationale as handleRegister.
 	if err := r.persistCronJobFile(spec); err != nil {
 		writeJSON(c, http.StatusInternalServerError, errorResp{Error: err.Error()})
@@ -1187,6 +1282,10 @@ func (r *Router) handleUpdateCronJob(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if r.isInlineConfiguredCronJob(name) {
+		writeJSON(c, http.StatusConflict, errInlineConfigured("cronjob", name))
+		return
+	}
 	spec.Name = name
 	if err := r.cronScheduler.Update(name, spec); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
@@ -1202,6 +1301,10 @@ func (r *Router) handleUpdateCronJob(c *gin.Context) {
 // handleDeleteCronJob stops and removes a cronjob, and its program file if any.
 func (r *Router) handleDeleteCronJob(c *gin.Context) {
 	name := c.Param("name")
+	if r.isInlineConfiguredCronJob(name) {
+		writeJSON(c, http.StatusConflict, errInlineConfigured("cronjob", name))
+		return
+	}
 	if err := r.cronScheduler.Delete(name); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
@@ -1213,6 +1316,10 @@ func (r *Router) handleDeleteCronJob(c *gin.Context) {
 // handleSuspendCronJob pauses a cronjob's schedule without removing it.
 func (r *Router) handleSuspendCronJob(c *gin.Context) {
 	name := c.Param("name")
+	if r.isInlineConfiguredCronJob(name) {
+		writeJSON(c, http.StatusConflict, errInlineConfigured("cronjob", name))
+		return
+	}
 	if err := r.cronScheduler.Suspend(name); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
@@ -1226,6 +1333,10 @@ func (r *Router) handleSuspendCronJob(c *gin.Context) {
 // handleResumeCronJob re-schedules a previously-suspended cronjob.
 func (r *Router) handleResumeCronJob(c *gin.Context) {
 	name := c.Param("name")
+	if r.isInlineConfiguredCronJob(name) {
+		writeJSON(c, http.StatusConflict, errInlineConfigured("cronjob", name))
+		return
+	}
 	if err := r.cronScheduler.Resume(name); err != nil {
 		writeJSON(c, http.StatusBadRequest, errorResp{Error: err.Error()})
 		return
@@ -1298,6 +1409,10 @@ func (r *Router) handleUnregister(c *gin.Context) {
 			return
 		}
 	}
+	if persistedName != "" && r.isInlineConfiguredProcess(persistedName) {
+		writeJSON(c, http.StatusConflict, errInlineConfigured("process", persistedName))
+		return
+	}
 	var backup programFileBackup
 	if persistedName != "" {
 		backup, err = r.backupProgramFile(persistedName)
@@ -1336,10 +1451,10 @@ func (r *Router) handleUnregister(c *gin.Context) {
 // removeProgramFile deletes the program file for name, if any. A no-op if no
 // programs directory is configured or no such file exists.
 func (r *Router) removeProgramFile(name string) error {
-	if r.programsDir == "" {
+	path, ok := r.existingProgramFilePath(name)
+	if !ok {
 		return nil
 	}
-	path := filepath.Join(r.programsDir, name+".json")
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove program file: %w", err)
 	}

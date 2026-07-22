@@ -21,6 +21,12 @@ type CronJobSpec struct {
 	StartingDeadlineSeconds    *int64                 `json:"starting_deadline_seconds" mapstructure:"starting_deadline_seconds"`         // Deadline for starting job if missed
 	TimeZone                   *string                `json:"time_zone" mapstructure:"time_zone"`                                         // Time zone for cron
 	Lifecycle                  process.LifecycleHooks `json:"lifecycle" mapstructure:"lifecycle"`                                         // CronJob-level lifecycle hooks (applied to each scheduled job)
+
+	// InlineConfig marks a cronjob declared directly in the main config
+	// file's `[[processes]]` array (type = "cronjob"), as opposed to a file
+	// in the programs directory or a cronjob created at runtime through the
+	// HTTP API. See process.Spec.InlineConfig for the full rationale.
+	InlineConfig bool `json:"-" mapstructure:"-"`
 }
 
 // ConcurrencyPolicy defines how to handle concurrent executions

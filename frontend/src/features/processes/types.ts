@@ -10,6 +10,9 @@ export interface ProcessStatus {
   restarts: number
   state: string
   groups?: string[]
+  // Declared in the main config file's [[processes]] array. The API
+  // refuses to update/unregister these — only start/stop are allowed.
+  provisioned?: boolean
 }
 
 export interface LogLine {
@@ -58,6 +61,8 @@ export interface ProcessSpec {
     }
   }
   lifecycle?: LifecycleHooks
+  // See ProcessStatus.provisioned.
+  provisioned?: boolean
 }
 
 export interface ProcessMetrics {

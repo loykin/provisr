@@ -261,12 +261,16 @@ func LoadConfig(configPath string) (*LoadedConfig, error) {
 		} else {
 			resolveSpecPaths(&spec, filepath.Dir(configPath))
 		}
+		// Mark as declared in the main config file, not a programs-directory
+		// file or an API registration — see process.Spec.InlineConfig.
+		spec.InlineConfig = true
 		// convert detectors after decode
 		if err := convertDetectorConfigs(&spec); err != nil {
 			return nil, fmt.Errorf("failed to convert detectors for process %s: %w", spec.Name, err)
 		}
 		config.Specs = append(config.Specs, spec)
 		if job != nil {
+			job.InlineConfig = true
 			if err := convertDetectorConfigs(job.JobTemplate.ToProcessSpec()); err != nil {
 				return nil, fmt.Errorf("failed to convert detectors for cronjob %s: %w", job.Name, err)
 			}

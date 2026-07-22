@@ -38,6 +38,15 @@ type Spec struct {
 	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"`               // for config parsing
 	Log             logger.Config       `json:"log" mapstructure:"log"`                           // unified slog-based logging configuration
 	Lifecycle       LifecycleHooks      `json:"lifecycle" mapstructure:"lifecycle"`               // lifecycle hooks for pre/post operations
+
+	// InlineConfig marks a spec declared directly in the main config file's
+	// `[[processes]]` array, as opposed to a file in the programs directory
+	// or a process registered at runtime through the HTTP API. Set only by
+	// config.LoadConfig; excluded from JSON/mapstructure so an API request
+	// body or a hand-authored program file can never set it themselves. The
+	// HTTP router refuses update/unregister when this is true — there is no
+	// file it could safely rewrite or delete, only the main config file.
+	InlineConfig bool `json:"-" mapstructure:"-"`
 }
 
 // Validate enforces Spec invariants.

@@ -44,6 +44,9 @@ export interface CronJobStatus {
 export interface CronJobInfo extends CronJobSpec {
   status: CronJobStatus
   next_schedule?: string
+  // Declared in the main config file's [[processes]] array. The API
+  // refuses to update/delete/suspend/resume these — only trigger is allowed.
+  provisioned?: boolean
 }
 
 export interface CronJobHistoryEntry {
