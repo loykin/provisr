@@ -44,11 +44,20 @@ go get github.com/loykin/provisr
 - **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks
 - **Process groups**: Manage related processes together with scaling support
 - **HTTP API**: RESTful API with JSON I/O, embeddable in Gin/Echo applications
+- **Web UI**: Single-page app served at `/ui`, embedded in the same binary — manage processes, jobs, cronjobs, and groups without a separate deploy
 - **Metrics**: Prometheus metrics for monitoring processes, jobs, and cronjobs
 - **Output streaming**: Inject `io.Writer` into `Spec.Log.File.StdoutWriter` / `StderrWriter` for real-time output capture
 - **Configuration**: TOML/YAML/JSON config with startup reconciliation and PID-file recovery
 - **Security**: TLS support, input validation, and secure PID management
 - **Lightweight core**: `github.com/loykin/provisr/core` for embedding without gin, jwt, or database deps
+
+## Web UI
+
+`provisr serve` embeds a web UI in the same binary, served at `/ui` — no
+separate frontend deploy. Manage processes, jobs, cronjobs, groups, and users
+from the browser; everything goes through the same HTTP API described below.
+
+![provisr Processes page](docs/images/ui-processes.png)
 
 ## Using as a Library
 
@@ -351,6 +360,21 @@ Groups reference program names:
 name = "webstack"
 members = ["web", "api"]
 ```
+
+### Config-managed Processes Are Read-only via the API
+
+A process or cronjob declared inline in the main config file's `[[processes]]`
+array is considered config-managed: `POST /api/update`, `POST /api/unregister`,
+and the equivalent cronjob endpoints (`update`, `delete`, `suspend`, `resume`)
+refuse to touch it and return `409 Conflict`. Only `start`/`stop`/`trigger`
+still work. To change or remove one of these, edit the config file and
+restart the daemon — the same rule the CLI's local `provisr unregister`
+already enforced.
+
+Processes and cronjobs defined as individual files in the programs directory,
+or registered at runtime through `POST /api/register` / `POST /api/cronjobs`,
+are unaffected — they remain fully manageable through the API, and
+unregistering one removes its program file too.
 
 ## Jobs and CronJobs
 
