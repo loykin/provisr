@@ -1,12 +1,67 @@
 package cronjob
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/loykin/provisr/core/internal/job"
 	"github.com/loykin/provisr/core/internal/process"
+	"github.com/loykin/provisr/core/observability"
 )
+
+// fakeJobRunner captures the job.Spec passed to CreateJob so tests can
+// inspect exactly what a scheduled run would have submitted, without needing
+// a real job.Manager.
+type fakeJobRunner struct {
+	created chan job.Spec
+}
+
+func (f *fakeJobRunner) CreateJob(spec job.Spec) (*job.Job, error) {
+	f.created <- spec
+	return nil, errors.New("fakeJobRunner: CreateJob not implemented")
+}
+
+func (f *fakeJobRunner) Observe(observability.Event) {}
+
+// TestCronJob_TriggerNow_MergesCronJobLevelHooks is the end-to-end
+// counterpart to the CreateJobFromTemplate unit tests above: those only
+// checked the merge helper in isolation, which is how a production bug
+// slipped through — cronjob.go's executeJob() used to build the job spec
+// straight from JobTemplate, never calling CreateJobFromTemplate at all, so
+// CronJob-level lifecycle hooks were silently dropped on every real
+// scheduled run despite the merge helper itself being fully covered. This
+// drives an actual TriggerNow() and inspects the spec that reaches
+// JobRunner.CreateJob.
+func TestCronJob_TriggerNow_MergesCronJobLevelHooks(t *testing.T) {
+	spec := CronJobSpec{
+		Name:     "trigger-test",
+		Schedule: "@every 1h",
+		JobTemplate: job.Spec{
+			Name:    "trigger-test",
+			Command: "echo hi",
+		},
+		Lifecycle: process.LifecycleHooks{
+			PreStart: []process.Hook{
+				{Name: "cronjob-level", Command: "echo cronjob-level", FailureMode: process.FailureModeFail},
+			},
+		},
+	}
+
+	runner := &fakeJobRunner{created: make(chan job.Spec, 1)}
+	cj := NewCronJob(spec, runner)
+	cj.TriggerNow()
+
+	select {
+	case created := <-runner.created:
+		if len(created.Lifecycle.PreStart) != 1 || created.Lifecycle.PreStart[0].Name != "cronjob-level" {
+			t.Fatalf("expected the actual scheduled run to include the cronjob-level PreStart hook, got %+v", created.Lifecycle.PreStart)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CreateJob to be called")
+	}
+}
 
 func TestCronJobSpec_WithLifecycleHooks(t *testing.T) {
 	spec := CronJobSpec{

@@ -1,5 +1,6 @@
 import type { DataGridColumnDef } from '@loykin/gridkit'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TruncateCell } from '@/components/truncate-cell'
 import { ProcessActions } from './ProcessActions'
 import { ProcessStateBadge } from './ProcessStateBadge'
@@ -31,8 +32,18 @@ export const columns: DataGridColumnDef<ProcessStatus>[] = [
   {
     accessorKey: 'name',
     header: 'Name',
-    cell: ({ row }) => <TruncateCell>{row.original.name}</TruncateCell>,
-    meta: { flex: 1, minWidth: 140 },
+    cell: ({ row }) => (
+      <div className="flex min-w-0 items-center gap-1.5">
+        <TruncateCell>{row.original.name}</TruncateCell>
+        {row.original.provisioned && (
+          <Tooltip>
+            <TooltipTrigger render={<Badge variant="outline" className="shrink-0 text-muted-foreground">config</Badge>} />
+            <TooltipContent>Defined in the main config file — edit/unregister via the API is disabled.</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    ),
+    meta: { flex: 1, minWidth: 140, cellOverflow: 'visible' },
   },
   {
     accessorKey: 'state',

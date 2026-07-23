@@ -756,6 +756,12 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 				// Prefer spec from PID file if available (preserve historical details)
 				if specFromFile != nil {
 					specFromFile.Name = name
+					// InlineConfig is excluded from JSON (see process.Spec), so it
+					// never survives the PID file's JSON round-trip — it must be
+					// reapplied from the freshly-loaded desired spec, which is
+					// always authoritative for provenance regardless of how old
+					// the recovered PID file's snapshot is.
+					specFromFile.InlineConfig = ds.InlineConfig
 					up.Recover(*specFromFile, pid)
 				} else {
 					ds.Name = name

@@ -1,6 +1,8 @@
 import type { DataGridColumnDef } from '@loykin/gridkit'
 import { lifecycleHookCount } from '@/components/lifecycle-hooks'
 import { StatusBadge } from '@/components/status-badge'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TruncateCell } from '@/components/truncate-cell'
 import { CronJobActions } from './CronJobActions'
 import type { CronJobInfo } from './types'
@@ -13,8 +15,18 @@ export const columns: DataGridColumnDef<CronJobInfo>[] = [
   {
     accessorKey: 'name',
     header: 'Name',
-    cell: ({ row }) => <TruncateCell>{row.original.name}</TruncateCell>,
-    meta: { flex: 1, minWidth: 140 },
+    cell: ({ row }) => (
+      <div className="flex min-w-0 items-center gap-1.5">
+        <TruncateCell>{row.original.name}</TruncateCell>
+        {row.original.provisioned && (
+          <Tooltip>
+            <TooltipTrigger render={<Badge variant="outline" className="shrink-0 text-muted-foreground">config</Badge>} />
+            <TooltipContent>Defined in the main config file — update/delete/suspend/resume via the API is disabled.</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    ),
+    meta: { flex: 1, minWidth: 140, cellOverflow: 'visible' },
   },
   { accessorKey: 'schedule', header: 'Schedule', size: 140 },
   {

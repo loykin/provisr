@@ -190,6 +190,7 @@ func (up *ManagedProcess) Status() process.Status {
 	status.DetectedBy = detectedBy
 	status.Restarts = restarts
 	status.State = state.String() // Add state machine state
+	status.Provisioned = spec.InlineConfig
 
 	return status
 }

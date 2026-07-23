@@ -1236,6 +1236,52 @@ func TestApplyConfig_RecoversFromPIDFile(t *testing.T) {
 	}
 }
 
+// TestApplyConfig_RecoverPreservesInlineConfig guards against a regression
+// where PID-file recovery silently reset InlineConfig to false: the recovered
+// spec comes from json.Unmarshal-ing the PID file (InlineConfig is
+// json:"-", so it can never round-trip that way), so ApplyConfig must
+// reapply it from the freshly-loaded desired spec rather than trust the
+// file. Without that, a process declared in config.toml's `[[processes]]`
+// would become unregisterable through the HTTP API again after any restart
+// that recovers it from an existing PID file instead of starting fresh.
+func TestApplyConfig_RecoverPreservesInlineConfig(t *testing.T) {
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "demo.pid")
+
+	mgr1 := NewManager()
+	defer func() { _ = mgr1.Shutdown() }()
+
+	spec := process.Spec{Name: "demo", Command: "sleep 2", PIDFile: pidfile, InlineConfig: true}
+	if err := mgr1.Register(spec); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("pidfile not written")
+		}
+		if _, err := os.Stat(pidfile); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	mgr2 := NewManager()
+	defer func() { _ = mgr2.Shutdown() }()
+	if err := mgr2.ApplyConfig([]process.Spec{spec}); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	got, err := mgr2.GetSpec("demo")
+	if err != nil {
+		t.Fatalf("GetSpec: %v", err)
+	}
+	if !got.InlineConfig {
+		t.Fatalf("expected InlineConfig=true to survive PID-file recovery, got false")
+	}
+}
+
 func TestApplyConfig_PIDFileIOErrorDoesNotStartProcess(t *testing.T) {
 	pidFile := t.TempDir() // Reading a directory as a PID file produces an OS-level I/O error.
 	spec := process.Spec{

@@ -176,8 +176,7 @@ func (c *CronJob) executeJob() {
 
 	// Create and start the job
 	jobName := fmt.Sprintf("%s-%d", c.spec.Name, now.Unix())
-	jobSpec := c.spec.JobTemplate
-	jobSpec.Name = jobName
+	jobSpec := c.spec.CreateJobFromTemplate(jobName)
 
 	j, err := c.jobs.CreateJob(jobSpec)
 	if err != nil {
