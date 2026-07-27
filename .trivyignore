@@ -1,0 +1,11 @@
+# GO-2026-5932: golang.org/x/crypto/openpgp is unmaintained and unsafe by design.
+#
+# Not applicable to this project:
+#   - provisr only imports golang.org/x/crypto/bcrypt (internal/auth); the
+#     openpgp package is never linked in.
+#   - govulncheck reports 0 called vulnerabilities for ./...
+#   - Upstream publishes no fixed version, and x/crypto is already at the
+#     latest release (v0.54.0), so there is nothing to upgrade to.
+#
+# Re-evaluate if provisr ever starts using OpenPGP.
+GO-2026-5932
