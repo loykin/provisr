@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { DataBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'
+import { PageBreadcrumbTopBar } from '@/components/page-breadcrumb-topbar'
 import { ApiError } from '@/lib/api'
 import {
   CronJobFormFields,
@@ -49,24 +50,23 @@ export default function CronJobRegisterPage() {
   }
 
   return (
-    <form className="flex h-full flex-col" onSubmit={(e) => void handleSubmit(e)}>
-      <DataBodyTemplate
-        title="Create CronJob"
-        contentClassName="flex-1"
-        actions={
-          <>
-            <Button type="button" variant="ghost" onClick={() => void navigate({ to: '/cronjobs' })}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={create.isPending}>
-              Create
-            </Button>
-          </>
-        }
-      >
+    <DataBodyTemplate
+      topBar={<PageBreadcrumbTopBar items={['provisr', 'Workloads', 'CronJobs', 'Create']} />}
+      title="Create CronJob"
+      description="Schedule a recurring one-time workload."
+    >
+      <form className="contents" onSubmit={(e) => void handleSubmit(e)}>
         <CronJobFormFields mode="create" form={form} setForm={setForm} />
         {error && <p className="px-4 text-sm text-destructive">{error}</p>}
-      </DataBodyTemplate>
-    </form>
+        <div className="flex justify-end gap-2 px-(--designkit-page-padding-x) pb-(--designkit-page-padding-y)">
+          <Button type="button" variant="outline" onClick={() => void navigate({ to: '/cronjobs' })}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={create.isPending}>
+            Create
+          </Button>
+        </div>
+      </form>
+    </DataBodyTemplate>
   )
 }

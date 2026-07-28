@@ -1,6 +1,7 @@
 import { DataBodyTemplate } from '@loykin/designkit'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { StackedFormField } from '@/components/stacked-form-field'
 import type { UserFormState } from './user-form-state'
 
 const ROLES = ['admin', 'operator', 'viewer'] as const
@@ -15,8 +16,13 @@ export function UserFormFields({
   setForm: (updater: (f: UserFormState) => UserFormState) => void
 }) {
   return (
-    <DataBodyTemplate.Group layout="stacked">
-      <DataBodyTemplate.Row label="Username" required>
+    <>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Identity"
+      description="Account name, credentials, and contact address."
+    >
+      <StackedFormField label="Username" required>
         <Input
 		  id="user-username"
 		  aria-label="Username"
@@ -25,9 +31,9 @@ export function UserFormFields({
           onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
+      </StackedFormField>
       {mode === 'create' && (
-        <DataBodyTemplate.Row label="Password" required>
+        <StackedFormField label="Password" required>
           <Input
 			id="user-password"
 			aria-label="Password"
@@ -36,9 +42,9 @@ export function UserFormFields({
             onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
             required
           />
-        </DataBodyTemplate.Row>
+        </StackedFormField>
       )}
-      <DataBodyTemplate.Row label="Email">
+      <StackedFormField label="Email">
         <Input
 		  id="user-email"
 		  aria-label="Email"
@@ -47,8 +53,14 @@ export function UserFormFields({
           value={form.email}
           onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Roles">
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Access"
+      description="Roles granted to this account."
+    >
+      <StackedFormField label="Roles">
         <div className="flex flex-col gap-2">
           {ROLES.map((role) => (
             <label key={role} className="flex items-center gap-2 text-sm">
@@ -66,7 +78,8 @@ export function UserFormFields({
             </label>
           ))}
         </div>
-      </DataBodyTemplate.Row>
+      </StackedFormField>
     </DataBodyTemplate.Group>
+    </>
   )
 }

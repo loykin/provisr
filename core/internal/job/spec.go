@@ -25,7 +25,6 @@ type Spec struct {
 	CompletionMode          string                 `json:"completion_mode" mapstructure:"completion_mode"`                       // "NonIndexed" or "Indexed"
 	RestartPolicy           string                 `json:"restart_policy" mapstructure:"restart_policy"`                         // "Never", "OnFailure"
 	Lifecycle               process.LifecycleHooks `json:"lifecycle" mapstructure:"lifecycle"`                                   // Lifecycle hooks for job execution
-	DependsOn               []string               `json:"depends_on,omitempty" mapstructure:"depends_on"`                       // Jobs that must succeed before this one starts
 }
 
 // JobStatus represents the current status of a job
@@ -110,12 +109,6 @@ func (j *Spec) Validate() error {
 	if len(j.Args) > 0 && j.Args[0] == "" {
 		return fmt.Errorf("job %q: args[0] must not be empty", j.Name)
 	}
-	for _, dep := range j.DependsOn {
-		if dep == j.Name {
-			return fmt.Errorf("job %q: cannot depend on itself", j.Name)
-		}
-	}
-
 	// Validate restart policy
 	if j.RestartPolicy != "" && j.RestartPolicy != string(RestartPolicyNever) && j.RestartPolicy != string(RestartPolicyOnFailure) {
 		return fmt.Errorf("job %q: invalid restart_policy %q, must be 'Never' or 'OnFailure'", j.Name, j.RestartPolicy)

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { LifecycleHookEditor, hasLifecycleHooks, validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
 import type { LifecycleHooks } from '@/components/lifecycle-hooks'
+import { StackedFormField } from '@/components/stacked-form-field'
 import { ApiError } from '@/lib/api'
 import { useCronJob, useUpdateCronJob } from './queries'
 import type { CronJobSpec } from './types'
@@ -78,8 +79,13 @@ export function CronJobFormFields({
   setForm: (updater: (f: CronJobFormState) => CronJobFormState) => void
 }) {
   return (
-    <DataBodyTemplate.Group layout="stacked">
-      <DataBodyTemplate.Row label="Name" required>
+    <>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Schedule"
+      description="CronJob identity, cadence, and concurrency behavior."
+    >
+      <StackedFormField label="Name" required>
         <Input
 		  aria-label="Name"
           value={form.name}
@@ -87,8 +93,8 @@ export function CronJobFormFields({
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Schedule" required>
+      </StackedFormField>
+      <StackedFormField label="Schedule" required>
         <Input
 		  aria-label="Schedule"
           placeholder="e.g. 0 */6 * * * or @every 1h"
@@ -96,34 +102,8 @@ export function CronJobFormFields({
           onChange={(e) => setForm((f) => ({ ...f, schedule: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Command" required>
-        <Input
-		  aria-label="Command"
-          placeholder="e.g. /usr/bin/backup.sh"
-          value={form.command}
-          onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
-          required
-        />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Working directory">
-        <Input
-		  aria-label="Working directory"
-          placeholder="(optional) absolute path"
-          value={form.workDir}
-          onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
-        />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Environment" description="One KEY=VALUE per line">
-        <Textarea
-		  aria-label="Environment"
-          rows={4}
-          className="font-mono text-xs"
-          value={form.env}
-          onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
-        />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Concurrency policy">
+      </StackedFormField>
+      <StackedFormField label="Concurrency policy">
         <select
 		  aria-label="Concurrency policy"
           className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
@@ -139,8 +119,46 @@ export function CronJobFormFields({
           <option value="Forbid">Forbid — skip if previous still running</option>
           <option value="Replace">Replace — cancel previous, start new</option>
         </select>
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Job template"
+      description="Command and environment used for every scheduled run."
+    >
+      <StackedFormField label="Command" required>
+        <Input
+		  aria-label="Command"
+          placeholder="e.g. /usr/bin/backup.sh"
+          value={form.command}
+          onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+          required
+        />
+      </StackedFormField>
+      <StackedFormField label="Working directory">
+        <Input
+		  aria-label="Working directory"
+          placeholder="(optional) absolute path"
+          value={form.workDir}
+          onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
+        />
+      </StackedFormField>
+      <StackedFormField label="Environment" description="One KEY=VALUE per line">
+        <Textarea
+		  aria-label="Environment"
+          rows={4}
+          className="font-mono text-xs"
+          value={form.env}
+          onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
+        />
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Lifecycle"
+      description="Hooks applied by the scheduler and each generated Job."
+    >
+      <StackedFormField
         label="Cronjob lifecycle hooks"
         description="Commands merged into every Job created by this schedule"
       >
@@ -148,8 +166,8 @@ export function CronJobFormFields({
           value={form.lifecycle}
           onChange={(lifecycle) => setForm((f) => ({ ...f, lifecycle }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row
+      </StackedFormField>
+      <StackedFormField
         label="Job template lifecycle hooks"
         description="Commands run before/after each triggered run starts or stops"
       >
@@ -157,8 +175,9 @@ export function CronJobFormFields({
           value={form.jobTemplateLifecycle}
           onChange={(jobTemplateLifecycle) => setForm((f) => ({ ...f, jobTemplateLifecycle }))}
         />
-      </DataBodyTemplate.Row>
+      </StackedFormField>
     </DataBodyTemplate.Group>
+    </>
   )
 }
 

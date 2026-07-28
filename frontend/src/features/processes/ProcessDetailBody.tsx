@@ -61,6 +61,9 @@ export function ProcessDetailBody({ name, status }: { name: string; status: Proc
                 {spec.auto_restart ? 'Enabled' : 'Disabled'}
               </DetailRow>
               <DetailRow label="Priority">{spec.priority ?? 0}</DetailRow>
+              <DetailRow label="Depends on">
+                {(spec.depends_on ?? []).join(', ') || '-'}
+              </DetailRow>
               <DetailRow label="PID file">
                 <MonoValue>{spec.pid_file || '-'}</MonoValue>
               </DetailRow>

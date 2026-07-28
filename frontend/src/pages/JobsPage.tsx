@@ -22,7 +22,13 @@ function JobsGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <WorkloadHeader active="jobs" title="Jobs" />
+      <WorkloadHeader
+        active="jobs"
+        title="Jobs"
+        actions={canWriteWorkloads(user) ? (
+          <Button size="sm" onClick={() => void navigate({ to: '/jobs/new' })}>Create Job</Button>
+        ) : undefined}
+      />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4">
         {error && !hasData && (
           <p className="mb-2 text-sm text-destructive">Failed to load Jobs.</p>
@@ -41,9 +47,6 @@ function JobsGrid() {
           onGlobalFilterChange={setGlobalFilter}
           searchableColumns={['name', 'phase']}
           headerLeft={<WorkloadSearch value={globalFilter} onChange={setGlobalFilter} placeholder="Search jobs…" />}
-          headerRight={canWriteWorkloads(user) ? (
-            <Button onClick={() => void navigate({ to: '/jobs/new' })}>Create Job</Button>
-          ) : undefined}
           onRowClick={(row) => open(<JobDetailPanel name={row.name} />, { size: 480 })}
           classNames={{ root: 'shrink-0' }}
         />

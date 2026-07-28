@@ -72,7 +72,6 @@ export function JobDetailPanel({ name }: { name: string }) {
           <DetailRow label="Backoff limit">{formatNumber(job.backoff_limit)}</DetailRow>
           <DetailRow label="Active deadline">{formatNumber(job.active_deadline_seconds)}</DetailRow>
           <DetailRow label="TTL after finished">{formatNumber(job.ttl_seconds_after_finished)}</DetailRow>
-          <DetailRow label="Depends on">{formatList(job.depends_on)}</DetailRow>
           <DetailRow label="Hooks">
             <LifecycleHookSummary lifecycle={job.lifecycle} />
           </DetailRow>

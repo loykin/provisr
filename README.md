@@ -40,7 +40,7 @@ go get github.com/loykin/provisr
 - **Auto-restart**: Configurable retry logic with intervals and failure detection
 - **Lifecycle hooks**: Kubernetes-style hooks (pre_start, post_start, pre_stop, post_stop) with failure modes
 - **Job execution**: Kubernetes-style Jobs for one-time tasks with parallelism and retry logic
-- **Job dependencies (DAG)**: `DependsOn` field lets jobs wait for upstream jobs before starting
+- **Process dependencies**: Start required processes before their dependents
 - **Cron scheduling**: Kubernetes-style CronJobs for recurring tasks
 - **Process groups**: Manage related processes together with scaling support
 - **HTTP API**: RESTful API with JSON I/O, embeddable in Gin/Echo applications
@@ -329,7 +329,13 @@ type = "process"
 name = "web"
 command = "sh -c 'while true; do echo web; sleep 2; done'"
 priority = 10
+depends_on = ["database"]
 ```
+
+`depends_on` references registered processes. Starting `web` starts any stopped
+dependencies first and only continues after each dependency reports running.
+References may use an exact process name or the base name of a multi-instance
+process. Dependency cycles and missing processes are rejected.
 
 ### CronJob Example
 
@@ -407,23 +413,6 @@ Jobs are used for one-time task execution with support for:
 | `restart_policy`             | string   | "Never" or "OnFailure" (default: "Never")         |
 | `active_deadline_seconds`    | int64    | Job timeout in seconds                            |
 | `ttl_seconds_after_finished` | int32    | Auto-cleanup delay                                |
-| `depends_on`                 | []string | Jobs that must succeed before this job starts     |
-
-### Job Dependencies (DAG)
-
-Use `DependsOn` to form a dependency graph — a job waits for all named jobs to succeed before starting:
-
-```go
-jobMgr.CreateJob(provisr.JobSpec{Name: "stage-a", Command: "python stage_a.py"})
-jobMgr.CreateJob(provisr.JobSpec{
-    Name:      "stage-b",
-    Command:   "python stage_b.py",
-    DependsOn: []string{"stage-a"},  // waits for stage-a to succeed
-})
-```
-
-If an upstream job fails, all downstream jobs are immediately marked failed.
-
 ### CronJobs
 
 CronJobs schedule Jobs to run periodically with support for:

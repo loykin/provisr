@@ -1,0 +1,1 @@
+import{Bn as e}from"./useFloatingRootContext-RctkhJj5.js";import{l as t,u as n}from"./dist-DZU9JldP.js";var r=e();function i({items:e}){return(0,r.jsx)(n,{left:(0,r.jsx)(t,{items:e})})}export{i as t};

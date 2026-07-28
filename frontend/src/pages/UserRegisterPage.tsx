@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { DataBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'
+import { PageBreadcrumbTopBar } from '@/components/page-breadcrumb-topbar'
 import { ApiError } from '@/lib/api'
 import { UserFormFields } from '@/features/users/UserForm'
 import { initialUserForm, type UserFormState } from '@/features/users/user-form-state'
@@ -34,24 +35,23 @@ export default function UserRegisterPage() {
   }
 
   return (
-    <form className="flex h-full flex-col" onSubmit={(e) => void handleSubmit(e)}>
-      <DataBodyTemplate
-        title="Create user"
-        contentClassName="flex-1"
-        actions={
-          <>
-            <Button type="button" variant="ghost" onClick={() => void navigate({ to: '/users' })}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={create.isPending}>
-              Create
-            </Button>
-          </>
-        }
-      >
+    <DataBodyTemplate
+      topBar={<PageBreadcrumbTopBar items={['provisr', 'Users', 'Create']} />}
+      title="Create user"
+      description="Create an account and assign its access roles."
+    >
+      <form className="contents" onSubmit={(e) => void handleSubmit(e)}>
         <UserFormFields mode="create" form={form} setForm={setForm} />
         {error && <p className="px-4 text-sm text-destructive">{error}</p>}
-      </DataBodyTemplate>
-    </form>
+        <div className="flex justify-end gap-2 px-(--designkit-page-padding-x) pb-(--designkit-page-padding-y)">
+          <Button type="button" variant="outline" onClick={() => void navigate({ to: '/users' })}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={create.isPending}>
+            Create
+          </Button>
+        </div>
+      </form>
+    </DataBodyTemplate>
   )
 }

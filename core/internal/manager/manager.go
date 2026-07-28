@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,12 +118,18 @@ func (m *Manager) getProcessPIDs() map[string]int32 {
 
 // Register registers and starts a new process
 func (m *Manager) Register(spec process.Spec) error {
-	up := m.ensureProcess(spec.Name)
-	return up.Start(spec)
+	if err := spec.Validate(); err != nil {
+		return err
+	}
+	m.ensureProcess(spec.Name)
+	return m.startWithDependencies(spec.Name, spec, nil, make(map[string]bool), nil)
 }
 
 // RegisterN registers and starts N instances of a process
 func (m *Manager) RegisterN(spec process.Spec) error {
+	if err := spec.Validate(); err != nil {
+		return err
+	}
 	instances := spec.Instances
 	if instances < 1 {
 		instances = 1
@@ -158,8 +165,8 @@ func (m *Manager) RegisterN(spec process.Spec) error {
 	}
 	m.mu.Unlock()
 
-	for i, up := range created {
-		if err := up.Start(specs[i]); err != nil {
+	for i := range created {
+		if err := m.startWithDependencies(specs[i].Name, specs[i], nil, make(map[string]bool), nil); err != nil {
 			m.mu.Lock()
 			for j, createdProcess := range created {
 				if m.processes[specs[j].Name] == createdProcess {
@@ -178,6 +185,42 @@ func (m *Manager) RegisterN(spec process.Spec) error {
 
 // Start starts an already registered process without creating a new one
 func (m *Manager) Start(name string) error {
+	spec, err := m.GetSpec(name)
+	if err != nil {
+		return err
+	}
+	return m.startWithDependencies(name, spec, nil, make(map[string]bool), nil)
+}
+
+// dependencyNames resolves either an exact registered process name or a base
+// name such as "worker" to its numbered instances ("worker-1", "worker-2").
+func (m *Manager) dependencyNames(dependency string) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.processes[dependency]; exists {
+		return []string{dependency}
+	}
+
+	names := make([]string, 0)
+	for name := range m.processes {
+		if strings.HasPrefix(name, dependency+"-") {
+			suffix := strings.TrimPrefix(name, dependency+"-")
+			if _, err := strconv.Atoi(suffix); err == nil {
+				names = append(names, name)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (m *Manager) startWithDependencies(name string, spec process.Spec, knownSpecs map[string]process.Spec, visiting map[string]bool, path []string) error {
+	if visiting[name] {
+		cycle := append(append([]string(nil), path...), name)
+		return fmt.Errorf("process dependency cycle: %s", strings.Join(cycle, " -> "))
+	}
+
 	m.mu.RLock()
 	up := m.processes[name]
 	m.mu.RUnlock()
@@ -186,21 +229,38 @@ func (m *Manager) Start(name string) error {
 		return fmt.Errorf("process %q is not registered", name)
 	}
 
-	// Get current spec from the managed process
-	up.mu.RLock()
-	proc := up.proc
-	up.mu.RUnlock()
+	visiting[name] = true
+	path = append(path, name)
+	defer delete(visiting, name)
 
-	if proc == nil {
-		return fmt.Errorf("process %q has no process instance", name)
+	for _, dependency := range spec.DependsOn {
+		dependencyNames := m.dependencyNames(dependency)
+		if len(dependencyNames) == 0 {
+			return fmt.Errorf("process %q: dependency %q is not registered", name, dependency)
+		}
+		for _, dependencyName := range dependencyNames {
+			dependencySpec, exists := knownSpecs[dependencyName]
+			if !exists {
+				var err error
+				dependencySpec, err = m.GetSpec(dependencyName)
+				if err != nil {
+					return fmt.Errorf("process %q: dependency %q: %w", name, dependencyName, err)
+				}
+			}
+			if err := m.startWithDependencies(dependencyName, dependencySpec, knownSpecs, visiting, path); err != nil {
+				return fmt.Errorf("process %q: dependency %q failed: %w", name, dependencyName, err)
+			}
+		}
 	}
 
-	spec := proc.GetSpec()
-	if spec == nil {
-		return fmt.Errorf("process %q has no spec defined", name)
+	if status := up.Status(); status.Running {
+		return nil
 	}
 
-	return up.Start(*spec)
+	if err := up.Start(spec); err != nil {
+		return fmt.Errorf("start process %q: %w", name, err)
+	}
+	return nil
 }
 
 // GetSpec returns the currently-registered spec for name, e.g. so a caller
@@ -261,6 +321,9 @@ func (m *Manager) Recover(spec process.Spec) error {
 // restarts it under the new spec (stop, then start). The process must already
 // be registered; use Register/RegisterN to create a new one.
 func (m *Manager) Update(spec process.Spec, wait time.Duration) error {
+	if err := spec.Validate(); err != nil {
+		return err
+	}
 	m.mu.RLock()
 	up := m.processes[spec.Name]
 	m.mu.RUnlock()
@@ -273,7 +336,7 @@ func (m *Manager) Update(spec process.Spec, wait time.Duration) error {
 		return fmt.Errorf("update %q: stop failed: %w", spec.Name, err)
 	}
 
-	return up.Start(spec)
+	return m.startWithDependencies(spec.Name, spec, nil, make(map[string]bool), nil)
 }
 
 func processBaseName(currentName string, instances int) string {
@@ -738,7 +801,13 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 		}
 	}
 
-	// First, ensure desired processes are running or recovered from PID files
+	// Register every desired name before starting any of them so dependencies
+	// may refer forward to another process in the same configuration.
+	for name := range desired {
+		m.ensureProcess(name)
+	}
+
+	// Recover desired processes from PID files before resolving starts.
 	for name, ds := range desired {
 		up := m.ensureProcess(name)
 
@@ -771,10 +840,17 @@ func (m *Manager) ApplyConfig(specs []process.Spec) error {
 			}
 		}
 
-		// Check current status; if not running, register and start it
-		st := up.Status()
-		if !st.Running {
-			_ = up.Start(ds)
+	}
+
+	// Start through the same dependency-aware path used by the API and groups.
+	names := make([]string, 0, len(desired))
+	for name := range desired {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := m.startWithDependencies(name, desired[name], desired, make(map[string]bool), nil); err != nil {
+			return fmt.Errorf("apply config %q: %w", name, err)
 		}
 	}
 

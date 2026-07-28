@@ -34,6 +34,7 @@ type Spec struct {
 	RestartInterval time.Duration       `json:"restart_interval" mapstructure:"restart_interval"` // wait before attempting an auto-restart
 	Instances       int                 `json:"instances" mapstructure:"instances"`               // number of instances to run concurrently (default 1)
 	Detached        bool                `json:"detached" mapstructure:"detached"`                 // run in detached mode
+	DependsOn       []string            `json:"depends_on,omitempty" mapstructure:"depends_on"`   // processes that must be running before this process starts
 	Detectors       []detector.Detector `json:"-" mapstructure:"-"`                               // excluded from mapstructure
 	DetectorConfigs []DetectorConfig    `json:"detectors" mapstructure:"detectors"`               // for config parsing
 	Log             logger.Config       `json:"log" mapstructure:"log"`                           // unified slog-based logging configuration
@@ -64,6 +65,20 @@ func (s *Spec) Validate() error {
 	if len(s.Args) > 0 && s.Args[0] == "" {
 		return fmt.Errorf("process %q: args[0] must not be empty", s.Name)
 	}
+	seenDependencies := make(map[string]struct{}, len(s.DependsOn))
+	for _, dependency := range s.DependsOn {
+		dependency = strings.TrimSpace(dependency)
+		if dependency == "" {
+			return fmt.Errorf("process %q: dependency name must not be empty", s.Name)
+		}
+		if dependency == s.Name {
+			return fmt.Errorf("process %q: cannot depend on itself", s.Name)
+		}
+		if _, exists := seenDependencies[dependency]; exists {
+			return fmt.Errorf("process %q: duplicate dependency %q", s.Name, dependency)
+		}
+		seenDependencies[dependency] = struct{}{}
+	}
 	// Detached mode must not configure file logging, because manager-supplied
 	// writers may hold the child process via open fds. Enforce mutual exclusion.
 	if s.Detached {
@@ -93,6 +108,10 @@ func (s *Spec) DeepCopy() *Spec {
 
 	if s.Env != nil {
 		copySpec.Env = append([]string(nil), s.Env...)
+	}
+
+	if s.DependsOn != nil {
+		copySpec.DependsOn = append([]string(nil), s.DependsOn...)
 	}
 
 	// Copy DetectorConfigs slice

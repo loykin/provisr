@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { LifecycleHookEditor, hasLifecycleHooks, validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
 import type { LifecycleHooks } from '@/components/lifecycle-hooks'
-import { useProcessSpec, useUpdateProcess } from './queries'
+import { StackedFormField } from '@/components/stacked-form-field'
+import { useProcesses, useProcessSpec, useUpdateProcess } from './queries'
 import type { ProcessSpec } from './types'
 
 export interface ProcessFormState {
@@ -26,6 +27,7 @@ export interface ProcessFormState {
   startDuration: string
   restartInterval: string
   detached: boolean
+  dependsOn: string[]
   detectors: string
   logDir: string
   stdoutPath: string
@@ -75,6 +77,7 @@ export function specToForm(spec: ProcessSpec): ProcessFormState {
     startDuration: durationToForm(spec.start_duration),
     restartInterval: durationToForm(spec.restart_interval),
     detached: spec.detached ?? false,
+    dependsOn: spec.depends_on ?? [],
     detectors: spec.detectors?.length ? JSON.stringify(spec.detectors, null, 2) : '',
     logDir: spec.log?.file?.dir ?? '',
     stdoutPath: spec.log?.file?.stdoutPath ?? '',
@@ -118,6 +121,7 @@ export function formToSpec(form: ProcessFormState, base?: ProcessSpec): ProcessS
     start_duration: durationToNanos(form.startDuration),
     restart_interval: durationToNanos(form.restartInterval),
     detached: form.detached,
+    depends_on: form.dependsOn.length > 0 ? form.dependsOn : undefined,
     detectors,
     log: hasLog ? {
       ...base?.log,
@@ -150,9 +154,23 @@ export function ProcessFormFields({
   form: ProcessFormState
   setForm: (updater: (f: ProcessFormState) => ProcessFormState) => void
 }) {
+  const { data: processes = [] } = useProcesses()
+  const candidates = [...new Set([
+    ...processes.map((candidate) => candidate.name),
+    ...form.dependsOn,
+  ])]
+    .filter((name) => name !== form.name)
+    .sort((a, b) => a.localeCompare(b))
+  const runningByName = new Map(processes.map((candidate) => [candidate.name, candidate.running]))
+
   return (
-    <DataBodyTemplate.Group layout="stacked">
-      <DataBodyTemplate.Row label="Name" required>
+    <>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="General"
+      description="Process identity, command, environment, and instance count."
+    >
+      <StackedFormField label="Name" required>
         <Input
 		  aria-label="Name"
           value={form.name}
@@ -160,8 +178,8 @@ export function ProcessFormFields({
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Command" required>
+      </StackedFormField>
+      <StackedFormField label="Command" required>
         <Input
 		  aria-label="Command"
           placeholder="e.g. /usr/bin/myapp --flag"
@@ -169,16 +187,16 @@ export function ProcessFormFields({
           onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Working directory">
+      </StackedFormField>
+      <StackedFormField label="Working directory">
         <Input
 		  aria-label="Working directory"
           placeholder="(optional) absolute path"
           value={form.workDir}
           onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Environment" description="One KEY=VALUE per line">
+      </StackedFormField>
+      <StackedFormField label="Environment" description="One KEY=VALUE per line">
         <Textarea
 		  aria-label="Environment"
           rows={4}
@@ -186,8 +204,8 @@ export function ProcessFormFields({
           value={form.env}
           onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Instances" description={mode === 'edit' ? 'Changing this restarts the process set' : undefined}>
+      </StackedFormField>
+      <StackedFormField label="Instances" description={mode === 'edit' ? 'Changing this restarts the process set' : undefined}>
         <Input
           aria-label="Instances"
           type="number"
@@ -196,8 +214,14 @@ export function ProcessFormFields({
           value={form.instances}
           onChange={(e) => setForm((f) => ({ ...f, instances: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Auto-restart">
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Startup"
+      description="Restart behavior, dependencies, ordering, and startup timing."
+    >
+      <StackedFormField label="Auto-restart">
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
             checked={form.autoRestart}
@@ -205,54 +229,95 @@ export function ProcessFormFields({
           />
           Restart automatically on exit
         </label>
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Detached">
+      </StackedFormField>
+      <StackedFormField label="Detached">
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.detached} onCheckedChange={(checked) => setForm((f) => ({ ...f, detached: checked === true }))} />
           Run independently from provisr log capture
         </label>
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="PID file">
+      </StackedFormField>
+      <StackedFormField
+        label="Depends on"
+        description="Start these processes first and require them to be running before this process starts"
+      >
+        {candidates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No registered processes available.</p>
+        ) : (
+          <div className="divide-y rounded-lg border">
+            {candidates.map((name) => (
+              <label key={name} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                <Checkbox
+                  aria-label={`Depend on ${name}`}
+                  checked={form.dependsOn.includes(name)}
+                  onCheckedChange={(checked) => setForm((current) => ({
+                    ...current,
+                    dependsOn: checked === true
+                      ? [...new Set([...current.dependsOn, name])]
+                      : current.dependsOn.filter((dependency) => dependency !== name),
+                  }))}
+                />
+                <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {runningByName.has(name) ? (runningByName.get(name) ? 'Running' : 'Stopped') : 'Unavailable'}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+      </StackedFormField>
+      <StackedFormField label="PID file">
         <Input aria-label="PID file" placeholder="(optional) absolute path" value={form.pidFile} onChange={(e) => setForm((f) => ({ ...f, pidFile: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Priority" description="Lower values start first">
+      </StackedFormField>
+      <StackedFormField label="Priority" description="Lower values start first">
         <Input aria-label="Priority" type="number" placeholder="0" value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Retry count">
+      </StackedFormField>
+      <StackedFormField label="Retry count">
         <Input aria-label="Retry count" type="number" min={0} placeholder="0" value={form.retryCount} onChange={(e) => setForm((f) => ({ ...f, retryCount: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Retry interval" description="Examples: 500ms, 2s, 1m">
+      </StackedFormField>
+      <StackedFormField label="Retry interval" description="Examples: 500ms, 2s, 1m">
         <Input aria-label="Retry interval" placeholder="(optional)" value={form.retryInterval} onChange={(e) => setForm((f) => ({ ...f, retryInterval: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Start duration" description="Minimum healthy runtime before start succeeds">
+      </StackedFormField>
+      <StackedFormField label="Start duration" description="Minimum healthy runtime before start succeeds">
         <Input aria-label="Start duration" placeholder="(optional) e.g. 2s" value={form.startDuration} onChange={(e) => setForm((f) => ({ ...f, startDuration: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Restart interval">
+      </StackedFormField>
+      <StackedFormField label="Restart interval">
         <Input aria-label="Restart interval" placeholder="(optional) e.g. 5s" value={form.restartInterval} onChange={(e) => setForm((f) => ({ ...f, restartInterval: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Detectors" description='JSON array, e.g. [{"type":"pidfile","path":"/tmp/app.pid"}]'>
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Detection & logging"
+      description="Liveness detection and captured output configuration."
+    >
+      <StackedFormField label="Detectors" description='JSON array, e.g. [{"type":"pidfile","path":"/tmp/app.pid"}]'>
         <Textarea aria-label="Detectors" rows={4} className="font-mono text-xs" value={form.detectors} onChange={(e) => setForm((f) => ({ ...f, detectors: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Log directory" description="Cannot be combined with detached mode">
+      </StackedFormField>
+      <StackedFormField label="Log directory" description="Cannot be combined with detached mode">
         <Input aria-label="Log directory" placeholder="(optional) absolute path" value={form.logDir} onChange={(e) => setForm((f) => ({ ...f, logDir: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Stdout path">
+      </StackedFormField>
+      <StackedFormField label="Stdout path">
         <Input aria-label="Stdout path" placeholder="(optional) absolute path" value={form.stdoutPath} onChange={(e) => setForm((f) => ({ ...f, stdoutPath: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Stderr path">
+      </StackedFormField>
+      <StackedFormField label="Stderr path">
         <Input aria-label="Stderr path" placeholder="(optional) absolute path" value={form.stderrPath} onChange={(e) => setForm((f) => ({ ...f, stderrPath: e.target.value }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Log rotation" description="Size MB / backups / age days">
+      </StackedFormField>
+      <StackedFormField label="Log rotation" description="Size MB / backups / age days">
         <div className="grid grid-cols-3 gap-2">
           <Input aria-label="Max log size MB" type="number" min={1} placeholder="10" value={form.logMaxSize} onChange={(e) => setForm((f) => ({ ...f, logMaxSize: e.target.value }))} />
           <Input aria-label="Max log backups" type="number" min={0} placeholder="3" value={form.logMaxBackups} onChange={(e) => setForm((f) => ({ ...f, logMaxBackups: e.target.value }))} />
           <Input aria-label="Max log age days" type="number" min={0} placeholder="7" value={form.logMaxAge} onChange={(e) => setForm((f) => ({ ...f, logMaxAge: e.target.value }))} />
         </div>
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Compress rotated logs">
+      </StackedFormField>
+      <StackedFormField label="Compress rotated logs">
         <Checkbox checked={form.logCompress} onCheckedChange={(checked) => setForm((f) => ({ ...f, logCompress: checked === true }))} />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Lifecycle"
+      description="Commands run around process start and stop transitions."
+    >
+      <StackedFormField
         label="Lifecycle hooks"
         description="Commands run before/after the process starts or stops"
       >
@@ -260,8 +325,9 @@ export function ProcessFormFields({
           value={form.lifecycle}
           onChange={(lifecycle) => setForm((f) => ({ ...f, lifecycle }))}
         />
-      </DataBodyTemplate.Row>
+      </StackedFormField>
     </DataBodyTemplate.Group>
+    </>
   )
 }
 

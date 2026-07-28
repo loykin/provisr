@@ -41,6 +41,7 @@ export interface ProcessSpec {
   restart_interval?: string | number
   instances?: number
   detached?: boolean
+  depends_on?: string[]
   detectors?: Array<Record<string, unknown>>
   log?: {
     slog?: {

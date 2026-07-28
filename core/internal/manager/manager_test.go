@@ -306,6 +306,116 @@ func TestInstanceGroupStartDefaultsInstancesToOne(t *testing.T) {
 	}
 }
 
+func TestStartStartsProcessDependenciesFirst(t *testing.T) {
+	mgr := NewManager()
+	t.Cleanup(func() { _ = mgr.Shutdown() })
+
+	if err := mgr.Register(process.Spec{Name: "database", Command: "sleep 30"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Stop("database", time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Register(process.Spec{
+		Name:      "api",
+		Command:   "sleep 30",
+		DependsOn: []string{"database"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"database", "api"} {
+		status, err := mgr.Status(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Running {
+			t.Fatalf("process %q is not running after dependency-aware start", name)
+		}
+	}
+}
+
+func TestInstanceGroupStartHonorsProcessDependencies(t *testing.T) {
+	mgr := NewManager()
+	t.Cleanup(func() { _ = mgr.Shutdown() })
+
+	if err := mgr.Register(process.Spec{Name: "database", Command: "sleep 30"}); err != nil {
+		t.Fatal(err)
+	}
+	api := process.Spec{Name: "api", Command: "sleep 30", DependsOn: []string{"database"}}
+	if err := mgr.Register(api); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Stop("api", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Stop("database", time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.SetInstanceGroups([]InstanceGroup{{Name: "web", Members: []process.Spec{api}}})
+	if err := mgr.InstanceGroupStart("web"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"database", "api"} {
+		status, err := mgr.Status(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Running {
+			t.Fatalf("process %q is not running after group start", name)
+		}
+	}
+}
+
+func TestStartRejectsDependencyCycle(t *testing.T) {
+	mgr := NewManager()
+	t.Cleanup(func() { _ = mgr.Shutdown() })
+
+	if err := mgr.Recover(process.Spec{Name: "a", Command: "sleep 30", DependsOn: []string{"b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Recover(process.Spec{Name: "b", Command: "sleep 30", DependsOn: []string{"a"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.Start("a")
+	if err == nil || !strings.Contains(err.Error(), "dependency cycle") {
+		t.Fatalf("Start() error = %v, want dependency cycle", err)
+	}
+}
+
+func TestStartResolvesMultiInstanceDependencyBase(t *testing.T) {
+	mgr := NewManager()
+	t.Cleanup(func() { _ = mgr.Shutdown() })
+
+	if err := mgr.RegisterN(process.Spec{Name: "worker", Command: "sleep 30", Instances: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.StopAll("worker", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Register(process.Spec{
+		Name:      "consumer",
+		Command:   "sleep 30",
+		DependsOn: []string{"worker"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"worker-1", "worker-2", "consumer"} {
+		status, err := mgr.Status(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Running {
+			t.Fatalf("process %q is not running after base dependency start", name)
+		}
+	}
+}
+
 func TestManagerPatternMatching(t *testing.T) {
 	mgr := NewManager()
 	defer func() { _ = mgr.Shutdown() }()

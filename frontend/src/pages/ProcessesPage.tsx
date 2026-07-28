@@ -59,7 +59,13 @@ function ProcessesGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <WorkloadHeader active="processes" title="Processes" />
+      <WorkloadHeader
+        active="processes"
+        title="Processes"
+        actions={canWrite ? (
+          <Button size="sm" onClick={() => void navigate({ to: '/processes/new' })}>Register process</Button>
+        ) : undefined}
+      />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4">
         {error && !hasData && (
           <p className="mb-2 text-sm text-destructive">Failed to load process list.</p>
@@ -101,9 +107,6 @@ function ProcessesGrid() {
               )}
             </div>
           )}
-          headerRight={canWrite ? (
-            <Button onClick={() => void navigate({ to: '/processes/new' })}>Register process</Button>
-          ) : undefined}
           onRowClick={(row) => open(<ProcessDetailPanel name={row.name} />, { size: 480 })}
           // gridkit's shell has `overflow: hidden`, which per the flexbox spec
           // makes its automatic min-height resolve to 0 — so as a flex child

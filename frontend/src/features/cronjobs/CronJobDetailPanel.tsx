@@ -86,7 +86,6 @@ export function CronJobDetailPanel({ name }: { name: string }) {
           <DetailRow label="TTL after finished">
             {formatNumber(job.job_template.ttl_seconds_after_finished)}
           </DetailRow>
-          <DetailRow label="Depends on">{formatList(job.job_template.depends_on)}</DetailRow>
           <DetailRow label="CronJob hooks">
             <LifecycleHookSummary lifecycle={job.lifecycle} />
           </DetailRow>

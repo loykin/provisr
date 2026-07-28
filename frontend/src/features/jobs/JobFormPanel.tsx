@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { LifecycleHookEditor, hasLifecycleHooks, validateLifecycleHooks } from '@/components/lifecycle-hook-editor'
 import type { LifecycleHooks } from '@/components/lifecycle-hooks'
+import { StackedFormField } from '@/components/stacked-form-field'
 import { ApiError } from '@/lib/api'
 import { useJob, useUpdateJob } from './queries'
 import type { JobSpec } from './types'
@@ -78,8 +79,13 @@ export function JobFormFields({
   setForm: (updater: (f: JobFormState) => JobFormState) => void
 }) {
   return (
-    <DataBodyTemplate.Group layout="stacked">
-      <DataBodyTemplate.Row label="Name" required>
+    <>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="General"
+      description="Job identity, command, and execution environment."
+    >
+      <StackedFormField label="Name" required>
         <Input
 		  aria-label="Name"
           value={form.name}
@@ -87,8 +93,8 @@ export function JobFormFields({
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Command" required>
+      </StackedFormField>
+      <StackedFormField label="Command" required>
         <Input
 		  aria-label="Command"
           placeholder="e.g. /usr/bin/backup.sh"
@@ -96,16 +102,16 @@ export function JobFormFields({
           onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
           required
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Working directory">
+      </StackedFormField>
+      <StackedFormField label="Working directory">
         <Input
 		  aria-label="Working directory"
           placeholder="(optional) absolute path"
           value={form.workDir}
           onChange={(e) => setForm((f) => ({ ...f, workDir: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Environment" description="One KEY=VALUE per line">
+      </StackedFormField>
+      <StackedFormField label="Environment" description="One KEY=VALUE per line">
         <Textarea
 		  aria-label="Environment"
           rows={4}
@@ -113,8 +119,14 @@ export function JobFormFields({
           value={form.env}
           onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Parallelism">
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Execution"
+      description="Completion, retry, and deadline behavior."
+    >
+      <StackedFormField label="Parallelism">
         <Input
 		  aria-label="Parallelism"
           type="number"
@@ -123,8 +135,8 @@ export function JobFormFields({
           value={form.parallelism}
           onChange={(e) => setForm((f) => ({ ...f, parallelism: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Completions">
+      </StackedFormField>
+      <StackedFormField label="Completions">
         <Input
 		  aria-label="Completions"
           type="number"
@@ -133,8 +145,8 @@ export function JobFormFields({
           value={form.completions}
           onChange={(e) => setForm((f) => ({ ...f, completions: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Restart policy">
+      </StackedFormField>
+      <StackedFormField label="Restart policy">
         <select
 		  aria-label="Restart policy"
           className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
@@ -146,8 +158,8 @@ export function JobFormFields({
           <option value="Never">Never</option>
           <option value="OnFailure">OnFailure</option>
         </select>
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Backoff limit">
+      </StackedFormField>
+      <StackedFormField label="Backoff limit">
         <Input
 		  aria-label="Backoff limit"
           type="number"
@@ -156,8 +168,8 @@ export function JobFormFields({
           value={form.backoffLimit}
           onChange={(e) => setForm((f) => ({ ...f, backoffLimit: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row label="Active deadline seconds">
+      </StackedFormField>
+      <StackedFormField label="Active deadline seconds">
         <Input
 		  aria-label="Active deadline seconds"
           type="number"
@@ -165,8 +177,14 @@ export function JobFormFields({
           value={form.activeDeadlineSeconds}
           onChange={(e) => setForm((f) => ({ ...f, activeDeadlineSeconds: e.target.value }))}
         />
-      </DataBodyTemplate.Row>
-      <DataBodyTemplate.Row
+      </StackedFormField>
+    </DataBodyTemplate.Group>
+    <DataBodyTemplate.Group
+      layout="stacked"
+      title="Lifecycle"
+      description="Commands run around job process transitions."
+    >
+      <StackedFormField
         label="Lifecycle hooks"
         description="Commands run before/after the job starts or stops"
       >
@@ -174,8 +192,9 @@ export function JobFormFields({
           value={form.lifecycle}
           onChange={(lifecycle) => setForm((f) => ({ ...f, lifecycle }))}
         />
-      </DataBodyTemplate.Row>
+      </StackedFormField>
     </DataBodyTemplate.Group>
+    </>
   )
 }
 

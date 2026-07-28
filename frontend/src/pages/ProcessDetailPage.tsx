@@ -1,26 +1,17 @@
-import { useParams, useNavigate } from '@tanstack/react-router'
-import { DetailBodyTemplate, PageTopBar } from '@loykin/designkit'
-import { Button } from '@/components/ui/button'
+import { useParams } from '@tanstack/react-router'
+import { DetailBodyTemplate } from '@loykin/designkit'
+import { PageBreadcrumbTopBar } from '@/components/page-breadcrumb-topbar'
 import { useProcessStatus } from '@/features/processes/queries'
 import { ProcessDetailBody } from '@/features/processes/ProcessDetailBody'
 import { ProcessStateBadge } from '@/features/processes/ProcessStateBadge'
 
 export default function ProcessDetailPage() {
   const { name } = useParams({ from: '/processes/$name' })
-  const navigate = useNavigate()
   const { data: status, error } = useProcessStatus(name)
 
   return (
     <DetailBodyTemplate
-      topBar={
-        <PageTopBar
-          left={
-            <Button variant="ghost" onClick={() => void navigate({ to: '/processes' })}>
-              ← Processes
-            </Button>
-          }
-        />
-      }
+      topBar={<PageBreadcrumbTopBar items={['provisr', 'Workloads', 'Processes', name]} />}
       eyebrow="Process"
       title={name}
       status={status ? <ProcessStateBadge state={status.state} /> : undefined}

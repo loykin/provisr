@@ -3,6 +3,8 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { DataBodyTemplate } from '@loykin/designkit'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PageBreadcrumbTopBar } from '@/components/page-breadcrumb-topbar'
+import { StackedFormField } from '@/components/stacked-form-field'
 import { ApiError } from '@/lib/api'
 import { UserFormFields } from '@/features/users/UserForm'
 import { userToForm, type UserFormState } from '@/features/users/user-form-state'
@@ -50,34 +52,33 @@ export default function UserEditPage() {
   }
 
   return (
-    <form className="flex h-full flex-col" onSubmit={(e) => void handleSubmit(e)}>
-      <DataBodyTemplate
-        title={`Edit ${form.username}`}
-        contentClassName="flex-1"
-        actions={
-          <>
-            <Button type="button" variant="ghost" onClick={() => void navigate({ to: '/users' })}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={update.isPending}>Save</Button>
-          </>
-        }
-      >
+    <DataBodyTemplate
+      topBar={<PageBreadcrumbTopBar items={['provisr', 'Users', form.username, 'Edit']} />}
+      title={`Edit ${form.username}`}
+      description="Update account details, access roles, and credentials."
+    >
+      <form className="contents" onSubmit={(e) => void handleSubmit(e)}>
         <UserFormFields
           mode="edit"
           form={form}
           setForm={(updater) => setForm((current) => (current ? updater(current) : current))}
         />
-        <DataBodyTemplate.Group layout="stacked">
-          <DataBodyTemplate.Row label="New password" description="Leave blank to keep the current password">
+        <DataBodyTemplate.Group layout="stacked" title="Credentials" description="Optionally replace the current password.">
+          <StackedFormField label="New password" description="Leave blank to keep the current password">
             <Input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-          </DataBodyTemplate.Row>
-          <DataBodyTemplate.Row label="Confirm password">
+          </StackedFormField>
+          <StackedFormField label="Confirm password">
             <Input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
-          </DataBodyTemplate.Row>
+          </StackedFormField>
         </DataBodyTemplate.Group>
         {error && <p className="px-4 text-sm text-destructive">{error}</p>}
-      </DataBodyTemplate>
-    </form>
+        <div className="flex justify-end gap-2 px-(--designkit-page-padding-x) pb-(--designkit-page-padding-y)">
+          <Button type="button" variant="outline" onClick={() => void navigate({ to: '/users' })}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={update.isPending}>Save</Button>
+        </div>
+      </form>
+    </DataBodyTemplate>
   )
 }

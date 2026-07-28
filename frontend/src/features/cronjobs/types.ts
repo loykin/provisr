@@ -14,7 +14,6 @@ export interface JobTemplate {
   completion_mode?: 'NonIndexed' | 'Indexed' | ''
   restart_policy?: 'Never' | 'OnFailure' | ''
   lifecycle?: LifecycleHooks
-  depends_on?: string[]
 }
 
 export interface CronJobSpec {
