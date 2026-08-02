@@ -10,7 +10,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/loykin/dbstore v0.0.1
-	github.com/opensearch-project/opensearch-go/v4 v4.7.2
+	github.com/opensearch-project/opensearch-go/v4 v4.7.3
 	github.com/pressly/goose/v3 v3.27.3
 	github.com/prometheus/client_golang v1.24.1
 	github.com/robfig/cron/v3 v3.0.1
@@ -25,7 +25,7 @@ require (
 	github.com/tklauser/go-sysconf v0.4.0
 	golang.org/x/crypto v0.54.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
