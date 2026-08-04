@@ -52,11 +52,11 @@ func TestGroupRollbackOnFailure(t *testing.T) {
 		Name: "grp2",
 		Members: []process.Spec{
 			{Name: "ok", Command: "sleep 1"},
-			{Name: "bad", Command: "false", StartDuration: 50 * time.Millisecond}, // false exits immediately
+			{Name: "bad", Command: failCommand(), StartDuration: 50 * time.Millisecond}, // exits immediately
 		},
 	}
 
-	t.Logf("Starting group with members: ok (sleep 1), bad (false with 50ms StartDuration)")
+	t.Logf("Starting group with members: ok (sleep 1), bad (%s with 50ms StartDuration)", failCommand())
 	err := g.Start(gs)
 	t.Logf("Group.Start returned: %v", err)
 
