@@ -48,15 +48,16 @@ func TestGroupStartStopBasic(t *testing.T) {
 func TestGroupRollbackOnFailure(t *testing.T) {
 	mgr := mgrpkg.NewManager()
 	g := New(mgr)
+	const startDuration = 250 * time.Millisecond
 	gs := ServiceGroup{
 		Name: "grp2",
 		Members: []process.Spec{
 			{Name: "ok", Command: "sleep 1"},
-			{Name: "bad", Command: failCommand(), StartDuration: 50 * time.Millisecond}, // exits immediately
+			{Name: "bad", Command: failCommand(), StartDuration: startDuration}, // exits immediately
 		},
 	}
 
-	t.Logf("Starting group with members: ok (sleep 1), bad (%s with 50ms StartDuration)", failCommand())
+	t.Logf("Starting group with members: ok (sleep 1), bad (%s with %s StartDuration)", failCommand(), startDuration)
 	err := g.Start(gs)
 	t.Logf("Group.Start returned: %v", err)
 

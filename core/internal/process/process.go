@@ -407,15 +407,22 @@ func (r *Process) EnforceStartDuration(d time.Duration) error {
 
 	// Poll-based approach to avoid race conditions with cmd.Wait()
 	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
+	for {
 		// Check if the process is still alive
 		alive, _ := r.DetectAlive()
 		if !alive {
 			return errBeforeStart(d)
 		}
-		time.Sleep(10 * time.Millisecond)
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil
+		}
+		if remaining > 10*time.Millisecond {
+			remaining = 10 * time.Millisecond
+		}
+		time.Sleep(remaining)
 	}
-	return nil
 }
 
 // StopWithSignal sends the provided signal to the process group. It does not wait.
