@@ -1,0 +1,1 @@
+import{cr as e}from"./DirectionContext-CvSNCgNj.js";import{t}from"./status-badge-N9XgC5jp.js";var n=e();function r({state:e}){return(0,n.jsx)(t,{status:e})}export{r as t};
