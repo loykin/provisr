@@ -1,6 +1,6 @@
 module github.com/loykin/provisr
 
-go 1.26.4
+go 1.26.8
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
@@ -10,7 +10,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/loykin/dbstore v0.0.1
-	github.com/opensearch-project/opensearch-go/v4 v4.7.3
+	github.com/opensearch-project/opensearch-go/v4 v4.8.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/robfig/cron/v3 v3.0.1

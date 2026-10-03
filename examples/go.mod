@@ -1,6 +1,6 @@
 module github.com/loykin/provisr/examples
 
-go 1.26.4
+go 1.26.8
 
 require (
 	github.com/gin-gonic/gin v1.12.0
@@ -54,7 +54,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/opensearch-project/opensearch-go/v4 v4.7.3 // indirect
+	github.com/opensearch-project/opensearch-go/v4 v4.8.0 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/pierrec/lz4/v4 v4.1.29 // indirect
