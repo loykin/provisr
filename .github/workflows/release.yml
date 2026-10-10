@@ -34,7 +34,7 @@ jobs:
       # and shared via artifact so the 5-way OS/arch matrix below doesn't
       # each redundantly rebuild the same frontend.
       - name: Upload built UI
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ui-dist
           path: frontend/dist
@@ -111,7 +111,7 @@ jobs:
 
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
