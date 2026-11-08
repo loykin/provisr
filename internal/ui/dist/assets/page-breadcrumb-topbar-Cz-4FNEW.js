@@ -1,0 +1,1 @@
+import{l as e,u as t}from"./dist-BJRCOrl6.js";import{cr as n}from"./DirectionContext-CqL7sPbD.js";var r=n();function i({items:n}){return(0,r.jsx)(t,{left:(0,r.jsx)(e,{items:n})})}export{i as t};
