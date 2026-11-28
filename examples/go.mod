@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/labstack/echo/v4 v4.16.5
+	github.com/labstack/echo/v4 v4.16.6
 	github.com/loykin/provisr v0.0.8
 	github.com/prometheus/client_golang v1.25.0
 )
@@ -54,7 +54,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
-	github.com/opensearch-project/opensearch-go/v4 v4.8.1 // indirect
+	github.com/opensearch-project/opensearch-go/v4 v4.8.2 // indirect
 	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/paulmach/orb v0.14.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
@@ -103,7 +103,7 @@ require (
 	modernc.org/libc v1.80.2 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.62.0 // indirect
+	modernc.org/sqlite v1.63.0 // indirect
 )
 
 replace github.com/loykin/provisr => ../
